@@ -38,6 +38,10 @@ _Avoid_: priority, importance score
 The links from a Wisdom back to the Episodes, Events, and Harvested Items it derives from. Merges union provenance; it is never discarded.
 _Avoid_: source, citation
 
+**Retire**:
+The reversible exclusion of a Wisdom from all recall and default search, keeping its versions and Provenance. Superseded Wisdom is Retired automatically; deletion is a separate, explicit, permanent act.
+_Avoid_: archive, soft delete, disable
+
 ### Pipeline
 
 **Capture**:
