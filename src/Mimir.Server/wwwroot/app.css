@@ -1,0 +1,176 @@
+:root {
+    --surface: #14161a;
+    --surface-raised: #1c1f26;
+    --border: #2a2f38;
+    --text: #e6e8ec;
+    --text-dim: #949aa6;
+    --ready: #3fb950;
+    --working: #d29922;
+    --degraded: #f85149;
+    --pending: #6e7681;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+h1:focus {
+    outline: none;
+}
+
+/* Layout */
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    gap: 1.5rem;
+    align-items: stretch;
+    padding: 0.75rem 1.5rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.app-brand {
+    align-self: center;
+    color: var(--text);
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+}
+
+.app-body {
+    max-width: 60rem;
+    padding: 2rem 1.5rem;
+}
+
+.lede {
+    color: var(--text-dim);
+    max-width: 44rem;
+}
+
+/* Health strip (spec §8) */
+
+.health-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(11rem, 1fr));
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.health-tile {
+    padding: 0.6rem 0.8rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-width: 0;
+}
+
+.health-tile header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.tile-title {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.tile-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--pending);
+    flex: none;
+}
+
+.state-ready .tile-dot { background: var(--ready); }
+.state-working .tile-dot { background: var(--working); }
+.state-degraded .tile-dot { background: var(--degraded); }
+
+.state-working .tile-dot {
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    50% { opacity: 0.35; }
+}
+
+.tile-summary {
+    margin: 0.15rem 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tile-placeholder,
+.state-placeholder .tile-title {
+    color: var(--pending);
+}
+
+.tile-detail {
+    margin-top: 0.35rem;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+}
+
+.detail-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.detail-value {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 60rem) {
+    .app-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .health-strip {
+        align-self: stretch;
+    }
+
+    .health-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* Blazor infrastructure */
+
+.blazor-error-boundary {
+    background: #b32121;
+    padding: 1rem;
+    color: white;
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred."
+}

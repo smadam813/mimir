@@ -1,0 +1,60 @@
+@using Mimir.Contracts.Health
+@using Mimir.Server.Health
+@implements IDisposable
+@inject IHealthState HealthState
+
+@* Spec §8: the four-tile health strip, pinned above every surface. *@
+<section class="health-strip" aria-label="Health">
+    <HealthTile Title="Ollama" State="_snapshot.Ollama.State" Summary="@_snapshot.Ollama.Summary">
+        @foreach (var model in _snapshot.Ollama.Models)
+        {
+            <div class="detail-row">
+                <span class="detail-name">@model.Name</span>
+                <span class="detail-value">@DescribeModel(model)</span>
+            </div>
+        }
+    </HealthTile>
+
+    <HealthTile Title="Distillation" Placeholder="Arrives with the Distiller" />
+
+    <HealthTile Title="Harvester" Placeholder="Arrives with the Harvester" />
+
+    <HealthTile Title="Storage" State="_snapshot.Storage.State" Summary="@_snapshot.Storage.Summary">
+        @foreach (var table in _snapshot.Storage.Tables)
+        {
+            <div class="detail-row">
+                <span class="detail-name">@table.Table</span>
+                <span class="detail-value">@table.Rows.ToString("N0") rows</span>
+            </div>
+        }
+    </HealthTile>
+</section>
+
+@code {
+    private HealthSnapshot _snapshot = HealthSnapshot.Pending;
+    private IDisposable? _subscription;
+
+    protected override void OnInitialized()
+    {
+        _snapshot = HealthState.Current;
+
+        // Probes push from background threads; hop onto the circuit's dispatcher to re-render.
+        // This is what makes the strip live without a page refresh (spec §8).
+        _subscription = HealthState.Subscribe(snapshot => InvokeAsync(() =>
+        {
+            _snapshot = snapshot;
+            StateHasChanged();
+        }));
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+
+    private static string DescribeModel(ModelStatus model) => model.State switch
+    {
+        ModelProvisioningState.Pulling when model.PercentComplete is { } percent => $"pulling {percent}%",
+        ModelProvisioningState.Pulling => "pulling",
+        ModelProvisioningState.Ready => "ready",
+        ModelProvisioningState.Failed => model.Error ?? "failed",
+        _ => "pending",
+    };
+}

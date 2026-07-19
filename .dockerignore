@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/node_modules/
+.git/
+.github/
+.claude/
+docs/
+tests/
+src/Mimir.Cli/
+*.md
+LICENSE
+compose.yaml
+Dockerfile
+.dockerignore
+.env

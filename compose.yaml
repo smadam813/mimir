@@ -1,0 +1,55 @@
+# Spec §12. Localhost is the trust boundary — nothing here is published beyond 127.0.0.1, and
+# there is no auth in v1.
+name: mimir
+
+services:
+  mimir:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:6464:8080"
+    environment:
+      ConnectionStrings__Mimir: "Host=postgres;Port=5432;Database=mimir;Username=mimir;Password=${POSTGRES_PASSWORD:-mimir}"
+      Mimir__Models__Endpoint: "http://ollama:11434"
+    volumes:
+      # Claude Code's built-in auto-memory, read-only: Harvest is one-way (ADR-0002).
+      - "${USERPROFILE}/.claude/projects:/harvest:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Healthy here means the Ollama API answers, which is quick — the multi-gigabyte model pull
+      # happens afterwards, narrated live on the Ollama tile.
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: mimir
+      POSTGRES_USER: mimir
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-mimir}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mimir -d mimir"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    gpus: all
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  ollama:
