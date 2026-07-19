@@ -1,4 +1,3 @@
-using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Mimir.Contracts.Health;
@@ -19,25 +18,20 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
             var connection = context.Database.GetDbConnection();
             await context.Database.OpenConnectionAsync(cancellationToken);
 
-            // One snapshot, so the sizes and the occupancy answers describe the same moment and
-            // cannot contradict each other. It deliberately does NOT claim to stop a table
-            // vanishing mid-probe: below SERIALIZABLE, Postgres resolves relation names against a
-            // fresh catalog snapshot, so a dropped table still raises 42P01 in the occupancy query
-            // (measured). That race is handled where it lands, in ReadOccupancyAsync.
-            await using var transaction = await connection.BeginTransactionAsync(
-                IsolationLevel.RepeatableRead,
-                cancellationToken);
-
+            // Deliberately no wrapping transaction. Wrapping these in REPEATABLE READ looks like it
+            // would make the sizes and the occupancy answers agree, and does the opposite: sizes
+            // come from the filesystem and ignore the snapshot entirely (measured: 8 KB then 27 MB
+            // inside one snapshot), while EXISTS honours it — so a table populated just after the
+            // snapshot opened reported 27 MB and "empty", which is the one thing this tile must
+            // never say. Statement-level snapshots keep each answer as fresh as it can be, and the
+            // occupancy legs are a single statement, so they are already atomic with each other.
             var sizeBytes = Convert.ToInt64(
-                await ScalarAsync(connection, transaction, StorageQueries.DatabaseSize, cancellationToken));
-            var footprints = await ReadFootprintsAsync(connection, transaction, cancellationToken);
+                await ScalarAsync(connection, StorageQueries.DatabaseSize, cancellationToken));
+            var footprints = await ReadFootprintsAsync(connection, cancellationToken);
             var occupancy = await ReadOccupancyAsync(
                 connection,
-                transaction,
                 footprints.Select(footprint => footprint.Table),
                 cancellationToken);
-
-            await transaction.CommitAsync(cancellationToken);
 
             var tables = footprints
                 .Select(footprint => new TableFootprint(
@@ -62,20 +56,19 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
     /// <summary>Every reportable table with its total on-disk bytes, in catalog order.</summary>
     private static async Task<IReadOnlyList<(string Table, long TotalBytes)>> ReadFootprintsAsync(
         DbConnection connection,
-        DbTransaction transaction,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
         command.CommandText = StorageQueries.TableFootprints;
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var footprints = new List<(string, long)>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            // A table dropped since this transaction's snapshot is still listed by the pg_class
-            // scan, but sizing it yields NULL rather than an error (measured). Leave it out: it no
-            // longer exists, and naming it in the occupancy query would only earn a 42P01.
+            // Sizing a table that is being dropped yields NULL rather than an error (measured), and
+            // GetInt64 on a NULL throws an InvalidCastException no DbException filter would catch.
+            // Leave the row out: it no longer exists, and naming it in the occupancy query would
+            // only earn a 42P01.
             if (await reader.IsDBNullAsync(1, cancellationToken))
             {
                 continue;
@@ -89,7 +82,6 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
 
     private async Task<Dictionary<string, TableOccupancy>> ReadOccupancyAsync(
         DbConnection connection,
-        DbTransaction transaction,
         IEnumerable<string> tables,
         CancellationToken cancellationToken)
     {
@@ -103,7 +95,6 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
         try
         {
             await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
             command.CommandText = sql;
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -128,12 +119,10 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
 
     private static async Task<object?> ScalarAsync(
         DbConnection connection,
-        DbTransaction transaction,
         string sql,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
         command.CommandText = sql;
         return await command.ExecuteScalarAsync(cancellationToken);
     }
