@@ -25,6 +25,10 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg17
+    ports:
+      # Published so `dotnet run` and the storage integration tests can reach it from the host.
+      # Localhost-bound like everything else — see the trust-boundary note at the top.
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: mimir
       POSTGRES_USER: mimir
@@ -41,6 +45,9 @@ services:
   ollama:
     image: ollama/ollama
     gpus: all
+    ports:
+      # Published for the same reason as postgres: so the server can run on the host against it.
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama:/root/.ollama
     healthcheck:

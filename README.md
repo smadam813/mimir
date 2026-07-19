@@ -43,7 +43,13 @@ Run outside Compose and the server listens on `Mimir:Server:Port` (6464) directl
 the container listens on 8080 and the host publishes 6464, per spec §12 — if you change the
 published port, change it in `compose.yaml`.
 
-Both need a Postgres to talk to; `docker compose up postgres ollama` is the easy way.
+Both need a Postgres to talk to; `docker compose up -d postgres ollama` is the easy way. Both are
+published on localhost, and the `Development` config points at them, so `dotnet run` works against a
+half-started stack.
+
+Most of the suite needs nothing running. The storage integration tests do — they pin behaviour that
+only a real Postgres exhibits (see ADR-0006) — and they skip themselves with an explanation when
+none is reachable. Point them elsewhere with `MIMIR_TEST_POSTGRES`.
 
 Layout, per spec §2:
 

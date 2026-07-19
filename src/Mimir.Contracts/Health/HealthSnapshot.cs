@@ -97,8 +97,41 @@ public sealed record StorageTile
 
     public long? DatabaseSizeBytes { get; init; }
 
-    /// <summary>Row counts for every table in the public schema. Empty until a migration adds one.</summary>
-    public IReadOnlyList<TableRowCount> Tables { get; init; } = [];
+    /// <summary>
+    /// On-disk footprint and occupancy for every table in the public schema. Empty until a
+    /// migration adds one. A partitioned table appears once, under its parent's name.
+    /// </summary>
+    public IReadOnlyList<TableFootprint> Tables { get; init; } = [];
 }
 
-public sealed record TableRowCount(string Table, long Rows);
+/// <summary>
+/// One table's on-disk footprint and whether it holds anything. Carries no row count: under §10's
+/// keep-forever retention an exact count is an unbounded sequential scan, and every cheap estimate
+/// was measured misreporting a populated table as empty. See ADR-0006.
+/// </summary>
+/// <param name="TotalBytes">
+/// Heap + indexes + TOAST, rolled up across partitions. Always exact, and the figure the tile falls
+/// back to when <paramref name="Occupancy"/> is <see cref="TableOccupancy.Unknown"/>.
+/// </param>
+public sealed record TableFootprint(string Table, long TotalBytes, TableOccupancy Occupancy);
+
+/// <summary>
+/// Whether a table holds any rows. Three-valued on purpose: <see cref="Unknown"/> is not
+/// <see cref="Empty"/> and must never be rendered or aggregated as though it were.
+/// </summary>
+/// <remarks>
+/// <see cref="Unknown"/> is pinned to 0 so the C# default is the honest value — a probe that half
+/// fails reports "we do not know", never "there is nothing there". A <c>bool</c> would default to
+/// false and commit that misreport in the one place no SQL review would catch it.
+/// </remarks>
+public enum TableOccupancy
+{
+    /// <summary>Occupancy could not be determined this probe. Render distinctly from Empty.</summary>
+    Unknown = 0,
+
+    /// <summary>Proved to hold no rows, by EXISTS, in this snapshot.</summary>
+    Empty,
+
+    /// <summary>Proved to hold at least one row, by EXISTS, in this snapshot.</summary>
+    Populated,
+}

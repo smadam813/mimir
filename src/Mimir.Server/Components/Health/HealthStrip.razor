@@ -1,5 +1,6 @@
 @using Mimir.Contracts.Health
 @using Mimir.Server.Health
+@using Mimir.Server.Storage
 @implements IDisposable
 @inject IHealthState HealthState
 
@@ -24,7 +25,7 @@
         {
             <div class="detail-row">
                 <span class="detail-name">@table.Table</span>
-                <span class="detail-value">@table.Rows.ToString("N0") rows</span>
+                <span class="detail-value">@DescribeTable(table)</span>
             </div>
         }
     </HealthTile>
@@ -48,6 +49,16 @@
     }
 
     public void Dispose() => _subscription?.Dispose();
+
+    // Emptiness is carried in words, never inferred from the byte figure — a 28 MB heap can hold
+    // zero live rows. Only the two states we can prove get to say anything; everything else, an
+    // added enum member included, falls through to admitting we do not know.
+    private static string DescribeTable(TableFootprint table) => table.Occupancy switch
+    {
+        TableOccupancy.Populated => ByteSize.Format(table.TotalBytes),
+        TableOccupancy.Empty => $"{ByteSize.Format(table.TotalBytes)} · empty",
+        _ => $"{ByteSize.Format(table.TotalBytes)} · occupancy unknown",
+    };
 
     private static string DescribeModel(ModelStatus model) => model.State switch
     {
