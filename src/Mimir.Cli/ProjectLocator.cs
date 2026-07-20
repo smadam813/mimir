@@ -19,17 +19,21 @@ internal static class ProjectLocator
 
     public static async Task<ProjectLocation> LocateAsync(string cwd, CancellationToken cancellationToken)
     {
-        var root = await RunGitAsync(cwd, ["rev-parse", "--show-toplevel"], cancellationToken) is { } toplevel
-            ? Path.GetFullPath(toplevel)
-            : null;
+        // Both lookups read from cwd — no data dependency. Started together they cost one git
+        // round-trip instead of two on the prompt hook's 500 ms budget (§11).
+        var toplevelTask = RunGitAsync(cwd, ["rev-parse", "--show-toplevel"], cancellationToken);
+        var remoteTask = RemoteUrlAsync(cwd, cancellationToken);
+
+        var root = await toplevelTask is { } toplevel ? Path.GetFullPath(toplevel) : null;
+        var url = await remoteTask; // Always awaited: a hung git is killed, never orphaned.
 
         if (root is null)
         {
             return new ProjectLocation(cwd, cwd);
         }
 
-        return await RemoteUrlAsync(cwd, cancellationToken) is { } url
-            ? new ProjectLocation(RemoteIdentity.Normalize(url), root)
+        return url is { } remoteUrl
+            ? new ProjectLocation(RemoteIdentity.Normalize(remoteUrl), root)
             : new ProjectLocation(root, root);
     }
 
@@ -79,10 +83,11 @@ internal static class ProjectLocator
 
             // Drain both pipes while waiting: a full, unread stderr buffer can wedge git.
             var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            _ = process.StandardError.ReadToEndAsync(timeout.Token);
+            var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
 
             var output = (await stdout).Trim();
+            await stderr; // Observed, not abandoned: an I/O fault routes into the catch below.
             return process.ExitCode == 0 && output.Length > 0 ? output : null;
         }
         catch (Exception)

@@ -154,6 +154,30 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task ASealFromAnotherContext_BeatsAStaleDuplicate()
+    {
+        // First-seal-wins under real concurrency: this service still tracks the Episode as
+        // unsealed while another request seals it. The stale duplicate must update nothing.
+        var request = Request();
+        var service = Service();
+        await service.ResumeEpisodeAsync(request, Token);
+
+        await using (var other = fixture.CreateContext())
+        {
+            var raced = await other.Episodes.SingleAsync(e => e.SessionId == request.SessionId, Token);
+            raced.SealedAt = Now.AddMinutes(-1);
+            raced.SealReason = "exit";
+            await other.SaveChangesAsync(Token);
+        }
+
+        await service.SealEpisodeAsync(Request(request.SessionId, new { reason = "late" }), Token);
+
+        var persisted = await FromDb(db => db.Episodes.SingleAsync(e => e.SessionId == request.SessionId, Token));
+        persisted.SealReason.ShouldBe("exit");
+        persisted.SealedAt.ShouldBe(Now.AddMinutes(-1));
+    }
+
+    [Fact]
     public async Task AStragglerEventAfterTheSeal_IsStillCaptured()
     {
         // PostToolUse is fire-and-forget (§4): it can land after SessionEnd. Losing it would
@@ -211,8 +235,7 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
         {
             if (fixture.UnavailableReason is { } reason)
             {
-                Assert.Skip($"No Postgres reachable for integration tests ({reason}). "
-                    + "Run `docker compose up -d postgres`, or set MIMIR_TEST_POSTGRES.");
+                Assert.Skip(TestPostgres.SkipMessage(reason));
             }
 
             return _context ??= fixture.CreateContext();

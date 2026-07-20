@@ -28,8 +28,45 @@ public class RemoteIdentityTests
     [Fact]
     public void OnlyTheHostIsLowercased_OwnerAndRepoKeepTheirCase()
     {
+        // Deliberate (spec §3.1): owner/repo can be case-sensitive on self-hosted servers, so
+        // lowercasing the path could merge two distinct repositories — irreversible for a memory
+        // system. A case-variant split of one repository is the healable direction (#17).
         RemoteIdentity.Normalize("https://GitHub.com/SmAdam813/MiMir.git")
             .ShouldBe("github.com/SmAdam813/MiMir");
+    }
+
+    [Theory]
+    [InlineData(@"C:\repos\bare-repo.git")]
+    [InlineData("C:/repos/bare-repo.git")]
+    [InlineData("c:/repos/bare-repo.git")]
+    [InlineData(@"C:\repos\bare-repo")]
+    [InlineData("C:/repos/bare-repo/")]
+    public void EverySpellingOfOneLocalWindowsRemote_IsOneIdentity(string remoteUrl)
+    {
+        // A drive letter is not an SSH host: git accepts C:\ and C:/ for one directory, and both
+        // must land on one identity or a local bare remote splits into two Projects.
+        RemoteIdentity.Normalize(remoteUrl).ShouldBe("c:/repos/bare-repo");
+    }
+
+    [Fact]
+    public void AUnixPathRemote_KeepsItsPathAsIdentity()
+    {
+        RemoteIdentity.Normalize("/srv/git/repo.git").ShouldBe("/srv/git/repo");
+    }
+
+    [Fact]
+    public void AUncShareRemote_IsOneIdentityInBothSeparatorSpellings()
+    {
+        RemoteIdentity.Normalize(@"\\server\share\repo.git").ShouldBe("//server/share/repo");
+        RemoteIdentity.Normalize("//server/share/repo.git").ShouldBe("//server/share/repo");
+    }
+
+    [Fact]
+    public void AColonWithNoSeparatorAfterIt_IsStillAnScpHostNotADrive()
+    {
+        // git itself only treats <letter>:<separator> as a DOS path (has_dos_drive_prefix);
+        // a bare "c:path" keeps parsing as scp-form host "c".
+        RemoteIdentity.Normalize("c:repos/x").ShouldBe("c/repos/x");
     }
 
     [Fact]

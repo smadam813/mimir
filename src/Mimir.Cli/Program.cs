@@ -27,6 +27,9 @@ switch (args)
                 BaseAddress = new(Environment.GetEnvironmentVariable("MIMIR_URL") is { Length: > 0 } url
                     ? url
                     : "http://127.0.0.1:6464"),
+                // Redundant with RunAsync's cap, which always fires first — kept as a backstop
+                // so a future request that forgets to thread the cap token still cannot hang
+                // the session for HttpClient's default 100 s.
                 Timeout = HookCommand.Cap,
             };
             return await new HookCommand(http, Console.In, Console.Out).RunAsync(hookEvent);

@@ -90,6 +90,34 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task ARootAppendedByAnotherContext_SurvivesThisContextsAppend()
+    {
+        // Two sessions can race the same Project with different new roots. This context still
+        // tracks the stale array; its append must not overwrite the other's (§3.1 — roots
+        // accumulate, they are how a Project is found again).
+        var identity = Identity("racing");
+        await Resolve(identity, @"C:\git\racing");
+
+        await using (var other = fixture.CreateContext())
+        {
+            var raced = await other.Projects.SingleAsync(
+                p => p.Identity == identity, TestContext.Current.CancellationToken);
+            raced.RootPaths = [.. raced.RootPaths, @"D:\work\racing"];
+            await other.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var resolved = await Resolve(identity, @"E:\mirror\racing");
+
+        resolved.RootPaths.ShouldBe(
+            [@"C:\git\racing", @"D:\work\racing", @"E:\mirror\racing"],
+            "the returned Project must reflect the merged array");
+        await using var fresh = fixture.CreateContext();
+        var persisted = await fresh.Projects.SingleAsync(
+            p => p.Identity == identity, TestContext.Current.CancellationToken);
+        persisted.RootPaths.ShouldBe([@"C:\git\racing", @"D:\work\racing", @"E:\mirror\racing"]);
+    }
+
+    [Fact]
     public async Task APathIdentityProject_GetsItsDisplayNameFromTheLastSegment()
     {
         var project = await Resolve(@"C:\somewhere\deep\toolbox", @"C:\somewhere\deep\toolbox");
@@ -112,8 +140,7 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
         {
             if (fixture.UnavailableReason is { } reason)
             {
-                Assert.Skip($"No Postgres reachable for integration tests ({reason}). "
-                    + "Run `docker compose up -d postgres`, or set MIMIR_TEST_POSTGRES.");
+                Assert.Skip(TestPostgres.SkipMessage(reason));
             }
 
             return _context ??= fixture.CreateContext();

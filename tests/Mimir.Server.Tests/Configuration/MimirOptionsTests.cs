@@ -85,15 +85,20 @@ public class MimirOptionsTests
         options.PayloadTailBytes.ShouldBe(1024);
     }
 
-    [Fact]
-    public void HeadPlusTailBeyondTheCap_FailsValidation()
+    [Theory]
+    [InlineData("4000", "2000")]
+    [InlineData("2147483647", "1")]
+    [InlineData("1", "2147483647")]
+    public void HeadPlusTailBeyondTheCap_FailsValidation(string head, string tail)
     {
         // Head plus tail is what survives the cap; a combination that exceeds it would make the
         // truncator emit more than the cap allows and the marker lie about what was dropped.
+        // The near-int.MaxValue rows would wrap int addition around the check entirely — and
+        // then index far outside the payload at truncation time.
         Should.Throw<OptionsValidationException>(() => Resolve<CaptureOptions>(new Dictionary<string, string?>
         {
-            ["Mimir:Capture:PayloadHeadBytes"] = "4000",
-            ["Mimir:Capture:PayloadTailBytes"] = "2000",
+            ["Mimir:Capture:PayloadHeadBytes"] = head,
+            ["Mimir:Capture:PayloadTailBytes"] = tail,
         }));
     }
 

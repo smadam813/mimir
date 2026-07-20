@@ -22,8 +22,18 @@ internal sealed class ProjectResolver(MimirDbContext db)
             {
                 if (!project.RootPaths.Contains(rootPath))
                 {
-                    project.RootPaths = [.. project.RootPaths, rootPath];
-                    await db.SaveChangesAsync(cancellationToken);
+                    // Appended in the database, not in memory: a tracked save would overwrite a
+                    // concurrent hook's append with this context's stale array. The WHERE guard
+                    // re-checks under the row lock (EF cannot translate an array append into
+                    // ExecuteUpdate, hence SQL); the reload brings the merged array back.
+                    await db.Database.ExecuteSqlAsync(
+                        $"""
+                        UPDATE projects
+                        SET root_paths = array_append(root_paths, {rootPath})
+                        WHERE id = {project.Id} AND NOT ({rootPath} = ANY (root_paths))
+                        """,
+                        cancellationToken);
+                    await db.Entry(project).ReloadAsync(cancellationToken);
                 }
 
                 return project;
@@ -42,7 +52,7 @@ internal sealed class ProjectResolver(MimirDbContext db)
                 await db.SaveChangesAsync(cancellationToken);
                 return project;
             }
-            catch (DbUpdateException) when (attempt < 3)
+            catch (DbUpdateException ex) when (ex.IsUniqueViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
             {
                 // Lost a create race on the unique identity: forget ours, match the winner.
                 db.Entry(project).State = EntityState.Detached;

@@ -34,6 +34,26 @@ public class HookCommandTests
     }
 
     [Fact]
+    public async Task AStdinThatNeverEnds_StillExitsZeroWithinTheCap()
+    {
+        // Console.In reads synchronously beneath its async surface: an un-capped read would hang
+        // the hook — and the session — until the host closed the pipe (spec §4 forbids exactly
+        // that). A tight cap keeps this test honest without a 3 s wait.
+        using var http = new HttpClient { BaseAddress = ClosedPort() };
+        using var stdin = new NeverEndingReader();
+        var output = new StringWriter();
+        var stopwatch = Stopwatch.StartNew();
+
+        var exitCode = await new HookCommand(http, stdin, output, cap: TimeSpan.FromMilliseconds(100))
+            .RunAsync("PostToolUse");
+
+        stopwatch.Stop();
+        exitCode.ShouldBe(0);
+        output.ToString().ShouldBeEmpty();
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2), "the cap must bound a stdin that never closes");
+    }
+
+    [Fact]
     public async Task GarbageStdin_StillExitsZeroSilently()
     {
         using var http = new HttpClient { BaseAddress = ClosedPort() };
@@ -152,6 +172,24 @@ public class HookCommandTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return new Uri($"http://127.0.0.1:{port}");
+    }
+
+    /// <summary>Blocks every read until disposed, like a host that never closes the hook's stdin.</summary>
+    private sealed class NeverEndingReader : TextReader
+    {
+        private readonly ManualResetEventSlim _released = new();
+
+        public override int Read(char[] buffer, int index, int count)
+        {
+            _released.Wait();
+            return 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            _released.Set();
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>Captures the one request the relay makes and answers with canned JSON.</summary>

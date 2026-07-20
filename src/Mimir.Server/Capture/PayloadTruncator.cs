@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Mimir.Server.Configuration;
@@ -18,7 +19,9 @@ internal static class PayloadTruncator
 {
     public static TruncatedPayload Truncate(JsonElement payload, CaptureOptions options)
     {
-        var fullSize = Encoding.UTF8.GetByteCount(payload.GetRawText());
+        // The raw UTF-8 view of the original element — no UTF-16 round-trip. The span lives
+        // only for this line, well inside the backing document's lifetime.
+        var fullSize = JsonMarshal.GetRawUtf8Value(payload).Length;
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))

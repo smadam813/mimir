@@ -12,12 +12,7 @@ namespace Mimir.Server.Tests.Capture;
 /// </summary>
 public sealed class CaptureDatabaseFixture : IAsyncLifetime
 {
-    private const string FallbackConnectionString =
-        "Host=localhost;Port=5432;Database=mimir;Username=mimir;Password=mimir";
-
-    private readonly string _adminConnectionString =
-        (Environment.GetEnvironmentVariable("MIMIR_TEST_POSTGRES") ?? FallbackConnectionString)
-        + ";Timeout=3;Command Timeout=30";
+    private readonly string _adminConnectionString = TestPostgres.AdminConnectionString;
 
     private readonly string _databaseName = $"mimir_test_{Guid.NewGuid():N}";
 

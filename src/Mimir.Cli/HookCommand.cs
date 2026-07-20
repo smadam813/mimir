@@ -10,7 +10,7 @@ namespace Mimir.Cli;
 /// Everything fails open — 3 s cap, exit 0 on every path, because a dead Mimir must never break or
 /// slow the session that invoked it.
 /// </summary>
-internal sealed class HookCommand(HttpClient http, TextReader input, TextWriter output)
+internal sealed class HookCommand(HttpClient http, TextReader input, TextWriter output, TimeSpan? cap = null)
 {
     /// <summary>Spec §11: the hard cap on any hook's round-trip.</summary>
     public static readonly TimeSpan Cap = TimeSpan.FromSeconds(3);
@@ -21,8 +21,8 @@ internal sealed class HookCommand(HttpClient http, TextReader input, TextWriter 
     {
         try
         {
-            using var cap = new CancellationTokenSource(Cap);
-            await RelayAsync(hookEvent, cap.Token);
+            using var timeout = new CancellationTokenSource(cap ?? Cap);
+            await RelayAsync(hookEvent, timeout.Token);
         }
         catch (Exception)
         {
@@ -34,7 +34,10 @@ internal sealed class HookCommand(HttpClient http, TextReader input, TextWriter 
 
     private async Task RelayAsync(string hookEvent, CancellationToken cancellationToken)
     {
-        var stdin = await input.ReadToEndAsync(cancellationToken);
+        // Console.In reads synchronously beneath its async surface and would ignore the cap;
+        // parked on a worker thread, the read leaves this await cancellable. The parked thread
+        // is a background thread — it dies with the process.
+        var stdin = await Task.Run(input.ReadToEnd).WaitAsync(cancellationToken);
         using var document = JsonDocument.Parse(stdin);
 
         // No session id means nothing to attach an Episode to; stay silent rather than guess.
