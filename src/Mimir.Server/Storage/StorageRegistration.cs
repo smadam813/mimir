@@ -12,8 +12,15 @@ public static class StorageRegistration
         var connectionString = configuration.GetConnectionString(ConnectionStringName)
             ?? throw new InvalidOperationException($"No '{ConnectionStringName}' connection string is configured.");
 
-        services.AddDbContext<MimirDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()));
+        // Blazor circuits outlive any sensible DbContext lifetime, so they open a short-lived
+        // context per interaction through the factory; the capture path and hosted services still
+        // resolve the plain scoped MimirDbContext. AddDbContextFactory registers only the factory,
+        // not the context itself, so register both.
+        void Configure(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
+
+        services.AddDbContextFactory<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure);
         services.AddScoped<IStorageProbe, PostgresStorageProbe>();
         services.AddHostedService<StorageService>();
 

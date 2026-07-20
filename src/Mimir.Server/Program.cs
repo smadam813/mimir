@@ -4,6 +4,7 @@ using Mimir.Server.Health;
 using Mimir.Server.Models;
 using Mimir.Server.Modules;
 using Mimir.Server.Storage;
+using Mimir.Server.Ui;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,7 @@ builder.Services.AddMimirHealth();
 builder.Services.AddMimirStorage(builder.Configuration);
 builder.Services.AddMimirModelClients();
 builder.Services.AddMimirModules(builder.Configuration);
+builder.Services.AddMimirUi();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

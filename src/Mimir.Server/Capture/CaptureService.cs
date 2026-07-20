@@ -17,7 +17,8 @@ internal sealed class CaptureService(
     MimirDbContext db,
     ProjectResolver projects,
     IOptions<CaptureOptions> options,
-    TimeProvider clock)
+    TimeProvider clock,
+    IEpisodeFeed feed)
 {
     public async Task<Episode> ResumeEpisodeAsync(HookEventRequest request, CancellationToken cancellationToken)
         => await GetOrCreateEpisodeAsync(request, cancellationToken);
@@ -51,6 +52,7 @@ internal sealed class CaptureService(
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                feed.Publish(new EpisodeChange(episode.ProjectId, episode.Id));
                 return evt;
             }
             catch (DbUpdateException ex) when (ex.IsUniqueViolation() && attempt < DbRaces.SeqRaceMaxAttempts)
@@ -87,7 +89,7 @@ internal sealed class CaptureService(
         // zero rows instead of overwriting the session's real end.
         // §6: Sealing sets distillation=pending. Creation already starts there (the §3 state set
         // has no earlier value), so this restate matters only to readers of the spec and this code.
-        await db.Episodes
+        var sealedRows = await db.Episodes
             .Where(e => e.Id == episode.Id && e.SealedAt == null)
             .ExecuteUpdateAsync(
                 update => update
@@ -95,6 +97,10 @@ internal sealed class CaptureService(
                     .SetProperty(e => e.SealReason, reason)
                     .SetProperty(e => e.Distillation, DistillationState.Pending),
                 cancellationToken);
+        if (sealedRows > 0)
+        {
+            feed.Publish(new EpisodeChange(episode.ProjectId, episode.Id));
+        }
     }
 
     private async Task<Episode> GetOrCreateEpisodeAsync(
@@ -125,6 +131,7 @@ internal sealed class CaptureService(
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
+                feed.Publish(new EpisodeChange(episode.ProjectId, episode.Id));
                 return episode;
             }
             catch (DbUpdateException ex) when (

@@ -1,0 +1,69 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject EpisodeBrowser Browser
+@inject IEpisodeFeed Feed
+
+@* Spec §8.2: Sealed and live unsealed Episodes, newest first, growing over the circuit as
+   capture announces changes — no refresh, no polling. *@
+@if (IsGlobal)
+{
+    <p class="empty-note">
+        Global holds Wisdom only — Episodes always belong to the Project their session ran in (§3).
+    </p>
+}
+else if (_episodes.Count == 0)
+{
+    <p class="empty-note">No sessions captured for this Project yet.</p>
+}
+else
+{
+    <ol class="episode-timeline">
+        @foreach (var episode in _episodes)
+        {
+            <li>
+                <a class="episode-row" href="@($"projects/{ProjectId}/episodes/{episode.Id}")">
+                    <span class="episode-state @(episode.SealedAt is null ? "live" : "sealed")">
+                        @EpisodeDisplay.StateLabel(episode.SealedAt, episode.SealReason)
+                    </span>
+                    <span class="episode-session" title="@episode.SessionId">@episode.SessionId</span>
+                    <span class="episode-meta">
+                        @EpisodeDisplay.Stamp(episode.StartedAt) · @(episode.EventCount == 1 ? "1 Event" : $"{episode.EventCount} Events") · @episode.Cwd
+                    </span>
+                </a>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    [Parameter]
+    public bool IsGlobal { get; set; }
+
+    private IReadOnlyList<EpisodeSummary> _episodes = [];
+    private IDisposable? _subscription;
+
+    protected override void OnInitialized()
+        => _subscription = Feed.Subscribe(change =>
+        {
+            if (change.ProjectId == ProjectId)
+            {
+                _ = InvokeAsync(RefreshAsync);
+            }
+        });
+
+    protected override Task OnParametersSetAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _episodes = IsGlobal
+            ? []
+            : await Browser.ListEpisodesAsync(ProjectId, CancellationToken.None);
+        StateHasChanged();
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+}

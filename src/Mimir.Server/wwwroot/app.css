@@ -50,7 +50,14 @@ h1:focus {
     text-decoration: none;
 }
 
+.app-shell {
+    display: flex;
+    align-items: flex-start;
+}
+
 .app-body {
+    flex: 1;
+    min-width: 0;
     max-width: 60rem;
     padding: 2rem 1.5rem;
 }
@@ -161,6 +168,279 @@ h1:focus {
     .health-strip {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
+
+/* Project sidebar (spec §8) */
+
+.project-sidebar {
+    position: sticky;
+    top: 4.5rem;
+    flex: none;
+    width: 14rem;
+    padding: 1.25rem 0.75rem;
+    border-right: 1px solid var(--border);
+    min-height: calc(100vh - 4.5rem);
+}
+
+.sidebar-title {
+    margin: 0 0.5rem 0.5rem;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.sidebar-item {
+    display: block;
+    padding: 0.35rem 0.5rem;
+    border-radius: 5px;
+    color: var(--text);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sidebar-item:hover {
+    background: var(--surface-raised);
+}
+
+.sidebar-item.selected {
+    background: var(--surface-raised);
+    font-weight: 600;
+}
+
+/* Tab strip (spec §8) */
+
+.tab-strip {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.75rem 0 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab {
+    padding: 0.35rem 0.9rem;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    text-decoration: none;
+}
+
+.tab:hover {
+    color: var(--text);
+}
+
+.tab.active {
+    color: var(--text);
+    border-bottom-color: var(--ready);
+}
+
+.tab-stub,
+.empty-note {
+    color: var(--text-dim);
+    max-width: 44rem;
+}
+
+/* Episode timeline + detail (spec §8.2) */
+
+.episode-timeline,
+.event-stream {
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+}
+
+.episode-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.75rem;
+    row-gap: 0.1rem;
+    padding: 0.6rem 0.8rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.episode-row:hover {
+    border-color: var(--text-dim);
+}
+
+.episode-state {
+    font-size: 0.75rem;
+    font-weight: 600;
+    align-self: center;
+    white-space: nowrap;
+}
+
+.episode-state.live {
+    color: var(--ready);
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+.episode-state.sealed {
+    color: var(--text-dim);
+}
+
+.episode-session {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.episode-meta {
+    grid-column: 2;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.crumbs {
+    margin-bottom: 0.5rem;
+}
+
+.crumbs a {
+    color: var(--text-dim);
+    text-decoration: none;
+}
+
+.crumbs a:hover {
+    color: var(--text);
+}
+
+.episode-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.3rem;
+    word-break: break-all;
+}
+
+.episode-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, max-content));
+    gap: 0.4rem 2rem;
+    margin: 0 0 1rem;
+}
+
+.episode-facts div {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.episode-facts dt {
+    color: var(--text-dim);
+}
+
+.episode-facts dd {
+    margin: 0;
+}
+
+.event-stream {
+    margin-top: 1.25rem;
+}
+
+.event-item {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+}
+
+.event-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.event-seq {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.event-type {
+    font-weight: 600;
+}
+
+.event-badge {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+}
+
+.event-badge.salient {
+    color: var(--ready);
+    border-color: var(--ready);
+}
+
+.event-badge.truncated {
+    color: var(--working);
+    border-color: var(--working);
+}
+
+.event-at {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.event-payload {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.65rem;
+    background: var(--surface);
+    border-radius: 5px;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Buttons + confirmed deletes (spec §8.2) */
+
+.button {
+    padding: 0.25rem 0.7rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.button:hover {
+    border-color: var(--text-dim);
+}
+
+.button.danger-outline {
+    color: var(--degraded);
+    border-color: var(--degraded);
+    background: transparent;
+}
+
+.button.danger {
+    background: var(--degraded);
+    border-color: var(--degraded);
+    color: #fff;
+}
+
+.confirm-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.confirm-prompt {
+    color: var(--degraded);
+    font-size: 0.8rem;
 }
 
 /* Blazor infrastructure */

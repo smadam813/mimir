@@ -1,15 +1,18 @@
 @inherits LayoutComponentBase
 
-@* Spec §8: the health strip is pinned on top of every surface. The project sidebar and the
-   Wisdom / Episodes / Injections tabs arrive with the tickets that own those surfaces. *@
+@* Spec §8: the health strip is pinned on top of every surface; below it, the project sidebar
+   scopes the Wisdom / Episodes / Injections tabs. *@
 <header class="app-header">
     <a class="app-brand" href="/">Mimir</a>
     <HealthStrip />
 </header>
 
-<main class="app-body">
-    @Body
-</main>
+<div class="app-shell">
+    <ProjectSidebar />
+    <main class="app-body">
+        @Body
+    </main>
+</div>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
