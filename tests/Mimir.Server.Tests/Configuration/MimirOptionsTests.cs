@@ -102,6 +102,23 @@ public class MimirOptionsTests
         }));
     }
 
+    [Fact]
+    public void HarvestKnobs_DefaultToTheComposeMountAndTheSpecd5Minutes()
+    {
+        var options = Resolve<HarvestOptions>();
+
+        options.Root.ShouldBe("/harvest");
+        options.ScanInterval.ShouldBe(TimeSpan.FromMinutes(5));
+    }
+
+    [Theory]
+    [InlineData("Mimir:Harvest:Root", "")]
+    [InlineData("Mimir:Harvest:ScanInterval", "00:00:00")]
+    [InlineData("Mimir:Harvest:ScanInterval", "2.00:00:00")]
+    public void InvalidHarvestOptions_FailValidation(string key, string value)
+        => Should.Throw<OptionsValidationException>(
+            () => Resolve<HarvestOptions>(new Dictionary<string, string?> { [key] = value }));
+
     private static TOptions Resolve<TOptions>(Dictionary<string, string?>? settings = null)
         where TOptions : class
         => Resolve<TOptions>(new ConfigurationBuilder().AddInMemoryCollection(settings ?? []).Build());

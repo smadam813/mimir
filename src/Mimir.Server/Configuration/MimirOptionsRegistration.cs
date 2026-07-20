@@ -19,6 +19,7 @@ public static class MimirOptionsRegistration
         services.AddSection<ServerOptions>(configuration, ServerOptions.SectionName);
         services.AddSection<ModelOptions>(configuration, ModelOptions.SectionName);
         services.AddSection<CaptureOptions>(configuration, CaptureOptions.SectionName);
+        services.AddSection<HarvestOptions>(configuration, HarvestOptions.SectionName);
         return services;
     }
 

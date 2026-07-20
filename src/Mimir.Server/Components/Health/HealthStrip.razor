@@ -18,7 +18,29 @@
 
     <HealthTile Title="Distillation" Placeholder="Arrives with the Distiller" />
 
-    <HealthTile Title="Harvester" Placeholder="Arrives with the Harvester" />
+    <HealthTile Title="Harvester" State="_snapshot.Harvester.State" Summary="@_snapshot.Harvester.Summary">
+        @if (_snapshot.Harvester.LastScanAt is { } lastScan)
+        {
+            <div class="detail-row">
+                <span class="detail-name">last scan</span>
+                <span class="detail-value">@lastScan.LocalDateTime.ToString("HH:mm:ss")</span>
+            </div>
+        }
+        @if (_snapshot.Harvester.Items is { } harvestedItems)
+        {
+            <div class="detail-row">
+                <span class="detail-name">items</span>
+                <span class="detail-value">@harvestedItems</span>
+            </div>
+        }
+        @if (_snapshot.Harvester.Changed is { } harvestedChanged)
+        {
+            <div class="detail-row">
+                <span class="detail-name">changed</span>
+                <span class="detail-value">@harvestedChanged</span>
+            </div>
+        }
+    </HealthTile>
 
     <HealthTile Title="Storage" State="_snapshot.Storage.State" Summary="@_snapshot.Storage.Summary">
         @foreach (var table in _snapshot.Storage.Tables)
