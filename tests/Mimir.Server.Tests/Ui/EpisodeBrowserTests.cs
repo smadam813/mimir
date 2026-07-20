@@ -136,9 +136,13 @@ public sealed class EpisodeBrowserTests(CaptureDatabaseFixture fixture)
         await Browser().DeleteEpisodeAsync(doomed.Id, Token);
 
         (await FromDb(db => db.Episodes.CountAsync(e => e.Id == doomed.Id, Token))).ShouldBe(0);
-        var events = await FromDb(db => db.Events.Select(e => e.Id).ToListAsync(Token));
-        events.ShouldContain(keptEvent.Id);
-        events.Count.ShouldBe(1);
+        // Scoped to this test's two Episodes: the database is shared by the whole class, and
+        // sibling tests' Events are present in whatever order the runner chose.
+        var events = await FromDb(db => db.Events
+            .Where(e => e.EpisodeId == doomed.Id || e.EpisodeId == kept.Id)
+            .Select(e => e.Id)
+            .ToListAsync(Token));
+        events.ShouldBe([keptEvent.Id]);
         _announced.ShouldBe([new EpisodeChange(project.Id, doomed.Id)]);
     }
 
