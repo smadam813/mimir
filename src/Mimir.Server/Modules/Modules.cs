@@ -1,3 +1,5 @@
+using Mimir.Server.Capture;
+
 namespace Mimir.Server.Modules;
 
 /// <summary>
@@ -8,10 +10,15 @@ internal sealed class CaptureModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddScoped<ProjectResolver>();
+        services.AddScoped<CaptureService>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapPost("/api/capture/events", CaptureEndpoints.CaptureEventAsync);
+        endpoints.MapPost("/api/hooks/user-prompt", CaptureEndpoints.UserPromptAsync);
+        endpoints.MapPost("/api/hooks/session-start", CaptureEndpoints.SessionStartAsync);
     }
 }
 

@@ -5,6 +5,7 @@
     <Project Path="src/Mimir.Server/Mimir.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Mimir.Cli.Tests/Mimir.Cli.Tests.csproj" />
     <Project Path="tests/Mimir.Server.Tests/Mimir.Server.Tests.csproj" />
   </Folder>
 </Solution>

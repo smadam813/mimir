@@ -1,14 +1,16 @@
-// Spec §13: the host companion. Both verbs are stubs — the capture ticket fills in `hook`, the
-// recall ticket fills in `mcp`. What exists today is the shape and the publish configuration.
+// Spec §13: the host companion. `hook` relays Claude Code hooks to Mimir; `mcp` arrives with the
+// recall ticket. Registration of both is documented in the README.
 //
-// `hook` deliberately exits 0 on every path, including this one: a hook that fails must never
-// break or slow the session that invoked it (spec §1, §4).
+// `hook` deliberately exits 0 on every path, including argument mistakes and a malformed
+// MIMIR_URL: a hook that fails must never break or slow the session that invoked it (spec §1, §4).
+
+using Mimir.Cli;
 
 const string Usage = """
     mimir — host companion for the Mimir memory service
 
     Usage:
-      mimir hook <event>   Relay a Claude Code hook to Mimir. Not implemented yet.
+      mimir hook <event>   Relay a Claude Code hook to Mimir (see the README for registration).
       mimir mcp            Serve the Mimir MCP tools over stdio. Not implemented yet.
 
     Environment:
@@ -17,7 +19,27 @@ const string Usage = """
 
 switch (args)
 {
-    case ["hook", ..]:
+    case ["hook", var hookEvent, ..]:
+        try
+        {
+            using var http = new HttpClient
+            {
+                BaseAddress = new(Environment.GetEnvironmentVariable("MIMIR_URL") is { Length: > 0 } url
+                    ? url
+                    : "http://127.0.0.1:6464"),
+                // Redundant with RunAsync's cap, which always fires first — kept as a backstop
+                // so a future request that forgets to thread the cap token still cannot hang
+                // the session for HttpClient's default 100 s.
+                Timeout = HookCommand.Cap,
+            };
+            return await new HookCommand(http, Console.In, Console.Out).RunAsync(hookEvent);
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+
+    case ["hook"]:
         return 0;
 
     case ["mcp"]:
