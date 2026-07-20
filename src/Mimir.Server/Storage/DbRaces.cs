@@ -26,4 +26,11 @@ internal static class DbRaces
     /// </summary>
     public static bool IsUniqueViolation(this DbUpdateException exception)
         => exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
+
+    /// <summary>
+    /// The clone-merge race (#17): a concurrent hook can reference the merge's loser between
+    /// re-point and delete. The rolled-back merge is retried whole; anything else surfaces.
+    /// </summary>
+    public static bool IsForeignKeyViolation(this PostgresException exception)
+        => exception.SqlState == PostgresErrorCodes.ForeignKeyViolation;
 }
