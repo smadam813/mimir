@@ -56,7 +56,8 @@ public sealed class ProjectMergeTests(CaptureDatabaseFixture fixture)
         // A referencing table that exists only in this test — the stand-in for HarvestedItem,
         // Wisdom scope, Injection and GoldenCase, which arrive with later tickets. It is covered
         // because re-pointing enumerates foreign keys from the database catalog at merge time,
-        // not from a hand-list of today's tables.
+        // not from a hand-list of today's tables. No drop: the fixture database is throwaway, and
+        // later merges re-pointing through an emptied extra table is exactly the production shape.
         await Context.Database.ExecuteSqlAsync(
             $"""
             CREATE TABLE IF NOT EXISTS test_future_references (

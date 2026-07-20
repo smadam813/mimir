@@ -7,8 +7,9 @@ namespace Mimir.Server.Tests.Capture;
 
 /// <summary>
 /// Spec §3.1 server side: match a Project by identity, else by a known root, create it when new,
-/// and remember every root it has been seen at. (Identity upgrade and clone merge are a follow-up
-/// ticket — a root match deliberately leaves the stored identity alone.)
+/// remember every root it has been seen at, and upgrade a path-born Project in place when hook
+/// traffic first reports its remote identity. (The collision case — clone merge — is
+/// <see cref="ProjectMergeTests"/>.)
 /// </summary>
 public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
     : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime

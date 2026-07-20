@@ -76,7 +76,7 @@ internal sealed class ProjectResolver(MimirDbContext db)
                         await db.Entry(project).ReloadAsync(cancellationToken);
                     }
                     catch (PostgresException ex) when (
-                        ex.SqlState == PostgresErrorCodes.UniqueViolation && attempt < DbRaces.CreateRaceMaxAttempts)
+                        ex.IsUniqueViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
                     {
                         // The remote identity already names another Project: two clones of one
                         // repository. Re-read; the identity match finds the survivor.

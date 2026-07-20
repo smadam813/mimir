@@ -16,7 +16,9 @@ internal static class DbRaces
     public const int SeqRaceMaxAttempts = 5;
 
     /// <summary>
-    /// A lost create race on a unique key is found by the very next query; 3 is margin.
+    /// A lost create race on a unique key is found by the very next query; 3 is margin. The #17
+    /// identity races (upgrade collision, merge vs. concurrent reference) share this bound — the
+    /// same one-rival-then-re-read shape.
     /// </summary>
     public const int CreateRaceMaxAttempts = 3;
 
@@ -26,6 +28,17 @@ internal static class DbRaces
     /// </summary>
     public static bool IsUniqueViolation(this DbUpdateException exception)
         => exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
+
+    /// <summary>Same signal on raw SQL, where Npgsql's exception arrives unwrapped (#17 upgrade).</summary>
+    public static bool IsUniqueViolation(this PostgresException exception)
+        => exception.SqlState == PostgresErrorCodes.UniqueViolation;
+
+    /// <summary>
+    /// The clone merge (#17) hard-deletes the losing Project; a concurrent insert referencing it
+    /// mid-merge fails this way. The loser's rows were re-pointed, so a retry finds the survivor.
+    /// </summary>
+    public static bool IsForeignKeyViolation(this DbUpdateException exception)
+        => exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation };
 
     /// <summary>
     /// The clone-merge race (#17): a concurrent hook can reference the merge's loser between
