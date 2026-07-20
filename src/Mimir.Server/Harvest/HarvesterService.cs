@@ -31,11 +31,15 @@ internal sealed class HarvesterService(
                 var scanned = await ScanAsync(stoppingToken);
 
                 var wait = scanned ? options.Value.ScanInterval : FailureRetryInterval;
-                var tick = Task.Delay(wait, clock, stoppingToken);
+                using var tickCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                var tick = Task.Delay(wait, clock, tickCancellation.Token);
                 var woken = await Task.WhenAny(tick, triggered);
                 if (woken == triggered)
                 {
                     triggered = trigger.WaitAsync(stoppingToken);
+                    // The trigger won; release the pending timer now instead of leaving one
+                    // abandoned Task.Delay alive per SessionEnd until it lapses.
+                    tickCancellation.Cancel();
                 }
 
                 await woken; // Rethrows the shutdown cancellation; a lapsed timer yields nothing.
@@ -68,8 +72,12 @@ internal sealed class HarvesterService(
             });
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            // Only a shutdown cancellation is allowed to escape and stop the loop. Any other
+            // OperationCanceledException (e.g. a query timeout surfaced as one) is a failed scan
+            // to degrade-and-retry, not a reason to tear the whole host down. This filter is the
+            // inverse of ExecuteAsync's "genuine shutdown" catch — keep the two in sync.
             logger.LogWarning(ex, "Harvest scan failed; retrying in {RetryInterval}", FailureRetryInterval);
             health.Update(snapshot => snapshot with
             {
