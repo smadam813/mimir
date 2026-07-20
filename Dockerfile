@@ -19,9 +19,13 @@ COPY src/Mimir.Server/ src/Mimir.Server/
 # (a cache hit, thanks to the layer above) rebuilds the manifest against the real source tree.
 RUN dotnet publish src/Mimir.Server/Mimir.Server.csproj --configuration Release --output /app
 
-# Fail the build rather than ship a UI that looks fine and never updates.
-RUN grep -q '"Route":"_framework/blazor.web.js"' /app/Mimir.Server.staticwebassets.endpoints.json \
-    || (echo "Static web asset manifest has no blazor.web.js: the UI would fall back to static rendering with no SignalR circuit." >&2 && exit 1)
+# Fail the build rather than ship a UI that looks fine and never updates. Whitespace-tolerant
+# because the compact "Route":"..." spelling is an undocumented SDK serialization detail: an SDK
+# that pretty-prints this file must not fail the build over a manifest that is in fact correct.
+# Still matched on Route rather than the bare filename — the unfingerprinted route is the one the
+# script tag requests, and it can be absent while _framework/blazor.web.<hash>.js entries remain.
+RUN grep -qE '"Route"[[:space:]]*:[[:space:]]*"_framework/blazor\.web\.js"' /app/Mimir.Server.staticwebassets.endpoints.json \
+    || (echo "Static web asset manifest has no blazor.web.js route: the UI would fall back to static rendering with no SignalR circuit." >&2 && exit 1)
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
