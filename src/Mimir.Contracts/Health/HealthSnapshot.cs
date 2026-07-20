@@ -1,18 +1,21 @@
 namespace Mimir.Contracts.Health;
 
 /// <summary>
-/// The live half of the spec §8 health strip. The Distillation and Harvester tiles are inert
-/// placeholders until their pipeline stages exist, so they carry no state here yet.
+/// The live half of the spec §8 health strip. The Distillation tile is an inert placeholder until
+/// its pipeline stage exists, so it carries no state here yet.
 /// </summary>
 public sealed record HealthSnapshot
 {
     public static readonly HealthSnapshot Pending = new()
     {
         Ollama = OllamaTile.Pending,
+        Harvester = HarvesterTile.Pending,
         Storage = StorageTile.Pending,
     };
 
     public required OllamaTile Ollama { get; init; }
+
+    public required HarvesterTile Harvester { get; init; }
 
     public required StorageTile Storage { get; init; }
 }
@@ -77,6 +80,33 @@ public enum ModelProvisioningState
 
     /// <summary>Provisioning failed; the model is not usable.</summary>
     Failed,
+}
+
+/// <summary>
+/// Spec §8: Harvester last scan / items / changed. A failed scan goes Degraded but keeps the last
+/// good figures — stale numbers labelled with their scan time beat no numbers.
+/// </summary>
+public sealed record HarvesterTile
+{
+    public static readonly HarvesterTile Pending = new()
+    {
+        State = HealthTileState.Pending,
+        Summary = "Waiting for the first scan",
+    };
+
+    public required HealthTileState State { get; init; }
+
+    /// <summary>One line for the tile face.</summary>
+    public required string Summary { get; init; }
+
+    /// <summary>When the last successful scan finished. Null until one has.</summary>
+    public DateTimeOffset? LastScanAt { get; init; }
+
+    /// <summary>Memory files found by the last successful scan.</summary>
+    public int? Items { get; init; }
+
+    /// <summary>Files that stored a new HarvestedItem version in the last successful scan.</summary>
+    public int? Changed { get; init; }
 }
 
 /// <summary>
