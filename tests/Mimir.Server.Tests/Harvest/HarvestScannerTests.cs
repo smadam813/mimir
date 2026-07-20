@@ -201,26 +201,53 @@ public sealed class HarvestScannerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnUnreadableFile_KeepsItsStateInsteadOfGoingGone()
     {
-        // A memory file locked mid-write is present, just briefly unreadable. Marking it gone
-        // would fabricate a deletion — and resurrect it as a spurious new version next scan.
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None.");
+        // A memory file locked mid-write (or with its permissions off) is present, just briefly
+        // unreadable. Marking it gone would fabricate a deletion — and resurrect it as a
+        // spurious new version next scan.
         var slug = NewSlug();
         WriteMemoryFile(slug, "MEMORY.md", "locked later");
         await Scanner().ScanAsync(Token);
         _clock.Advance(TimeSpan.FromMinutes(5));
+        var file = Path.Combine(_root, slug, "memory", "MEMORY.md");
 
         HarvestScanResult result;
-        using (File.Open(
-            Path.Combine(_root, slug, "memory", "MEMORY.md"),
-            FileMode.Open, FileAccess.Read, FileShare.None))
+        using (MakeUnreadable(file))
         {
             result = await Scanner().ScanAsync(Token);
         }
 
-        result.Items.ShouldBe(1, "a locked file was still seen");
+        result.Items.ShouldBe(1, "an unreadable file was still seen");
         result.Gone.ShouldBe(0);
         var version = (await VersionsAsync(slug)).ShouldHaveSingleItem();
         version.GoneAt.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Unreadable the way each OS does it: an exclusive lock where sharing is mandatory
+    /// (Windows), permission bits where it is advisory (everything else). Disposal restores.
+    /// </summary>
+    private static IDisposable MakeUnreadable(string file)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return File.Open(file, FileMode.Open, FileAccess.Read, FileShare.None);
+        }
+
+        var mode = File.GetUnixFileMode(file);
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        return new RestoreMode(file, mode);
+    }
+
+    private sealed record RestoreMode(string File, UnixFileMode Mode) : IDisposable
+    {
+        public void Dispose()
+        {
+            // Only ever constructed off-Windows; the guard is for the platform analyzer.
+            if (!OperatingSystem.IsWindows())
+            {
+                System.IO.File.SetUnixFileMode(File, Mode);
+            }
+        }
     }
 
     [Fact]

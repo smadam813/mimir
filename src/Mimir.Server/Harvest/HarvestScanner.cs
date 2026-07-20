@@ -56,11 +56,11 @@ internal sealed class HarvestScanner(
             {
                 bytes = await File.ReadAllBytesAsync(file, cancellationToken);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The host is live under us; a file locked or vanishing mid-scan is next scan's
-                // problem, not this scan's failure. It was seen, so the gone-marking below leaves
-                // it alone: it keeps whatever state it had.
+                // The host is live under us; a file locked, vanishing mid-scan or with its
+                // permissions off is next scan's problem, not this scan's failure. It was seen,
+                // so the gone-marking below leaves it alone: it keeps whatever state it had.
                 logger.LogWarning(ex, "Skipping unreadable memory file {File}", file);
                 continue;
             }
