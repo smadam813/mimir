@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>mimir</AssemblyName>
+    <RootNamespace>Mimir.Cli</RootNamespace>
+
+    <!-- Spec §13: self-contained single-file win-x64 executable. Only applied on publish. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mimir.Contracts\Mimir.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

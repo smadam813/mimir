@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mimir.Cli/Mimir.Cli.csproj" />
+    <Project Path="src/Mimir.Contracts/Mimir.Contracts.csproj" />
+    <Project Path="src/Mimir.Server/Mimir.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mimir.Server.Tests/Mimir.Server.Tests.csproj" />
+  </Folder>
+</Solution>

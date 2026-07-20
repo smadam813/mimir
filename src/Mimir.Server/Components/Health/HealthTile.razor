@@ -1,0 +1,38 @@
+@using Mimir.Contracts.Health
+
+<article class="health-tile @(Placeholder is null ? StateClass : "state-placeholder")">
+    <header>
+        <span class="tile-title">@Title</span>
+        <span class="tile-dot" aria-hidden="true"></span>
+    </header>
+
+    @if (Placeholder is not null)
+    {
+        <p class="tile-summary tile-placeholder">@Placeholder</p>
+    }
+    else
+    {
+        <p class="tile-summary">@Summary</p>
+        <div class="tile-detail">@ChildContent</div>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public required string Title { get; set; }
+
+    /// <summary>Set on tiles whose pipeline stage does not exist yet; renders the tile inert.</summary>
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    [Parameter]
+    public HealthTileState State { get; set; }
+
+    [Parameter]
+    public string? Summary { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string StateClass => $"state-{State.ToString().ToLowerInvariant()}";
+}
