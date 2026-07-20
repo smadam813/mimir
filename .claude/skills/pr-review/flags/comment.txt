@@ -7,3 +7,23 @@ include a suggestion block only when it fully fixes the issue). If that tool
 is not available in this session, fall back to `gh api` (repos/{owner}/{repo}/pulls/{pr}/comments)
 or print the findings instead. If the target is not a PR, print the findings
 to the terminal and note that `--comment` was ignored.
+
+### If you fall back to `gh api`
+
+Multi-line markdown bodies are painful to quote in a shell, so writing each
+finding to a scratchpad file first is fine — but read it back with the right
+flag:
+
+- **`-F body=@finding.md`** — typed field; `@<path>` reads the file. This is
+  what you want.
+- **`-f body=@finding.md`** — raw-string field; `@<path>` is NOT interpreted.
+  Posts the literal text `@finding.md` as the comment body.
+
+The `-f` form still returns HTTP 201, so a `$?` check passes and the mistake
+is silent. Use `-f` only for values you are passing literally (`path`, `side`),
+and `-F` for the body and for numeric fields like `line`.
+
+After posting, verify at least one comment round-tripped — re-read a body with
+`gh api repos/{owner}/{repo}/pulls/{pr}/comments --jq '.[-1].body'` and confirm
+it is the finding text, not a filename. Do not report the comments as posted
+until that check passes.
