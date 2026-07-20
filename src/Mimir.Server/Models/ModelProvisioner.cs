@@ -122,22 +122,32 @@ public sealed class ModelProvisioner(
 
     private static (HealthTileState State, string Summary) Describe(IReadOnlyList<ModelStatus> statuses)
     {
+        var failed = statuses.Count(m => m.State == ModelProvisioningState.Failed);
+
         if (statuses.FirstOrDefault(m => m.State == ModelProvisioningState.Pulling) is { } pulling)
         {
             var percent = pulling.PercentComplete is { } value ? $" {value}%" : string.Empty;
-            return (HealthTileState.Working, $"Pulling {pulling.Name}{percent}");
+            var progress = $"Pulling {pulling.Name}{percent}";
+
+            // A failed pull is terminal, so it outranks the one still in flight. Reporting only
+            // the progress would leave the tile green for however long the remaining
+            // multi-gigabyte pull takes, which is exactly when the user is watching it.
+            return failed > 0
+                ? (HealthTileState.Degraded, $"{progress} · {Unavailable(failed, statuses.Count)}")
+                : (HealthTileState.Working, progress);
         }
 
-        var failed = statuses.Count(m => m.State == ModelProvisioningState.Failed);
         if (failed > 0)
         {
-            return (HealthTileState.Degraded, $"{failed} of {statuses.Count} models unavailable");
+            return (HealthTileState.Degraded, Unavailable(failed, statuses.Count));
         }
 
         return statuses.All(m => m.State == ModelProvisioningState.Ready)
             ? (HealthTileState.Ready, $"Ready · {string.Join(", ", statuses.Select(m => m.Name))}")
             : (HealthTileState.Working, "Provisioning models");
     }
+
+    private static string Unavailable(int failed, int total) => $"{failed} of {total} models unavailable";
 
     /// <summary>Ollama reports an untagged model as <c>:latest</c>; compare on the same footing.</summary>
     private static string NormalizeTag(string model) => model.Contains(':') ? model : $"{model}:latest";

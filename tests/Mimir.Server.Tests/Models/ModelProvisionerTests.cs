@@ -108,6 +108,24 @@ public class ModelProvisionerTests
     }
 
     [Fact]
+    public async Task AFailedPull_IsSurfacedWhileALaterModelIsStillPulling()
+    {
+        _catalog.PullFailures[Distiller] = new InvalidOperationException("no space left on device");
+        _catalog.PullProgress[Embedding] = [new ModelPullProgress("downloading", 42)];
+        var summaries = new List<(HealthTileState State, string Summary)>();
+        using var _ = _health.Subscribe(s => summaries.Add((s.Ollama.State, s.Ollama.Summary)));
+
+        await Provision();
+
+        // A failed pull is terminal. Reporting Working until the last (multi-gigabyte) pull
+        // finishes would hide it for minutes, so the tile carries both facts at once.
+        summaries.ShouldContain(x =>
+            x.State == HealthTileState.Degraded
+            && x.Summary.Contains("42%")
+            && x.Summary.Contains("1 of 2 models unavailable"));
+    }
+
+    [Fact]
     public async Task AnUnreachableOllama_IsRetriedUntilItAnswers()
     {
         _catalog
