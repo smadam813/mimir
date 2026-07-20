@@ -31,4 +31,15 @@ public class AppSettingsTests
         shipped.Embedding.ShouldBe(expected.Embedding);
         shipped.EmbeddingDimensions.ShouldBe(expected.EmbeddingDimensions);
     }
+
+    [Fact]
+    public void ShippedCaptureSection_MatchesTheCodeDefaults()
+    {
+        var shipped = AppSettings.GetSection(CaptureOptions.SectionName).Get<CaptureOptions>().ShouldNotBeNull();
+        var expected = new CaptureOptions();
+
+        shipped.PayloadFieldCapBytes.ShouldBe(expected.PayloadFieldCapBytes);
+        shipped.PayloadHeadBytes.ShouldBe(expected.PayloadHeadBytes);
+        shipped.PayloadTailBytes.ShouldBe(expected.PayloadTailBytes);
+    }
 }

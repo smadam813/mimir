@@ -5,14 +5,20 @@
     <AssemblyName>mimir</AssemblyName>
     <RootNamespace>Mimir.Cli</RootNamespace>
 
-    <!-- Spec §13: self-contained single-file win-x64 executable. Only applied on publish. -->
+    <!-- Spec §13: self-contained single-file win-x64 executable. Conditioned on publish so that
+         ordinary builds (and the test project's reference) stay framework-dependent. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier Condition="'$(_IsPublishing)' == 'true'">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(_IsPublishing)' == 'true'">true</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Mimir.Contracts\Mimir.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Mimir.Cli.Tests" />
   </ItemGroup>
 
 </Project>
