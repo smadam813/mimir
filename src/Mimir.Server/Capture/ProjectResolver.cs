@@ -37,6 +37,10 @@ internal sealed class ProjectResolver(MimirDbContext db)
                     await db.Entry(project).ReloadAsync(cancellationToken);
                 }
 
+                // The rival probe runs on every identity match, not only when a root was just
+                // appended: a concurrent create (or a Harvester-born path row) can leave a
+                // path-born duplicate at an already-known root, and this is where it is healed —
+                // root_paths is not unique across Projects, so nothing else catches it.
                 if (project.Identity == identity && identity != rootPath
                     && await PathBornRivalAtAsync(project, rootPath, cancellationToken) is { } rival)
                 {
@@ -111,15 +115,17 @@ internal sealed class ProjectResolver(MimirDbContext db)
 
     /// <summary>
     /// A different, path-born Project claiming the reported root — the loser of a clone merge.
-    /// Path-born is checked in memory, not in the query: at most one other row holds this root,
-    /// and the array-contains-own-column shape has no reliable translation.
+    /// Path-born is checked in memory, not in the query: the array-contains-own-column shape has
+    /// no reliable translation. Normally at most one other row holds this root, but the filter is
+    /// applied across every holder so a genuine path-born rival is never masked by a remote one.
     /// </summary>
     private async Task<Project?> PathBornRivalAtAsync(
         Project project, string rootPath, CancellationToken cancellationToken)
     {
-        var rival = await db.Projects.FirstOrDefaultAsync(
-            p => p.Id != project.Id && p.RootPaths.Contains(rootPath), cancellationToken);
-        return rival is not null && rival.RootPaths.Contains(rival.Identity) ? rival : null;
+        var holders = await db.Projects
+            .Where(p => p.Id != project.Id && p.RootPaths.Contains(rootPath))
+            .ToListAsync(cancellationToken);
+        return holders.FirstOrDefault(r => r.IsPathBorn);
     }
 
     /// <summary>
@@ -132,7 +138,7 @@ internal sealed class ProjectResolver(MimirDbContext db)
     private static bool ReportsARemoteFor(Project project, string identity, string rootPath)
         => project.Identity != identity
             && identity != rootPath
-            && project.RootPaths.Contains(project.Identity);
+            && project.IsPathBorn;
 
     /// <summary>The last segment of either identity form: <c>host/owner/repo</c> or a path.</summary>
     private static string DisplayNameOf(string identity)

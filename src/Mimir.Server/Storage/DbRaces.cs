@@ -27,7 +27,7 @@ internal static class DbRaces
     /// violation, a dropped connection — must surface, not spin through retries.
     /// </summary>
     public static bool IsUniqueViolation(this DbUpdateException exception)
-        => exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
+        => exception.InnerException is PostgresException inner && inner.IsUniqueViolation();
 
     /// <summary>Same signal on raw SQL, where Npgsql's exception arrives unwrapped (#17 upgrade).</summary>
     public static bool IsUniqueViolation(this PostgresException exception)
@@ -38,7 +38,7 @@ internal static class DbRaces
     /// mid-merge fails this way. The loser's rows were re-pointed, so a retry finds the survivor.
     /// </summary>
     public static bool IsForeignKeyViolation(this DbUpdateException exception)
-        => exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation };
+        => exception.InnerException is PostgresException inner && inner.IsForeignKeyViolation();
 
     /// <summary>
     /// The clone-merge race (#17): a concurrent hook can reference the merge's loser between
