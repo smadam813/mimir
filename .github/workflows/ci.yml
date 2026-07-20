@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    services:
+      # Matches compose.yaml's postgres service, minus the persistent volume: CI wants a
+      # throwaway database.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: mimir
+          POSTGRES_USER: mimir
+          POSTGRES_PASSWORD: mimir
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mimir -d mimir"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Keyword form, not a postgres:// URI: the storage fixture's connection attempt swallows a
+      # URI behind a blanket catch and reports it as "no Postgres reachable" (silent skips) rather
+      # than a connection error.
+      ConnectionStrings__Mimir: "Host=localhost;Port=5432;Database=mimir;Username=mimir;Password=mimir"
+      MIMIR_TEST_POSTGRES: "Host=localhost;Port=5432;Database=mimir;Username=mimir;Password=mimir"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Show resolved SDK version
+        run: dotnet --version
+
+      - name: Build (Release)
+        run: dotnet build Mimir.slnx --configuration Release
+
+      - name: Install dotnet-ef
+        # Kept in lockstep with the Microsoft.EntityFrameworkCore.Design version in
+        # Directory.Packages.props.
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.4
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Apply EF migrations
+        # Without this, two of the seven storage tests are vacuous: __EFMigrationsHistory and the
+        # vector extension only exist once a migration has actually run.
+        run: dotnet ef database update --project src/Mimir.Server/Mimir.Server.csproj --configuration Release
+
+      - name: Test
+        run: dotnet test Mimir.slnx --configuration Release --no-build --settings .github/ci.runsettings
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build server image
+        run: docker build .
