@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CI-only: makes the storage integration tests fail (rather than skip) when no Postgres is
+  reachable. Not xunit.runner.json, and not referenced by a plain local `dotnet test` — a
+  developer with nothing running must keep getting clean skips (see README "Developing").
+-->
+<RunSettings>
+  <xUnit>
+    <FailSkips>true</FailSkips>
+  </xUnit>
+</RunSettings>

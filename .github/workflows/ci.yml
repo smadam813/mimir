@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    env:
+      # Single source of truth for the CI Postgres credentials/connection details. Rotate the
+      # password (or change host/port/db/user) here only: services.postgres.env below and the
+      # composed connection strings built in the "Compute connection strings" step both read from
+      # these.
+      MIMIR_DB_HOST: localhost
+      MIMIR_DB_PORT: "5432"
+      MIMIR_DB_NAME: mimir
+      MIMIR_DB_USER: mimir
+      MIMIR_DB_PASSWORD: mimir
+
+    services:
+      # Matches compose.yaml's postgres service, minus the persistent volume: CI wants a
+      # throwaway database.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: ${{ env.MIMIR_DB_NAME }}
+          POSTGRES_USER: ${{ env.MIMIR_DB_USER }}
+          POSTGRES_PASSWORD: ${{ env.MIMIR_DB_PASSWORD }}
+        # `env` isn't available on jobs.<job_id>.services itself (only on the nested
+        # services.<service_id>.env.* keys), so the port and health-check below can't reference
+        # the vars above and must be kept in sync with them by hand. Low risk: these are
+        # non-secret identifiers, and a mismatch fails loudly (container never reports healthy)
+        # rather than silently connecting with a stale password.
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mimir -d mimir"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Compute connection strings
+        # Keyword form, not a postgres:// URI: the storage fixture's connection attempt swallows a
+        # URI behind a blanket catch and reports it as "no Postgres reachable" (silent skips)
+        # rather than a connection error.
+        run: |
+          CONN="Host=${{ env.MIMIR_DB_HOST }};Port=${{ env.MIMIR_DB_PORT }};Database=${{ env.MIMIR_DB_NAME }};Username=${{ env.MIMIR_DB_USER }};Password=${{ env.MIMIR_DB_PASSWORD }}"
+          echo "ConnectionStrings__Mimir=$CONN" >> "$GITHUB_ENV"
+          echo "MIMIR_TEST_POSTGRES=$CONN" >> "$GITHUB_ENV"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            Directory.Packages.props
+            **/*.csproj
+
+      - name: Show resolved SDK version
+        run: dotnet --version
+
+      - name: Build (Release)
+        run: dotnet build Mimir.slnx --configuration Release
+
+      - name: Install dotnet-ef
+        # Kept in lockstep with the Microsoft.EntityFrameworkCore.Design version in
+        # Directory.Packages.props.
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.4
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Apply EF migrations
+        # Without this, two of the seven storage tests are vacuous: __EFMigrationsHistory and the
+        # vector extension only exist once a migration has actually run. --no-build reuses the
+        # Release output from the build step above instead of paying for a second full build.
+        run: dotnet ef database update --project src/Mimir.Server/Mimir.Server.csproj --configuration Release --no-build
+
+      - name: Test
+        run: dotnet test Mimir.slnx --configuration Release --no-build --settings .github/ci.runsettings
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build server image
+        run: docker build .
