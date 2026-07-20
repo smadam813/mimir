@@ -6,7 +6,7 @@ namespace Mimir.Server.Configuration;
 /// Spec §11: event payload cap — 4 KB per payload field, kept as 3 KB head + 1 KB tail. The loss
 /// is deliberate (ADR-0003): capture is lossy-by-design and the original size is always recorded.
 /// </summary>
-public sealed class CaptureOptions
+public sealed class CaptureOptions : IValidatableObject
 {
     public const string SectionName = "Mimir:Capture";
 
@@ -21,4 +21,15 @@ public sealed class CaptureOptions
     /// <summary>How much of an oversized field's end survives.</summary>
     [Range(1, int.MaxValue)]
     public int PayloadTailBytes { get; init; } = 1024;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (PayloadHeadBytes + PayloadTailBytes > PayloadFieldCapBytes)
+        {
+            yield return new ValidationResult(
+                $"PayloadHeadBytes ({PayloadHeadBytes}) + PayloadTailBytes ({PayloadTailBytes}) must not "
+                + $"exceed PayloadFieldCapBytes ({PayloadFieldCapBytes}); head plus tail is what survives the cap.",
+                [nameof(PayloadHeadBytes), nameof(PayloadTailBytes)]);
+        }
+    }
 }

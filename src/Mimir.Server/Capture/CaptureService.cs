@@ -74,6 +74,9 @@ internal sealed class CaptureService(
         }
 
         episode.SealedAt = clock.GetUtcNow();
+        // §6: Sealing sets distillation=pending. Creation already starts there (the §3 state set
+        // has no earlier value), so this restate matters only to readers of the spec and this code.
+        episode.Distillation = DistillationState.Pending;
         episode.SealReason =
             request.Payload.ValueKind == JsonValueKind.Object
             && request.Payload.TryGetProperty("reason", out var reason)

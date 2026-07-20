@@ -10,7 +10,9 @@ internal sealed record TruncatedPayload(string Json, int FullSizeBytes);
 /// <summary>
 /// Spec §4 fidelity: every string field over the cap keeps its head and tail around a
 /// <c>…[truncated N bytes]…</c> marker; the top-level prompt is exempt because prompts are stored
-/// in full. Cuts land on character boundaries — a truncated payload is still honest UTF-8.
+/// in full. Assistant messages — the other §4 stored-in-full class — never arrive on the hook
+/// surface at all, an accepted v1 loss (§4 declines to read the transcript, ADR-0003). Cuts land
+/// on character boundaries — a truncated payload is still honest UTF-8.
 /// </summary>
 internal static class PayloadTruncator
 {

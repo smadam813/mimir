@@ -75,6 +75,28 @@ public class MimirOptionsTests
         => Should.Throw<OptionsValidationException>(
             () => Resolve<ModelOptions>(new Dictionary<string, string?> { [key] = value }));
 
+    [Fact]
+    public void PayloadCapKnobs_DefaultToTheSpecd4K3K1K()
+    {
+        var options = Resolve<CaptureOptions>();
+
+        options.PayloadFieldCapBytes.ShouldBe(4096);
+        options.PayloadHeadBytes.ShouldBe(3072);
+        options.PayloadTailBytes.ShouldBe(1024);
+    }
+
+    [Fact]
+    public void HeadPlusTailBeyondTheCap_FailsValidation()
+    {
+        // Head plus tail is what survives the cap; a combination that exceeds it would make the
+        // truncator emit more than the cap allows and the marker lie about what was dropped.
+        Should.Throw<OptionsValidationException>(() => Resolve<CaptureOptions>(new Dictionary<string, string?>
+        {
+            ["Mimir:Capture:PayloadHeadBytes"] = "4000",
+            ["Mimir:Capture:PayloadTailBytes"] = "2000",
+        }));
+    }
+
     private static TOptions Resolve<TOptions>(Dictionary<string, string?>? settings = null)
         where TOptions : class
         => Resolve<TOptions>(new ConfigurationBuilder().AddInMemoryCollection(settings ?? []).Build());

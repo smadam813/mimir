@@ -46,7 +46,7 @@ internal sealed class HookCommand(HttpClient http, TextReader input, TextWriter 
             ? reported
             : Environment.CurrentDirectory;
 
-        var location = ProjectLocator.Locate(cwd);
+        var location = await ProjectLocator.LocateAsync(cwd, cancellationToken);
         var request = new HookEventRequest
         {
             SessionId = sessionId,

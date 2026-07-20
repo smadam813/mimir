@@ -30,63 +30,81 @@ public sealed class ProjectLocatorTests : IDisposable
     }
 
     [Fact]
-    public void ARepoWithAnOriginRemote_GetsTheNormalizedOriginIdentity()
+    public async Task ARepoWithAnOriginRemote_GetsTheNormalizedOriginIdentity()
     {
         var repo = GitRepo();
         Git(repo, "remote", "add", "origin", "https://github.com/smadam813/mimir.git");
         Git(repo, "remote", "add", "upstream", "https://github.com/aaa/first-alphabetically.git");
 
-        var location = ProjectLocator.Locate(repo);
+        var location = await Locate(repo);
 
         location.Identity.ShouldBe("github.com/smadam813/mimir");
         location.Root.ShouldBe(repo);
     }
 
     [Fact]
-    public void WithNoOrigin_TheAlphabeticallyFirstRemoteWins()
+    public async Task WithNoOrigin_TheAlphabeticallyFirstRemoteWins()
     {
         var repo = GitRepo();
         Git(repo, "remote", "add", "zeta", "https://github.com/owner/zeta.git");
         Git(repo, "remote", "add", "alpha", "https://github.com/owner/alpha.git");
 
-        ProjectLocator.Locate(repo).Identity.ShouldBe("github.com/owner/alpha");
+        (await Locate(repo)).Identity.ShouldBe("github.com/owner/alpha");
     }
 
     [Fact]
-    public void ARepoWithNoRemote_FallsBackToItsRootPath()
+    public async Task ARepoWithNoRemote_FallsBackToItsRootPath()
     {
         var repo = GitRepo();
 
-        var location = ProjectLocator.Locate(repo);
+        var location = await Locate(repo);
 
         location.Identity.ShouldBe(repo);
         location.Root.ShouldBe(repo);
     }
 
     [Fact]
-    public void ANonRepoDirectory_FallsBackToTheCwd()
+    public async Task ANonRepoDirectory_FallsBackToTheCwd()
     {
         var dir = TempDir();
 
-        var location = ProjectLocator.Locate(dir);
+        var location = await Locate(dir);
 
         location.Identity.ShouldBe(dir);
         location.Root.ShouldBe(dir);
     }
 
     [Fact]
-    public void ASubdirectoryResolvesToTheRepoRoot_NotTheCwd()
+    public async Task ASubdirectoryResolvesToTheRepoRoot_NotTheCwd()
     {
         var repo = GitRepo();
         Git(repo, "remote", "add", "origin", "git@github.com:smadam813/mimir.git");
         var nested = Path.Combine(repo, "src", "deep");
         Directory.CreateDirectory(nested);
 
-        var location = ProjectLocator.Locate(nested);
+        var location = await Locate(nested);
 
         location.Identity.ShouldBe("github.com/smadam813/mimir");
         location.Root.ShouldBe(repo);
     }
+
+    [Fact]
+    public async Task AnAlreadyCancelledCap_StillAnswersWithThePathFallback()
+    {
+        // The hook's 3 s cap can expire mid-resolution; out of time means "no repository
+        // information", never an exception (spec §4 fail-open).
+        var repo = GitRepo();
+        using var expired = new CancellationTokenSource();
+        await expired.CancelAsync();
+
+        var location = await ProjectLocator.LocateAsync(repo, expired.Token);
+
+        location.Identity.ShouldBe(repo);
+        location.Root.ShouldBe(repo);
+    }
+
+    private static Task<ProjectLocation> Locate(string cwd)
+        => ProjectLocator.LocateAsync(cwd, TestContext.Current.CancellationToken);
 
     private string GitRepo()
     {
