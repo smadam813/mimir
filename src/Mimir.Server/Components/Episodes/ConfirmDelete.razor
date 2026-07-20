@@ -1,0 +1,33 @@
+@* Spec §8.2: every hard delete is confirmed. Two-phase, inline, no JS — arming swaps the button
+   for the consequence and an explicit choice. *@
+@if (_armed)
+{
+    <span class="confirm-delete" role="alertdialog" aria-label="Confirm deletion">
+        <span class="confirm-prompt">@Prompt</span>
+        <button class="button danger" @onclick="ConfirmAsync">Delete forever</button>
+        <button class="button" @onclick="() => _armed = false">Cancel</button>
+    </span>
+}
+else
+{
+    <button class="button danger-outline" @onclick="() => _armed = true">@Label</button>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string Prompt { get; set; } = "";
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    private bool _armed;
+
+    private async Task ConfirmAsync()
+    {
+        _armed = false;
+        await OnConfirm.InvokeAsync();
+    }
+}

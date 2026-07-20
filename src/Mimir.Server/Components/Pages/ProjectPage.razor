@@ -1,0 +1,62 @@
+@page "/projects/{ProjectId:guid}"
+@page "/projects/{ProjectId:guid}/{Tab}"
+@using Mimir.Server.Components.Episodes
+@using Mimir.Server.Ui
+@inject EpisodeBrowser Browser
+
+<PageTitle>@(_project?.DisplayName ?? "Project") · Mimir</PageTitle>
+
+@if (_project is null)
+{
+    <h1>Unknown Project</h1>
+    <p class="lede">Nothing lives at this id — the Project may have been deleted.</p>
+}
+else
+{
+    <h1>@_project.DisplayName</h1>
+
+    @* Spec §8: the three tabs, in spec order. Wisdom and Injections are stubs until their
+       tickets; Episodes is the default landing because it is the surface that exists. *@
+    <nav class="tab-strip" aria-label="Project surfaces">
+        <a class="tab @(ActiveTab == "wisdom" ? "active" : null)" href="@Href("wisdom")">Wisdom</a>
+        <a class="tab @(ActiveTab == "episodes" ? "active" : null)" href="@Href("episodes")">Episodes</a>
+        <a class="tab @(ActiveTab == "injections" ? "active" : null)" href="@Href("injections")">Injections</a>
+    </nav>
+
+    @switch (ActiveTab)
+    {
+        case "wisdom":
+            <p class="tab-stub">The Wisdom browser arrives with the Wisdom-tier ticket.</p>
+            break;
+
+        case "injections":
+            <p class="tab-stub">The Injection log arrives with the Recall tickets.</p>
+            break;
+
+        default:
+            <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+            break;
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid ProjectId { get; set; }
+
+    [Parameter]
+    public string? Tab { get; set; }
+
+    private ProjectListItem? _project;
+
+    private string ActiveTab => Tab?.ToLowerInvariant() switch
+    {
+        "wisdom" => "wisdom",
+        "injections" => "injections",
+        _ => "episodes",
+    };
+
+    private string Href(string tab) => $"projects/{ProjectId}/{tab}";
+
+    protected override async Task OnParametersSetAsync()
+        => _project = await Browser.GetProjectAsync(ProjectId, CancellationToken.None);
+}

@@ -1,0 +1,120 @@
+@page "/projects/{ProjectId:guid}/episodes/{EpisodeId:guid}"
+@using Mimir.Server.Capture
+@using Mimir.Server.Components.Episodes
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject EpisodeBrowser Browser
+@inject IEpisodeFeed Feed
+@inject NavigationManager Nav
+
+<PageTitle>Episode · Mimir</PageTitle>
+
+@if (_detail is null)
+{
+    <h1>Episode not found</h1>
+    <p class="lede">This Episode does not exist — most likely it was hard-deleted.</p>
+    <p><a href="@TimelineHref">Back to the timeline</a></p>
+}
+else
+{
+    var episode = _detail.Episode;
+
+    <nav class="crumbs"><a href="@TimelineHref">← Episodes</a></nav>
+    <h1 class="episode-title">@episode.SessionId</h1>
+
+    <dl class="episode-facts">
+        <div><dt>State</dt><dd>@EpisodeDisplay.StateLabel(episode.SealedAt, episode.SealReason)</dd></div>
+        <div><dt>Started</dt><dd>@EpisodeDisplay.Stamp(episode.StartedAt)</dd></div>
+        @if (episode.SealedAt is { } sealedAt)
+        {
+            <div><dt>Sealed</dt><dd>@EpisodeDisplay.Stamp(sealedAt)</dd></div>
+        }
+        <div><dt>Cwd</dt><dd>@episode.Cwd</dd></div>
+        <div><dt>Distillation</dt><dd>@episode.Distillation.ToString().ToLowerInvariant()</dd></div>
+    </dl>
+
+    @* Spec §8.2: hard delete of the whole Episode for sensitive content; its Events go with it. *@
+    <ConfirmDelete Label="Delete Episode"
+                   Prompt="@($"Hard-delete this Episode and its {_detail.Events.Count} Events forever?")"
+                   OnConfirm="DeleteEpisodeAsync" />
+
+    @if (_detail.Events.Count == 0)
+    {
+        <p class="empty-note">No Events captured yet.</p>
+    }
+    else
+    {
+        <ol class="event-stream">
+            @foreach (var evt in _detail.Events)
+            {
+                <li class="event-item">
+                    <div class="event-head">
+                        <span class="event-seq">#@evt.Seq</span>
+                        <span class="event-type">@evt.Type</span>
+                        @if (evt.Salient)
+                        {
+                            <span class="event-badge salient" title="Explicitly saved via mimir_remember (§4)">salient</span>
+                        }
+                        @if (EventPayload.IsTruncated(evt.Payload))
+                        {
+                            <span class="event-badge truncated"
+                                  title="Stored truncated per §4; the marker in the payload shows where.">
+                                truncated · full @evt.PayloadFullSize bytes
+                            </span>
+                        }
+                        <span class="event-at">@EpisodeDisplay.Stamp(evt.At)</span>
+                        <ConfirmDelete Label="Delete"
+                                       Prompt="@($"Hard-delete Event #{evt.Seq} forever?")"
+                                       OnConfirm="() => DeleteEventAsync(evt.Id)" />
+                    </div>
+                    <pre class="event-payload">@EventPayload.Pretty(evt.Payload)</pre>
+                </li>
+            }
+        </ol>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid ProjectId { get; set; }
+
+    [Parameter]
+    public Guid EpisodeId { get; set; }
+
+    private EpisodeDetail? _detail;
+    private IDisposable? _subscription;
+
+    private string TimelineHref => $"projects/{ProjectId}/episodes";
+
+    protected override void OnInitialized()
+        => _subscription = Feed.Subscribe(change =>
+        {
+            // A live session's Episode grows while this page is open (§8.2).
+            if (change.EpisodeId == EpisodeId)
+            {
+                _ = InvokeAsync(RefreshAsync);
+            }
+        });
+
+    protected override Task OnParametersSetAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _detail = await Browser.GetEpisodeAsync(EpisodeId, CancellationToken.None);
+        StateHasChanged();
+    }
+
+    // No explicit refresh after the delete: the browser announces it on the feed, and this
+    // page's own subscription is a subscriber like any other.
+    private Task DeleteEventAsync(Guid eventId)
+        => Browser.DeleteEventAsync(eventId, CancellationToken.None);
+
+    private async Task DeleteEpisodeAsync()
+    {
+        await Browser.DeleteEpisodeAsync(EpisodeId, CancellationToken.None);
+        Nav.NavigateTo(TimelineHref);
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+}

@@ -20,9 +20,17 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
 
+    private readonly EpisodeFeed _feed = new();
+
+    private readonly List<EpisodeChange> _announced = [];
+
     private MimirDbContext? _context;
 
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public ValueTask InitializeAsync()
+    {
+        _feed.Subscribe(_announced.Add);
+        return ValueTask.CompletedTask;
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -190,12 +198,64 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
         evt.Seq.ShouldBe(1);
     }
 
+    // Spec §8.2's timeline is live because every committed capture write is announced on the
+    // feed; a write that changed nothing stays quiet so circuits never re-query for no reason.
+
+    [Fact]
+    public async Task ANewSessionsEpisode_IsAnnouncedOnTheFeed()
+    {
+        var request = Request();
+
+        var episode = await Service().ResumeEpisodeAsync(request, Token);
+
+        _announced.ShouldBe([new EpisodeChange(episode.ProjectId, episode.Id)]);
+    }
+
+    [Fact]
+    public async Task ResumingAnExistingSession_StaysQuietOnTheFeed()
+    {
+        var request = Request();
+        await Service().ResumeEpisodeAsync(request, Token);
+        _announced.Clear();
+
+        await Service().ResumeEpisodeAsync(request, Token);
+
+        _announced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task AnAppendedEvent_IsAnnouncedOnTheFeed()
+    {
+        var request = Request();
+        await Service().ResumeEpisodeAsync(request, Token);
+        _announced.Clear();
+
+        var evt = await Service().AppendEventAsync(request, EventType.Stop, Token);
+
+        var episode = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == evt.EpisodeId, Token));
+        _announced.ShouldBe([new EpisodeChange(episode.ProjectId, episode.Id)]);
+    }
+
+    [Fact]
+    public async Task ASeal_IsAnnouncedOnce_AndALateDuplicateStaysQuiet()
+    {
+        var request = Request(payload: new { reason = "exit" });
+        var episode = await Service().ResumeEpisodeAsync(request, Token);
+        _announced.Clear();
+
+        await Service().SealEpisodeAsync(request, Token);
+        await Service().SealEpisodeAsync(Request(request.SessionId, new { reason = "late" }), Token);
+
+        _announced.ShouldBe([new EpisodeChange(episode.ProjectId, episode.Id)]);
+    }
+
     private CaptureService Service()
         => new(
             Context,
             new ProjectResolver(Context),
             Options.Create(new CaptureOptions()),
-            new FakeTimeProvider(Now));
+            new FakeTimeProvider(Now),
+            _feed);
 
     /// <summary>
     /// A request for a fresh session unless one is named. Identity and root are unique per call:

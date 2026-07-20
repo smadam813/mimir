@@ -1,0 +1,52 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject EpisodeBrowser Browser
+@inject IEpisodeFeed Feed
+@inject NavigationManager Nav
+
+@* Spec §8: the project-centric chassis — every surface is scoped by the Project chosen here.
+   Global is pinned on top by the query's ordering. *@
+<nav class="project-sidebar" aria-label="Projects">
+    <h2 class="sidebar-title">Projects</h2>
+    @foreach (var project in _projects)
+    {
+        <a class="sidebar-item @(IsSelected(project.Id) ? "selected" : null)"
+           href="@($"projects/{project.Id}/episodes")">
+            @project.DisplayName
+        </a>
+    }
+</nav>
+
+@code {
+    private IReadOnlyList<ProjectListItem> _projects = [];
+    private IDisposable? _subscription;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _projects = await Browser.ListProjectsAsync(CancellationToken.None);
+
+        // The first hook from a new repo creates its Project mid-session; any capture change may
+        // be that first hook, so re-query the (tiny) list and let the sidebar grow live.
+        _subscription = Feed.Subscribe(change => _ = InvokeAsync(RefreshAsync));
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private async Task RefreshAsync()
+    {
+        _projects = await Browser.ListProjectsAsync(CancellationToken.None);
+        StateHasChanged();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+        => StateHasChanged();
+
+    private bool IsSelected(Guid id)
+        => Nav.ToBaseRelativePath(Nav.Uri).StartsWith($"projects/{id}", StringComparison.OrdinalIgnoreCase);
+
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

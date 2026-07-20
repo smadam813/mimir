@@ -10,6 +10,7 @@ internal sealed class CaptureModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddSingleton<IEpisodeFeed, EpisodeFeed>();
         services.AddScoped<ProjectResolver>();
         services.AddScoped<CaptureService>();
     }
