@@ -2,8 +2,8 @@ namespace Mimir.Server.Storage.Entities;
 
 /// <summary>
 /// Spec §3: the repository a memory belongs to. Identity follows the repository, not the directory
-/// — two clones of one repository are one Project (§3.1). Full column set lands here; identity
-/// upgrade and clone merge are a follow-up ticket.
+/// — two clones of one repository are one Project (§3.1). A path-born row is upgraded in place
+/// when its remote is first reported, and colliding clones merge (see <c>ProjectResolver</c>).
 /// </summary>
 public sealed class Project
 {
@@ -29,4 +29,12 @@ public sealed class Project
     public string[] RootPaths { get; set; } = [];
 
     public required string DisplayName { get; set; }
+
+    /// <summary>
+    /// True when this Project was created without a known remote, so it carries the root it was
+    /// born at as its <see cref="Identity"/> (spec §3.1 fallback) — the identity sits in its own
+    /// <see cref="RootPaths"/>. A remote identity never does. Such a row is the one that can be
+    /// upgraded in place, or become the loser of a clone merge.
+    /// </summary>
+    public bool IsPathBorn => Array.IndexOf(RootPaths, Identity) >= 0;
 }

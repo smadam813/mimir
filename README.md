@@ -27,11 +27,13 @@ Compose needs `USERPROFILE` set to your home directory; Windows sets it for you.
 
 ### What works today
 
-The walking skeleton plus the capture path: the Compose topology, the server shell, a health strip
-whose Ollama and Storage tiles are real, and `mimir hook` recording sessions as Episodes with
-their Events (see below). The Distillation and Harvester tiles are inert placeholders, and there
-is no Project sidebar yet — Harvest, Distillation and Recall arrive with the tickets that own
-them.
+The walking skeleton plus the capture path and Harvest: the Compose topology, the server shell, a
+health strip whose Ollama, Storage and Harvester tiles are real, `mimir hook` recording sessions
+as Episodes with their Events (see below), and one-way ingestion of Claude Code's built-in
+auto-memory into HarvestedItems — scanned from the read-only `/harvest` mount every 5 minutes and
+opportunistically on every SessionEnd, with the first scan doubling as the Backfill. The
+Distillation tile is an inert placeholder, and there is no Project sidebar yet — Distillation and
+Recall arrive with the tickets that own them.
 
 ## Capturing your sessions
 

@@ -7,8 +7,9 @@ namespace Mimir.Server.Tests.Capture;
 
 /// <summary>
 /// Spec §3.1 server side: match a Project by identity, else by a known root, create it when new,
-/// and remember every root it has been seen at. (Identity upgrade and clone merge are a follow-up
-/// ticket — a root match deliberately leaves the stored identity alone.)
+/// remember every root it has been seen at, and upgrade a path-born Project in place when hook
+/// traffic first reports its remote identity. (The collision case — clone merge — is
+/// <see cref="ProjectMergeTests"/>.)
 /// </summary>
 public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
     : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
@@ -74,19 +75,19 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
-    public async Task AKnownRootWithADifferentIdentity_MatchesByRoot_AndKeepsItsStoredIdentity()
+    public async Task AKnownRootWithADifferentRemoteIdentity_MatchesByRoot_AndKeepsItsStoredIdentity()
     {
-        // The §3.1 fallback order: a Project first seen without a remote carries its root path as
-        // identity; when hook traffic later reports the real remote, the root still finds it.
-        // Upgrading the identity in place is the follow-up ticket, not this resolver.
+        // Only a path-born Project is ever upgraded (§3.1). A Project that already carries a
+        // remote identity keeps it when a hook reports a different remote from a shared root —
+        // re-identifying an established repository on one stray hook would be irreversible.
         var root = @"C:\git\pathborn";
-        var pathIdentity = Identity("pathborn-root");
-        var born = await Resolve(pathIdentity, root);
+        var remoteIdentity = Identity("pathborn-root");
+        var born = await Resolve(remoteIdentity, root);
 
         var found = await Resolve(Identity("pathborn-remote"), root);
 
         found.Id.ShouldBe(born.Id);
-        found.Identity.ShouldBe(pathIdentity);
+        found.Identity.ShouldBe(remoteIdentity);
     }
 
     [Fact]
@@ -115,6 +116,40 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
         var persisted = await fresh.Projects.SingleAsync(
             p => p.Identity == identity, TestContext.Current.CancellationToken);
         persisted.RootPaths.ShouldBe([@"C:\git\racing", @"D:\work\racing", @"E:\mirror\racing"]);
+    }
+
+    [Fact]
+    public async Task APathIdentityProject_ReportingARemote_IsUpgradedInPlace()
+    {
+        // §3.1 identity upgrade: identity follows the repository. A Project born without a remote
+        // carries its root as identity; the first hook that knows the real remote fixes the row —
+        // same row, id stable, roots kept.
+        var root = $@"C:\git\upgrade-{Guid.NewGuid():N}";
+        var born = await Resolve(root, root);
+        var remote = Identity("upgraded");
+
+        var upgraded = await Resolve(remote, root);
+
+        upgraded.Id.ShouldBe(born.Id);
+        upgraded.Identity.ShouldBe(remote);
+        upgraded.RootPaths.ShouldBe([root]);
+        upgraded.DisplayName.ShouldBe(remote.Split('/')[^1], "the display name follows the identity");
+    }
+
+    [Fact]
+    public async Task APathIdentityProject_SeenAtASecondRootWithoutARemote_KeepsItsPathIdentity()
+    {
+        // A hook that knows no remote sends its root as identity (§3.1 fallback). That reveals
+        // nothing about the repository — a path-born Project keeps its birth root as identity.
+        var rootA = $@"C:\git\stay-{Guid.NewGuid():N}";
+        var rootB = $@"D:\work\stay-{Guid.NewGuid():N}";
+        var born = await Resolve(rootA, rootA);
+        await Resolve(rootA, rootB);
+
+        var found = await Resolve(rootB, rootB);
+
+        found.Id.ShouldBe(born.Id);
+        found.Identity.ShouldBe(rootA);
     }
 
     [Fact]

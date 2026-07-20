@@ -134,9 +134,12 @@ internal sealed class CaptureService(
                 feed.Publish(new EpisodeChange(episode.ProjectId, episode.Id));
                 return episode;
             }
-            catch (DbUpdateException ex) when (ex.IsUniqueViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
+            catch (DbUpdateException ex) when (
+                (ex.IsUniqueViolation() || ex.IsForeignKeyViolation()) && attempt < DbRaces.CreateRaceMaxAttempts)
             {
-                // Lost the unique-session race to a concurrent hook; resume the winner's Episode.
+                // Unique violation: lost the unique-session race to a concurrent hook — resume the
+                // winner's Episode. FK violation: a concurrent clone merge (#17) deleted the
+                // resolved Project between resolve and insert — re-resolve; it finds the survivor.
                 db.Entry(episode).State = EntityState.Detached;
             }
         }

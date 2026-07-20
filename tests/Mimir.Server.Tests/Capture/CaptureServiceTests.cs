@@ -249,6 +249,32 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
         _announced.ShouldBe([new EpisodeChange(episode.ProjectId, episode.Id)]);
     }
 
+    [Fact]
+    public async Task SessionsInTwoClonesOfOneRepo_EndUpUnderOneProjectWithBothRoots()
+    {
+        // The #17 demo: a session in clone A before its remote is known (path identity), a
+        // session in clone B that reports the remote, then hook traffic from clone A learning the
+        // remote too. Identity follows the repository (§3.1) — one Project, both roots, every
+        // Episode attached to it.
+        var suffix = Guid.NewGuid().ToString("N");
+        var remote = $"github.com/test/demo-{suffix}";
+        var rootA = $@"C:\git\demo-{suffix}";
+        var rootB = $@"D:\work\demo-{suffix}";
+
+        var inCloneA = await Service().ResumeEpisodeAsync(Request(identity: rootA, root: rootA), Token);
+        var inCloneB = await Service().ResumeEpisodeAsync(Request(identity: remote, root: rootB), Token);
+        var backInCloneA = await Service().ResumeEpisodeAsync(Request(identity: remote, root: rootA), Token);
+
+        var project = await FromDb(db => db.Projects.SingleAsync(p => p.Identity == remote, Token));
+        project.RootPaths.ShouldBe([rootB, rootA]);
+        var episodeProjects = await FromDb(db => db.Episodes
+            .Where(e => new[] { inCloneA.Id, inCloneB.Id, backInCloneA.Id }.Contains(e.Id))
+            .Select(e => e.ProjectId)
+            .Distinct()
+            .ToListAsync(Token));
+        episodeProjects.ShouldBe([project.Id], "two clones of one repository are one Project");
+    }
+
     private CaptureService Service()
         => new(
             Context,
@@ -262,16 +288,20 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
     /// the database is shared by the whole class, and §3.1 root-matching would otherwise weld
     /// every test's session onto the first test's Project.
     /// </summary>
-    private static HookEventRequest Request(string? sessionId = null, object? payload = null)
+    private static HookEventRequest Request(
+        string? sessionId = null,
+        object? payload = null,
+        string? identity = null,
+        string? root = null)
     {
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload ?? new { }));
         var suffix = Guid.NewGuid().ToString("N");
         return new HookEventRequest
         {
             SessionId = sessionId ?? $"sess-{suffix}",
-            Cwd = $@"C:\git\capture-{suffix}",
-            ProjectIdentity = $"github.com/test/capture-{suffix}",
-            ProjectRoot = $@"C:\git\capture-{suffix}",
+            Cwd = root ?? $@"C:\git\capture-{suffix}",
+            ProjectIdentity = identity ?? $"github.com/test/capture-{suffix}",
+            ProjectRoot = root ?? $@"C:\git\capture-{suffix}",
             HookEvent = HookEvents.PostToolUse,
             Payload = document.RootElement.Clone(),
         };

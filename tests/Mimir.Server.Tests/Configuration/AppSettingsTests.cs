@@ -42,4 +42,14 @@ public class AppSettingsTests
         shipped.PayloadHeadBytes.ShouldBe(expected.PayloadHeadBytes);
         shipped.PayloadTailBytes.ShouldBe(expected.PayloadTailBytes);
     }
+
+    [Fact]
+    public void ShippedHarvestSection_MatchesTheCodeDefaults()
+    {
+        var shipped = AppSettings.GetSection(HarvestOptions.SectionName).Get<HarvestOptions>().ShouldNotBeNull();
+        var expected = new HarvestOptions();
+
+        shipped.Root.ShouldBe(expected.Root);
+        shipped.ScanInterval.ShouldBe(expected.ScanInterval);
+    }
 }
