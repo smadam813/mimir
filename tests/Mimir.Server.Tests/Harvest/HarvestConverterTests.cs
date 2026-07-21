@@ -148,6 +148,10 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
         (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == poisoned.Id, Token)))
             .ConvertedAt.ShouldBeNull("the still-null marker is what retries it next tick");
         (await FromDb(db => db.Wisdom.CountAsync(w => w.ScopeProjectId == project, Token))).ShouldBe(1);
+
+        // Leave nothing pending behind: the class shares one database, and the exactly-once
+        // test counts every pending item — a leftover here would inflate it, order permitting.
+        await Context.HarvestedItems.Where(i => i.Id == poisoned.Id).ExecuteDeleteAsync(Token);
     }
 
     private HarvestConverter Converter(HarvestOptions? options = null)
