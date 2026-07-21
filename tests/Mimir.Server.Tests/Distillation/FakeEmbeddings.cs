@@ -14,14 +14,27 @@ internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<flo
 {
     private readonly Dictionary<string, float[]> _mapped = new(StringComparer.Ordinal);
 
+    private readonly HashSet<string> _poisoned = new(StringComparer.Ordinal);
+
     public void Map(string text, float[] vector) => _mapped[text] = vector;
+
+    /// <summary>Any batch containing this text throws — a deterministically unembeddable item.</summary>
+    public void Poison(string text) => _poisoned.Add(text);
 
     public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
         IEnumerable<string> values,
         EmbeddingGenerationOptions? options = null,
         CancellationToken cancellationToken = default)
-        => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-            values.Select(v => new Embedding<float>(VectorFor(v)))));
+    {
+        var texts = values.ToList();
+        if (texts.Any(_poisoned.Contains))
+        {
+            throw new InvalidOperationException("poisoned text cannot embed");
+        }
+
+        return Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
+            texts.Select(v => new Embedding<float>(VectorFor(v)))));
+    }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

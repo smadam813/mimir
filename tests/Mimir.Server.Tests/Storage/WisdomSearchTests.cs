@@ -36,7 +36,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task RrfFusion_RanksADualLegRowAboveEitherSingleLegRow()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var vectorOnly = await AddWisdomAsync(TestVectors.WithCosine(0.95), "unrelated filler one");
         var dualLeg = await AddWisdomAsync(TestVectors.WithCosine(0.9), "zebra stripes pattern");
         var outOfBothLegs = await AddWisdomAsync(TestVectors.WithCosine(0.5), "unrelated filler two");
@@ -57,7 +57,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task FusedScores_AreRankFusionValues_NeverACosineScale()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         await AddWisdomAsync(TestVectors.WithCosine(0.99), "zebra herd zebra");
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "zebra", Token);
@@ -73,7 +73,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Cosine_IsTheVectorLegsSimilarity_AndNullOffTheVectorLeg()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var near = await AddWisdomAsync(TestVectors.WithCosine(0.6), "quagga sighting");
         var nearer = await AddWisdomAsync(TestVectors.WithCosine(0.8), "unrelated filler");
         var offLeg = await AddWisdomAsync(TestVectors.WithCosine(-0.5), "quagga quagga quagga");
@@ -89,7 +89,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task RetiredWisdom_IsInvisibleToBothLegs()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var live = await AddWisdomAsync(TestVectors.WithCosine(0.7), "okapi facts");
         await AddWisdomAsync(TestVectors.WithCosine(0.99), "okapi okapi okapi", retiredAt: Now);
 
@@ -118,14 +118,6 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
         Context.Wisdom.Add(wisdom);
         await Context.SaveChangesAsync(Token);
         return wisdom;
-    }
-
-    /// <summary>Leg membership is global to the table, so each test starts from clean Wisdom.</summary>
-    private async Task ResetWisdomAsync()
-    {
-        await Context.Provenance.ExecuteDeleteAsync(Token);
-        await Context.WisdomVersions.ExecuteDeleteAsync(Token);
-        await Context.Wisdom.ExecuteDeleteAsync(Token);
     }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;

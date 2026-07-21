@@ -16,7 +16,7 @@ internal static partial class HarvestCandidates
 {
     public static IReadOnlyList<HarvestCandidate> Of(string content, int cap)
     {
-        var lines = content.Replace("\r\n", "\n").Split('\n');
+        var lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var bodyStart = FrontmatterEnd(lines);
         var kind = KindOf(lines[..bodyStart]);
 
@@ -27,20 +27,29 @@ internal static partial class HarvestCandidates
         {
             var text = string.Join('\n', section).Trim();
             section.Clear();
-            if (text.Length > 0)
+            // The capped text is what must be non-empty: a cap of 1 landing on a surrogate
+            // pair caps to nothing, and an empty candidate has no business at the gate.
+            if (text.Length > 0 && Capped(text, cap) is { Length: > 0 } capped)
             {
-                candidates.Add(new HarvestCandidate(kind, Capped(text, cap)));
+                candidates.Add(new HarvestCandidate(kind, capped));
             }
         }
 
-        var inFence = false;
+        FenceRun? fence = null;
         foreach (var line in lines[bodyStart..])
         {
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            if (FenceRun.Of(line) is { } run)
             {
-                inFence = !inFence;
+                if (fence is null)
+                {
+                    fence = run;
+                }
+                else if (run.Closes(fence.Value))
+                {
+                    fence = null;
+                }
             }
-            else if (!inFence && IsSectionHeading(line))
+            else if (fence is null && IsSectionHeading(line))
             {
                 Flush();
             }
@@ -52,14 +61,70 @@ internal static partial class HarvestCandidates
         return candidates;
     }
 
-    /// <summary>H1/H2 start a new candidate (§5); deeper headings stay inside their section.</summary>
+    /// <summary>
+    /// H1/H2 start a new candidate (§5); deeper headings stay inside their section. Up to three
+    /// leading spaces still make a heading; four make an indented code block (CommonMark).
+    /// </summary>
     private static bool IsSectionHeading(string line)
-        => line.StartsWith("# ", StringComparison.Ordinal)
-            || line.StartsWith("## ", StringComparison.Ordinal);
+    {
+        var indent = LeadingSpaces(line);
+        if (indent > 3)
+        {
+            return false;
+        }
+
+        var rest = line.AsSpan(indent);
+        return rest.StartsWith("# ") || rest.StartsWith("## ");
+    }
+
+    /// <summary>
+    /// A backtick or tilde code-fence delimiter line: fences only close on the same delimiter at
+    /// the opening run's length or more, so nested fences of differing length and tilde fences
+    /// both keep their <c>#</c> lines from splitting sections.
+    /// </summary>
+    private readonly record struct FenceRun(char Delimiter, int Length, bool Bare)
+    {
+        public static FenceRun? Of(string line)
+        {
+            var indent = LeadingSpaces(line);
+            if (indent > 3 || indent == line.Length || (line[indent] != '`' && line[indent] != '~'))
+            {
+                return null;
+            }
+
+            var delimiter = line[indent];
+            var end = indent;
+            while (end < line.Length && line[end] == delimiter)
+            {
+                end++;
+            }
+
+            return end - indent >= 3
+                ? new FenceRun(delimiter, end - indent, line[end..].Trim().Length == 0)
+                : null;
+        }
+
+        /// <summary>A closing fence is bare (no info string), matching the opener's delimiter.</summary>
+        public bool Closes(FenceRun open)
+            => Bare && Delimiter == open.Delimiter && Length >= open.Length;
+    }
+
+    private static int LeadingSpaces(string line)
+    {
+        var i = 0;
+        while (i < line.Length && line[i] == ' ')
+        {
+            i++;
+        }
+
+        return i;
+    }
 
     /// <summary>
     /// The first body line: past the closing <c>---</c> of a leading frontmatter block, or 0 when
-    /// there is none (an unclosed fence is body, not frontmatter that swallows the file).
+    /// there is none. Only a block of YAML-mapping-shaped lines counts as frontmatter — a file
+    /// that merely opens with a <c>---</c> horizontal rule is all body, never silently swallowed.
+    /// (An unclosed block is body too.)
     /// </summary>
     private static int FrontmatterEnd(string[] lines)
     {
@@ -73,6 +138,11 @@ internal static partial class HarvestCandidates
             if (lines[i].Trim() == "---")
             {
                 return i + 1;
+            }
+
+            if (lines[i].Trim().Length > 0 && !FrontmatterLine().IsMatch(lines[i]))
+            {
+                return 0;
             }
         }
 
@@ -113,4 +183,8 @@ internal static partial class HarvestCandidates
 
     [GeneratedRegex(@"^\s*type:\s*(.+)$")]
     private static partial Regex TypeLine();
+
+    /// <summary>A key or list item, the two line shapes real frontmatter is made of.</summary>
+    [GeneratedRegex(@"^\s*([A-Za-z0-9_.-]+\s*:(\s|$)|-\s)")]
+    private static partial Regex FrontmatterLine();
 }

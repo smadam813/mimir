@@ -182,4 +182,66 @@ public class HarvestCandidatesTests
         candidates[0].Kind.ShouldBe(WisdomKind.Preference);
         candidates[0].Text.ShouldBe("# A\nbody");
     }
+
+    [Fact]
+    public void ClassicMacLineEndings_AreHandled()
+    {
+        var candidates = HarvestCandidates.Of("# A\rbody\r# B\rmore", Cap);
+
+        candidates.Select(c => c.Text).ShouldBe(["# A\nbody", "# B\nmore"]);
+    }
+
+    [Fact]
+    public void AFileOpeningWithAHorizontalRule_IsAllBody_NeverSwallowedAsFrontmatter()
+    {
+        // Two markdown horizontal rules, no frontmatter: nothing here is key: value shaped,
+        // so no content may be silently dropped between the --- lines.
+        var content = "---\n# Real Heading\nSome real content here.\n---\n## Another Heading\nMore real content.";
+
+        var candidates = HarvestCandidates.Of(content, Cap);
+
+        candidates.Select(c => c.Text).ShouldBe(
+        [
+            "---",
+            "# Real Heading\nSome real content here.\n---",
+            "## Another Heading\nMore real content.",
+        ]);
+    }
+
+    [Fact]
+    public void HeadingsIndentedUpToThreeSpaces_StillSplit()
+    {
+        var candidates = HarvestCandidates.Of("# Notes\nfirst\n ## Indented heading\nsecond", Cap);
+
+        candidates.Select(c => c.Text).ShouldBe(
+            ["# Notes\nfirst", "## Indented heading\nsecond"]);
+    }
+
+    [Fact]
+    public void FourSpacesOfIndent_IsACodeBlock_NotAHeading()
+    {
+        HarvestCandidates.Of("# Notes\nbody\n    # an indented code line", Cap).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void TildeFences_AlsoGuardHeadings()
+    {
+        HarvestCandidates.Of("# Section\n~~~\n# not a heading\n~~~\nafter", Cap).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void ANestedShorterFence_DoesNotCloseTheOuterOne()
+    {
+        // A four-backtick fence documenting three-backtick fence syntax — the inner runs are
+        // content, so the # line inside must not split.
+        var content = "# Docs\n````\n```\n# inside the example\n```\n````\nafter";
+
+        HarvestCandidates.Of(content, Cap).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void ACapLandingInsideASurrogatePair_NeverEmitsAnEmptyCandidate()
+    {
+        HarvestCandidates.Of("🙂 emoji first", cap: 1).ShouldBeEmpty();
+    }
 }

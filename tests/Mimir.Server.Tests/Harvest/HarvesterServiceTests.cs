@@ -108,7 +108,38 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         Directory.CreateDirectory(_root); // so DisposeAsync still has something to delete
     }
 
-    private async Task StartServiceAsync()
+    [Fact]
+    public async Task AConversionFailure_DegradesTheTile_ButKeepsTheFreshScanFigures()
+    {
+        WriteMemoryFile("MEMORY.md", "scanned fine, never embedded");
+
+        // The scan itself succeeds; only the §5 handoff to the Merge Gate fails. The tile must
+        // say so without discarding what the scan just found.
+        await StartServiceAsync(new ThrowingEmbeddings());
+
+        var degraded = await TileAsync(t => t.State == HealthTileState.Degraded);
+        degraded.Items.ShouldBe(1, "the scan succeeded and its figures must survive the conversion failure");
+        degraded.Changed.ShouldBe(1);
+        degraded.LastScanAt.ShouldBe(_clock.GetUtcNow());
+        degraded.Summary.ShouldBe("embedding model offline");
+    }
+
+    private sealed class ThrowingEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
+    {
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values,
+            EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("embedding model offline");
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private async Task StartServiceAsync(IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
         if (fixture.UnavailableReason is { } reason)
         {
@@ -125,7 +156,7 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         services.AddScoped<HarvestConverter>();
         services.AddScoped<MergeGate>();
         services.AddScoped<WisdomSearch>();
-        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(new FakeEmbeddings());
+        services.AddSingleton(embeddings ?? new FakeEmbeddings());
         services.AddSingleton(Options.Create(new SearchOptions()));
         services.AddSingleton(Options.Create(new DistillationOptions()));
         services.AddSingleton(Options.Create(new HarvestOptions { Root = _root }));

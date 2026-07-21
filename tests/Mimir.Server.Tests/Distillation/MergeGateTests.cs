@@ -39,7 +39,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task NoMatch_InsertsNewWisdom_AtReinforcementOneVersionOne()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var item = await AddHarvestedItemAsync();
         var text = $"Prefers tabs over spaces {Guid.NewGuid():N}";
 
@@ -67,7 +67,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ANearDuplicate_Reinforces_KeepingTheExistingText()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var first = await AddHarvestedItemAsync();
         var second = await AddHarvestedItemAsync(first.ProjectId);
         var originalText = $"Original wording {Guid.NewGuid():N}";
@@ -98,7 +98,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task JustBelowTheThreshold_InsertsASecondWisdom()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var item = await AddHarvestedItemAsync();
         var originalText = $"First fact {Guid.NewGuid():N}";
         var similarText = $"Nearly related fact {Guid.NewGuid():N}";
@@ -120,7 +120,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AWordForWordFtsMatch_WithADistantEmbedding_DoesNotReinforce()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         // The §3 score-scale rule at the gate: identical wording makes the FTS leg rank the pair
         // as hard as it can, but the threshold reads cosine — a distant embedding means no match.
         var item = await AddHarvestedItemAsync();
@@ -142,7 +142,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ReinforcingFromTheSameHarvestedItem_DoesNotDuplicateProvenance()
     {
-        await ResetWisdomAsync();
+        await Context.ResetWisdomAsync(Token);
         var item = await AddHarvestedItemAsync();
         var originalText = $"One fact {Guid.NewGuid():N}";
         var nearDuplicate = $"Same fact again {Guid.NewGuid():N}";
@@ -160,17 +160,36 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             .ShouldBe(1, "Provenance is unioned (§6): the same link is recorded once");
     }
 
-    /// <summary>
-    /// Tests map embeddings into the same 0/1 plane, so a prior test's Wisdom could out-match a
-    /// later test's candidate. Each test starts from clean Wisdom tables instead.
-    /// </summary>
-    private async Task ResetWisdomAsync()
+    [Fact]
+    public async Task ADistillerShapedCandidate_RecordsOneProvenanceRowPerEvent_Unioned()
     {
-        await Context.Provenance.ExecuteDeleteAsync(Token);
-        await Context.WisdomVersions.ExecuteDeleteAsync(Token);
-        await Context.Wisdom.ExecuteDeleteAsync(Token);
+        await Context.ResetWisdomAsync(Token);
+        // The §6 Distiller output shape: a candidate carries its Episode and plural provenance
+        // event ids. Each Event gets its own row; a reinforcing admission unions, not appends.
+        var (projectId, episodeId, eventIds) = await AddEpisodeWithEventsAsync(3);
+        var originalText = $"Sessions produce wisdom {Guid.NewGuid():N}";
+        var nearDuplicate = $"Wisdom comes from sessions {Guid.NewGuid():N}";
+        _embeddings.Map(originalText, TestVectors.Basis);
+        _embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.9));
+
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Lesson, projectId, originalText,
+            EpisodeId: episodeId, EventIds: [eventIds[0], eventIds[1]]));
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Lesson, projectId, nearDuplicate,
+            EpisodeId: episodeId, EventIds: [eventIds[1], eventIds[2]]));
+
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == projectId, Token));
+        wisdom.Reinforcement.ShouldBe(2);
+        var provenance = await FromDb(db => db.Provenance
+            .Where(p => p.WisdomId == wisdom.Id)
+            .ToListAsync(Token));
+        provenance.Select(p => p.EventId).ShouldBe(
+            [eventIds[0], eventIds[1], eventIds[2]], ignoreOrder: true);
+        provenance.ShouldAllBe(p => p.EpisodeId == episodeId);
     }
 
+    /// <summary>The gate saves per admission itself, so the helper only builds and calls it.</summary>
     private async Task AdmitAsync(WisdomCandidate candidate)
     {
         var gate = new MergeGate(
@@ -180,7 +199,36 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             Options.Create(new DistillationOptions()),
             _clock);
         await gate.AdmitAsync(candidate, Token);
+    }
+
+    /// <summary>A fresh Project with one Episode carrying <paramref name="eventCount"/> Events.</summary>
+    private async Task<(Guid ProjectId, Guid EpisodeId, IReadOnlyList<Guid> EventIds)> AddEpisodeWithEventsAsync(
+        int eventCount)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var project = TestData.NewProject("gate");
+        var episode = new Episode
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = $"sess-{suffix}",
+            ProjectId = project.Id,
+            StartedAt = Now,
+            Cwd = $@"C:\git\gate-{suffix}",
+        };
+        var events = Enumerable.Range(1, eventCount).Select(seq => new Event
+        {
+            Id = Guid.CreateVersion7(),
+            EpisodeId = episode.Id,
+            Seq = seq,
+            Type = EventType.UserPromptSubmit,
+            At = Now,
+            Payload = """{"prompt":"remember this"}""",
+            PayloadFullSize = 28,
+        }).ToList();
+        Context.AddRange(project, episode);
+        Context.AddRange(events);
         await Context.SaveChangesAsync(Token);
+        return (project.Id, episode.Id, events.Select(e => e.Id).ToList());
     }
 
     /// <summary>An item on its own fresh Project, so per-scope assertions see only this test.</summary>
@@ -189,12 +237,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         var suffix = Guid.NewGuid().ToString("N");
         if (projectId is null)
         {
-            var project = new Project
-            {
-                Id = Guid.CreateVersion7(),
-                Identity = $"github.com/test/gate-{suffix}",
-                DisplayName = $"gate-{suffix}",
-            };
+            var project = TestData.NewProject("gate");
             Context.Projects.Add(project);
             projectId = project.Id;
         }

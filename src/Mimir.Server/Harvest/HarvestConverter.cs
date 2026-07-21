@@ -1,8 +1,11 @@
+using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
+using Pgvector;
 
 namespace Mimir.Server.Harvest;
 
@@ -16,6 +19,7 @@ namespace Mimir.Server.Harvest;
 internal sealed class HarvestConverter(
     MimirDbContext db,
     MergeGate gate,
+    IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IOptions<HarvestOptions> options,
     TimeProvider clock,
     ILogger<HarvestConverter> logger)
@@ -32,33 +36,69 @@ internal sealed class HarvestConverter(
             .Select(i => i.Id)
             .ToListAsync(cancellationToken);
 
+        var converted = 0;
+        ExceptionDispatchInfo? firstFailure = null;
         foreach (var itemId in pending)
         {
-            await ConvertAsync(itemId, cancellationToken);
+            try
+            {
+                await ConvertAsync(itemId, cancellationToken);
+                converted++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // One item must not dam the queue: the rest still convert, the failure
+                // resurfaces below so the tile degrades, and the still-null marker retries
+                // this item next tick.
+                logger.LogWarning(ex, "Converting harvested item {ItemId} failed; continuing with the rest", itemId);
+                firstFailure ??= ExceptionDispatchInfo.Capture(ex);
+            }
+            finally
+            {
+                // The scoped context outlives the whole run, and no entity is needed across
+                // items — a failed item's rolled-back rows especially must not stay tracked.
+                db.ChangeTracker.Clear();
+            }
         }
 
-        if (pending.Count > 0)
+        if (converted > 0)
         {
-            logger.LogInformation("Converted {Items} harvested item(s) through the Merge Gate", pending.Count);
+            logger.LogInformation("Converted {Items} harvested item(s) through the Merge Gate", converted);
         }
 
-        return pending.Count;
+        firstFailure?.Throw();
+        return converted;
     }
 
     private async Task ConvertAsync(Guid itemId, CancellationToken cancellationToken)
     {
+        var item = await db.HarvestedItems.FirstAsync(i => i.Id == itemId, cancellationToken);
+        var candidates = HarvestCandidates.Of(item.Content, options.Value.CandidateCap);
+
+        // Embeddings depend only on the text, so the whole item embeds in one batched
+        // round-trip up front — no model calls while the transaction below holds the connection.
+        var vectors = candidates.Count == 0
+            ? []
+            : (await embeddings.GenerateAsync(
+                    candidates.Select(c => c.Text), cancellationToken: cancellationToken))
+                .Select(e => new Vector(e.Vector))
+                .ToList();
+
         // One transaction per item: the marker commits with the item's Wisdom or not at all. The
-        // save after each candidate stays inside it — flushed rows are visible to the next
+        // gate's save after each candidate stays inside it — flushed rows are visible to the next
         // candidate's search on this connection, so near-identical sections of one file merge
         // instead of duplicating.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var item = await db.HarvestedItems.FirstAsync(i => i.Id == itemId, cancellationToken);
-
-        foreach (var (kind, text) in HarvestCandidates.Of(item.Content, options.Value.CandidateCap))
+        foreach (var (candidate, embedding) in candidates.Zip(vectors))
         {
-            var candidate = new WisdomCandidate(kind, item.ProjectId, text, HarvestedItemId: item.Id);
-            await gate.AdmitAsync(candidate, cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
+            await gate.AdmitAsync(
+                new WisdomCandidate(candidate.Kind, item.ProjectId, candidate.Text, HarvestedItemId: item.Id),
+                embedding,
+                cancellationToken);
         }
 
         item.ConvertedAt = clock.GetUtcNow();

@@ -41,6 +41,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task PendingVersions_FlowThroughTheGateExactlyOnce()
     {
+        await Context.ResetWisdomAsync(Token);
         // Rows born without the marker are exactly what the Backfill left behind before this
         // ticket shipped — the first run must carry them to the gate, the second must not.
         var project = await AddProjectAsync();
@@ -63,6 +64,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ReharvestedEquivalentContent_BumpsReinforcement()
     {
+        await Context.ResetWisdomAsync(Token);
         var project = await AddProjectAsync();
         var original = $"The build needs Postgres running {Guid.NewGuid():N}";
         var reworded = $"Postgres must be up for the build {Guid.NewGuid():N}";
@@ -87,6 +89,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Sections_BecomeCandidates_WithTheFrontmatterKindAndTheFilesProjectScope()
     {
+        await Context.ResetWisdomAsync(Token);
         var project = await AddProjectAsync();
         var suffix = Guid.NewGuid().ToString("N");
         await AddItemAsync(project, "c/memory/prefs.md", $"""
@@ -115,6 +118,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task OversizedSections_ArriveAtTheGateCapped()
     {
+        await Context.ResetWisdomAsync(Token);
         var project = await AddProjectAsync();
         await AddItemAsync(project, "d/memory/MEMORY.md", new string('y', 500));
 
@@ -122,6 +126,28 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
 
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == project, Token));
         wisdom.Text.Length.ShouldBe(64);
+    }
+
+    [Fact]
+    public async Task AFailingItem_DoesNotBlockTheItemsBehindIt()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        var unembeddable = $"unembeddable {Guid.NewGuid():N}";
+        _embeddings.Poison(unembeddable);
+        var poisoned = await AddItemAsync(project, "e/memory/poisoned.md", unembeddable);
+        var healthy = await AddItemAsync(
+            project, "e/memory/healthy.md", $"Fact gamma {Guid.NewGuid():N}", Now.AddMinutes(1));
+
+        // The failure still surfaces — that is what degrades the tile — but only after the
+        // items ordered behind the poisoned one got their turn at the gate.
+        await Should.ThrowAsync<InvalidOperationException>(() => Converter().ConvertPendingAsync(Token));
+
+        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == healthy.Id, Token)))
+            .ConvertedAt.ShouldNotBeNull();
+        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == poisoned.Id, Token)))
+            .ConvertedAt.ShouldBeNull("the still-null marker is what retries it next tick");
+        (await FromDb(db => db.Wisdom.CountAsync(w => w.ScopeProjectId == project, Token))).ShouldBe(1);
     }
 
     private HarvestConverter Converter(HarvestOptions? options = null)
@@ -135,6 +161,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
         return new HarvestConverter(
             Context,
             gate,
+            _embeddings,
             Options.Create(options ?? new HarvestOptions()),
             _clock,
             NullLogger<HarvestConverter>.Instance);
@@ -142,13 +169,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
 
     private async Task<Guid> AddProjectAsync()
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var project = new Project
-        {
-            Id = Guid.CreateVersion7(),
-            Identity = $"github.com/test/convert-{suffix}",
-            DisplayName = $"convert-{suffix}",
-        };
+        var project = TestData.NewProject("convert");
         Context.Projects.Add(project);
         await Context.SaveChangesAsync(Token);
         return project.Id;

@@ -89,12 +89,7 @@ public sealed class ProvenanceDeletionTests(CaptureDatabaseFixture fixture)
     private async Task<ReferencedRecords> AddReferencedRecordsAsync()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        var project = new Project
-        {
-            Id = Guid.CreateVersion7(),
-            Identity = $"github.com/test/provenance-{suffix}",
-            DisplayName = $"provenance-{suffix}",
-        };
+        var project = TestData.NewProject("provenance");
         var episode = new Episode
         {
             Id = Guid.CreateVersion7(),
