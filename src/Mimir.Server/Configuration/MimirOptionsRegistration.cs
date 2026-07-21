@@ -20,6 +20,8 @@ public static class MimirOptionsRegistration
         services.AddSection<ModelOptions>(configuration, ModelOptions.SectionName);
         services.AddSection<CaptureOptions>(configuration, CaptureOptions.SectionName);
         services.AddSection<HarvestOptions>(configuration, HarvestOptions.SectionName);
+        services.AddSection<SearchOptions>(configuration, SearchOptions.SectionName);
+        services.AddSection<DistillationOptions>(configuration, DistillationOptions.SectionName);
         return services;
     }
 

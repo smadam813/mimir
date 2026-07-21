@@ -20,4 +20,11 @@ public sealed class HarvestOptions
     /// <summary>Steady-state rescan interval; SessionEnd scans opportunistically in between.</summary>
     [Range(typeof(TimeSpan), "00:00:01", "1.00:00:00")]
     public TimeSpan ScanInterval { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Hard cap on one harvested Merge-Gate candidate (§5, §11). The gate's LLM rewrite is what
+    /// eventually compacts oversized text; mechanically it is simply cut here.
+    /// </summary>
+    [Range(1, 100_000)]
+    public int CandidateCap { get; init; } = 2000;
 }

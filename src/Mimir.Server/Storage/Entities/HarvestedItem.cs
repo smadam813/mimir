@@ -34,4 +34,12 @@ public sealed class HarvestedItem
     /// this marker stays on the old row as history.
     /// </summary>
     public DateTimeOffset? GoneAt { get; set; }
+
+    /// <summary>
+    /// The §5 conversion marker: when this version's candidates went through the Merge Gate.
+    /// Null means pending, which is what carries versions stored before the Wisdom tier shipped
+    /// (the Backfill's memory) to the gate — they never change again, so no rescan would. Set in
+    /// the same transaction as the gate's writes, making the handoff exactly-once across restarts.
+    /// </summary>
+    public DateTimeOffset? ConvertedAt { get; set; }
 }

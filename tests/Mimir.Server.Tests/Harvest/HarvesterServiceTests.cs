@@ -4,13 +4,16 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.AI;
 using Mimir.Contracts.Health;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
+using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 using Mimir.Server.Health;
 using Mimir.Server.Storage;
 using Mimir.Server.Tests.Capture;
+using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Harvest;
 
@@ -117,6 +120,14 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
             options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector()));
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
+        // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's
+        // whole graph rides along — with deterministic fake embeddings in place of Ollama.
+        services.AddScoped<HarvestConverter>();
+        services.AddScoped<MergeGate>();
+        services.AddScoped<WisdomSearch>();
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(new FakeEmbeddings());
+        services.AddSingleton(Options.Create(new SearchOptions()));
+        services.AddSingleton(Options.Create(new DistillationOptions()));
         services.AddSingleton(Options.Create(new HarvestOptions { Root = _root }));
         services.AddSingleton<TimeProvider>(_clock);
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));

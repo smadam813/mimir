@@ -59,6 +59,13 @@ internal sealed class HarvesterService(
             var scanner = scope.ServiceProvider.GetRequiredService<HarvestScanner>();
             var result = await scanner.ScanAsync(cancellationToken);
 
+            // The §5 handoff rides the scan cadence: whatever versions this or any earlier scan
+            // stored (the Backfill included) go through the Merge Gate now. A failure here — the
+            // embedding model still provisioning, say — degrades the tile and retries soon; the
+            // conversion marker means the retry picks up exactly where this run stopped.
+            var converter = scope.ServiceProvider.GetRequiredService<HarvestConverter>();
+            await converter.ConvertPendingAsync(cancellationToken);
+
             health.Update(snapshot => snapshot with
             {
                 Harvester = new HarvesterTile
