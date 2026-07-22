@@ -102,6 +102,25 @@ public sealed class PromptRecallServiceTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task ZeroNormEmbeddingsNaNCosine_NeverOpensTheGate()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        // pgvector computes a literal NaN cosine for a zero-magnitude embedding (no zero-norm
+        // guard in its distance function). The gate's affirmative >= must hold shut for NaN —
+        // a `< threshold` reading would let the degenerate row slip through.
+        await AddWisdomAsync(
+            project.Id, "unrelated filler one", vector: new float[TestVectors.Dimensions]);
+        var sessionId = NewSessionId();
+
+        var injection = await ComposeAsync(project.Id, sessionId);
+
+        injection.ShouldBeEmpty();
+        (await FromDb(db => db.Injections.CountAsync(i => i.SessionId == sessionId, Token)))
+            .ShouldBe(0);
+    }
+
+    [Fact]
     public async Task AnotherProjectsWisdom_NeverOpensTheGate_NorInjects()
     {
         await Context.ResetWisdomAsync(Token);
@@ -177,7 +196,8 @@ public sealed class PromptRecallServiceTests(CaptureDatabaseFixture fixture)
         return project;
     }
 
-    private async Task<Wisdom> AddWisdomAsync(Guid scopeProjectId, string text, double cosine)
+    private async Task<Wisdom> AddWisdomAsync(
+        Guid scopeProjectId, string text, double cosine = 0.0, float[]? vector = null)
     {
         var wisdom = new Wisdom
         {
@@ -185,7 +205,7 @@ public sealed class PromptRecallServiceTests(CaptureDatabaseFixture fixture)
             Kind = WisdomKind.Fact,
             ScopeProjectId = scopeProjectId,
             Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
+            Embedding = new Vector(vector ?? TestVectors.WithCosine(cosine)),
             Reinforcement = 1,
             LastConfirmedAt = Now,
         };

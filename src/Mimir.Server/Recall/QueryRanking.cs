@@ -10,7 +10,9 @@ namespace Mimir.Server.Recall;
 
 /// <summary>
 /// One query-ranked Wisdom: the §7 score that ordered it, the vector leg's cosine for the caller's
-/// threshold (null off that leg, per the §3 score-scale rule), and what rendering needs.
+/// threshold (null off that leg, per the §3 score-scale rule), what rendering needs, and whether
+/// the row sits in the affinity context's ambient candidate universe — an annotation, not a
+/// filter, so consumers that reach everything (<c>mimir_search</c>) can ignore it.
 /// </summary>
 internal sealed record RankedWisdom(
     Guid WisdomId,
@@ -19,7 +21,8 @@ internal sealed record RankedWisdom(
     WisdomKind Kind,
     Guid ScopeProjectId,
     string Text,
-    DateTimeOffset LastConfirmedAt)
+    DateTimeOffset LastConfirmedAt,
+    bool AmbientEligible)
 {
     public InjectionEntry ToInjectionEntry()
         => new(WisdomId, Score, Kind, ScopeProjectId == Project.GlobalId, LastConfirmedAt, Text);
@@ -30,7 +33,8 @@ internal sealed record RankedWisdom(
 /// <c>mimir_search</c> and the golden runner later. Embeds the query, runs the §3 hybrid search,
 /// and orders every hit by <see cref="RecallScoring.QueryScore"/> under the caller's affinity
 /// context. Deliberately unthresholded and scope-unfiltered: consumers own their gates and
-/// candidate universes.
+/// candidate universes — ambient eligibility rides along as a flag so the Prompt lane needs no
+/// second query to apply its own.
 /// </summary>
 internal sealed class QueryRanking(
     MimirDbContext db,
@@ -63,34 +67,43 @@ internal sealed class QueryRanking(
                 w.Text,
                 w.Reinforcement,
                 w.LastConfirmedAt,
-                // Explicit salience (§7): any Provenance Event born from a deliberate save.
-                Salient = db.Provenance.Any(p => p.WisdomId == w.Id && p.EventId != null
-                    && db.Events.Any(e => e.Id == p.EventId && e.Salient)),
+                Salient = ExplicitSalience.Ids(db).Contains(w.Id),
+                AmbientEligible = AmbientCandidates.Of(db, affinityProjectId)
+                    .Any(c => c.Id == w.Id),
             })
             .ToDictionaryAsync(w => w.Id, cancellationToken);
 
         var now = clock.GetUtcNow();
-        return hits
-            .Select(hit =>
+        var ranked = new List<RankedWisdom>(hits.Count);
+        foreach (var hit in hits)
+        {
+            // A Wisdom hard-deleted (§8) between the search and the hydration query drops out;
+            // consumers must never meet an id the row for which no longer exists.
+            if (!records.TryGetValue(hit.WisdomId, out var w))
             {
-                var w = records[hit.WisdomId];
-                return new RankedWisdom(
-                    w.Id,
-                    RecallScoring.QueryScore(
-                        hit.FusedScore,
-                        // Global Wisdom never earns affinity, even under a Global context (§7).
-                        w.ScopeProjectId != Project.GlobalId && w.ScopeProjectId == affinityProjectId,
-                        w.Reinforcement,
-                        w.Salient,
-                        w.LastConfirmedAt,
-                        now,
-                        options.Value),
-                    hit.Cosine,
-                    w.Kind,
-                    w.ScopeProjectId,
-                    w.Text,
-                    w.LastConfirmedAt);
-            })
+                continue;
+            }
+
+            ranked.Add(new RankedWisdom(
+                w.Id,
+                RecallScoring.QueryScore(
+                    hit.FusedScore,
+                    // Global Wisdom never earns affinity, even under a Global context (§7).
+                    w.ScopeProjectId != Project.GlobalId && w.ScopeProjectId == affinityProjectId,
+                    w.Reinforcement,
+                    w.Salient,
+                    w.LastConfirmedAt,
+                    now,
+                    options.Value),
+                hit.Cosine,
+                w.Kind,
+                w.ScopeProjectId,
+                w.Text,
+                w.LastConfirmedAt,
+                w.AmbientEligible));
+        }
+
+        return ranked
             .OrderByDescending(r => r.Score)
             .ThenBy(r => r.WisdomId)
             .ToList();

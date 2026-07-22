@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mimir.Contracts.Hooks;
@@ -89,12 +88,7 @@ internal sealed class CaptureService(
         }
 
         var sealedAt = clock.GetUtcNow();
-        var reason =
-            request.Payload.ValueKind == JsonValueKind.Object
-            && request.Payload.TryGetProperty("reason", out var value)
-            && value.ValueKind == JsonValueKind.String
-                ? value.GetString()
-                : null;
+        var reason = request.Payload.StringProperty("reason");
 
         // The WHERE guard is first-seal-wins made atomic: a duplicate that lost the race updates
         // zero rows instead of overwriting the session's real end.

@@ -30,9 +30,7 @@ internal sealed class BriefService(
                 w.Text,
                 w.Reinforcement,
                 w.LastConfirmedAt,
-                // Explicit salience (§7): any Provenance Event born from a deliberate save.
-                Salient = db.Provenance.Any(p => p.WisdomId == w.Id && p.EventId != null
-                    && db.Events.Any(e => e.Id == p.EventId && e.Salient)),
+                Salient = ExplicitSalience.Ids(db).Contains(w.Id),
             })
             .ToListAsync(cancellationToken);
 
@@ -55,19 +53,9 @@ internal sealed class BriefService(
             return "";
         }
 
-        db.Injections.Add(new Injection
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = sessionId,
-            ProjectId = projectId,
-            At = now,
-            Lane = InjectionLane.Brief,
-            QueryContext = null,
-            Chars = brief.Length,
-            Items = included
-                .Select(e => new InjectionItem { WisdomId = e.WisdomId, Score = e.Score })
-                .ToList(),
-        });
+        InjectionLog.Record(
+            db, sessionId, projectId, now, InjectionLane.Brief,
+            queryContext: null, brief, included);
         await db.SaveChangesAsync(cancellationToken);
         return brief;
     }

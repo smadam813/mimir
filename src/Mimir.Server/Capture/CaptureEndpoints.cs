@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
@@ -62,7 +61,7 @@ internal static class CaptureEndpoints
         await capture.AppendEventAsync(episode, request, EventType.UserPromptSubmit, cancellationToken);
 
         var injection = "";
-        if (PromptOf(request.Payload) is { } prompt && !string.IsNullOrWhiteSpace(prompt))
+        if (request.Payload.StringProperty("prompt") is { } prompt && !string.IsNullOrWhiteSpace(prompt))
         {
             try
             {
@@ -78,14 +77,6 @@ internal static class CaptureEndpoints
 
         return new UserPromptReply { Injection = injection };
     }
-
-    /// <summary>The prompt text from the hook's stdin JSON, or null when absent.</summary>
-    private static string? PromptOf(JsonElement payload)
-        => payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("prompt", out var value)
-            && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
 
     /// <summary>
     /// Creates or resumes the session's Episode and answers with the Brief (§7). The

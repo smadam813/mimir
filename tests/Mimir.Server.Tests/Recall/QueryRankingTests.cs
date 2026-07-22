@@ -66,8 +66,11 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
 
         var ranked = await RankAsync(other.Id);
 
-        // Same rows, different affinity context: neither matches, so the nearer row leads.
+        // Same rows, different affinity context: neither matches, so the nearer row leads —
+        // and the foreign-Project row is flagged outside the context's ambient universe.
         ranked.Select(r => r.WisdomId).ShouldBe([global.Id, scoped.Id]);
+        ranked.Single(r => r.WisdomId == scoped.Id).AmbientEligible.ShouldBeFalse();
+        ranked.Single(r => r.WisdomId == global.Id).AmbientEligible.ShouldBeTrue();
     }
 
     [Fact]
@@ -117,6 +120,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         row.Text.ShouldBe(wisdom.Text);
         row.LastConfirmedAt.ShouldBe(wisdom.LastConfirmedAt);
         row.Score.ShouldBeGreaterThan(0);
+        row.AmbientEligible.ShouldBeTrue();
     }
 
     private async Task<IReadOnlyList<RankedWisdom>> RankAsync(
