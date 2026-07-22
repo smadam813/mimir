@@ -22,6 +22,7 @@ internal sealed record RankedWisdom(
     Guid ScopeProjectId,
     string Text,
     DateTimeOffset LastConfirmedAt,
+    DateTimeOffset? RetiredAt,
     bool AmbientEligible)
 {
     public InjectionEntry ToInjectionEntry()
@@ -47,10 +48,16 @@ internal sealed class QueryRanking(
     /// the session's Project for the ambient lane, the case's for the golden runner.</param>
     public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
         string query, Guid affinityProjectId, CancellationToken cancellationToken)
+        => await RankAsync(query, affinityProjectId, includeRetired: false, cancellationToken);
+
+    /// <param name="includeRetired">§7: only <c>mimir_search</c> with <c>include_retired</c> ranks
+    /// Retired Wisdom; every other consumer keeps "Retired never ranks" via the overload above.</param>
+    public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
+        string query, Guid affinityProjectId, bool includeRetired, CancellationToken cancellationToken)
     {
         var embedding = new Vector(
             await embeddings.GenerateVectorAsync(query, cancellationToken: cancellationToken));
-        var hits = await search.SearchAsync(embedding, query, cancellationToken);
+        var hits = await search.SearchAsync(embedding, query, includeRetired, cancellationToken);
         if (hits.Count == 0)
         {
             return [];
@@ -67,6 +74,7 @@ internal sealed class QueryRanking(
                 w.Text,
                 w.Reinforcement,
                 w.LastConfirmedAt,
+                w.RetiredAt,
                 Salient = ExplicitSalience.Ids(db).Contains(w.Id),
                 AmbientEligible = AmbientCandidates.Of(db, affinityProjectId)
                     .Any(c => c.Id == w.Id),
@@ -100,6 +108,7 @@ internal sealed class QueryRanking(
                 w.ScopeProjectId,
                 w.Text,
                 w.LastConfirmedAt,
+                w.RetiredAt,
                 w.AmbientEligible));
         }
 

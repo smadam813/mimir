@@ -40,7 +40,7 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                    1 - (embedding <=> CAST(@embedding AS vector)) AS cosine,
                    row_number() OVER (ORDER BY embedding <=> CAST(@embedding AS vector), id) AS rank
             FROM wisdom
-            WHERE retired_at IS NULL
+            WHERE (@include_retired OR retired_at IS NULL)
             ORDER BY embedding <=> CAST(@embedding AS vector), id
             LIMIT @top_n
         ),
@@ -49,7 +49,7 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                    row_number() OVER (
                        ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', @query)) DESC, id) AS rank
             FROM wisdom
-            WHERE retired_at IS NULL
+            WHERE (@include_retired OR retired_at IS NULL)
               AND tsv @@ plainto_tsquery('english', @query)
             ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', @query)) DESC, id
             LIMIT @top_n
@@ -67,6 +67,12 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <param name="query">The query text, for the FTS leg.</param>
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding, string query, CancellationToken cancellationToken)
+        => await SearchAsync(embedding, query, includeRetired: false, cancellationToken);
+
+    /// <param name="includeRetired">§7: Retired Wisdom surfaces only for <c>mimir_search</c> with
+    /// <c>include_retired</c>; every other caller keeps the exclusion via the overload above.</param>
+    public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
+        Vector embedding, string query, bool includeRetired, CancellationToken cancellationToken)
     {
         // The vector arrives as its text form and is cast in SQL, so the query needs no vector
         // type mapping on the raw-SQL path (Vector.ToString is the pgvector input syntax).
@@ -76,7 +82,8 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                 new NpgsqlParameter("embedding", embedding.ToString()),
                 new NpgsqlParameter("query", query),
                 new NpgsqlParameter("top_n", options.Value.PerLegTopN),
-                new NpgsqlParameter("k", options.Value.RrfK))
+                new NpgsqlParameter("k", options.Value.RrfK),
+                new NpgsqlParameter("include_retired", includeRetired))
             .ToListAsync(cancellationToken);
         return hits;
     }

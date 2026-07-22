@@ -70,6 +70,18 @@ public class PayloadTruncatorTests
     }
 
     [Fact]
+    public void RememberContentIsStoredInFull_HoweverLong()
+    {
+        var content = new string('c', 10_000);
+        var json = JsonSerializer.Serialize(new { content, kind = "Fact" });
+
+        var truncated = Truncate(json);
+
+        FieldOf(truncated, "content")
+            .ShouldBe(content, "spec §7.1: a deliberate save is never dropped — nor clipped");
+    }
+
+    [Fact]
     public void MultiByteTextIsCutAtCharacterBoundaries_NeverCorrupted()
     {
         // '€' is 3 UTF-8 bytes; 1,707 of them (5,121 bytes) forces cuts near both limits.

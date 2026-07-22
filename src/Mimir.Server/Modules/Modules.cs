@@ -80,9 +80,16 @@ internal sealed class RecallModule : IMimirModule
         services.AddScoped<BriefService>();
         services.AddScoped<QueryRanking>();
         services.AddScoped<PromptRecallService>();
+        services.AddScoped<McpProjects>();
+        services.AddScoped<McpSearchService>();
+        services.AddScoped<McpTimelineService>();
+        services.AddScoped<McpRememberService>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapPost("/api/mcp/search", McpEndpoints.SearchAsync);
+        endpoints.MapPost("/api/mcp/timeline", McpEndpoints.TimelineAsync);
+        endpoints.MapPost("/api/mcp/remember", McpEndpoints.RememberAsync);
     }
 }

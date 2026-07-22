@@ -25,6 +25,7 @@ public static class StorageRegistration
         services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
         services.AddScoped<IStorageProbe, PostgresStorageProbe>();
         services.AddScoped<WisdomSearch>();
+        services.AddScoped<EventSearch>();
         services.AddHostedService<StorageService>();
 
         return services;
