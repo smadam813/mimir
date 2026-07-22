@@ -4,13 +4,16 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.AI;
 using Mimir.Contracts.Health;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
+using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 using Mimir.Server.Health;
 using Mimir.Server.Storage;
 using Mimir.Server.Tests.Capture;
+using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Harvest;
 
@@ -105,7 +108,38 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         Directory.CreateDirectory(_root); // so DisposeAsync still has something to delete
     }
 
-    private async Task StartServiceAsync()
+    [Fact]
+    public async Task AConversionFailure_DegradesTheTile_ButKeepsTheFreshScanFigures()
+    {
+        WriteMemoryFile("MEMORY.md", "scanned fine, never embedded");
+
+        // The scan itself succeeds; only the §5 handoff to the Merge Gate fails. The tile must
+        // say so without discarding what the scan just found.
+        await StartServiceAsync(new ThrowingEmbeddings());
+
+        var degraded = await TileAsync(t => t.State == HealthTileState.Degraded);
+        degraded.Items.ShouldBe(1, "the scan succeeded and its figures must survive the conversion failure");
+        degraded.Changed.ShouldBe(1);
+        degraded.LastScanAt.ShouldBe(_clock.GetUtcNow());
+        degraded.Summary.ShouldBe("embedding model offline");
+    }
+
+    private sealed class ThrowingEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
+    {
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values,
+            EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("embedding model offline");
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private async Task StartServiceAsync(IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
         if (fixture.UnavailableReason is { } reason)
         {
@@ -117,6 +151,14 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
             options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector()));
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
+        // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's
+        // whole graph rides along — with deterministic fake embeddings in place of Ollama.
+        services.AddScoped<HarvestConverter>();
+        services.AddScoped<MergeGate>();
+        services.AddScoped<WisdomSearch>();
+        services.AddSingleton(embeddings ?? new FakeEmbeddings());
+        services.AddSingleton(Options.Create(new SearchOptions()));
+        services.AddSingleton(Options.Create(new DistillationOptions()));
         services.AddSingleton(Options.Create(new HarvestOptions { Root = _root }));
         services.AddSingleton<TimeProvider>(_clock);
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));

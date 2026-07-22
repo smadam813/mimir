@@ -51,5 +51,25 @@ public class AppSettingsTests
 
         shipped.Root.ShouldBe(expected.Root);
         shipped.ScanInterval.ShouldBe(expected.ScanInterval);
+        shipped.CandidateCap.ShouldBe(expected.CandidateCap);
+    }
+
+    [Fact]
+    public void ShippedSearchSection_MatchesTheCodeDefaults()
+    {
+        var shipped = AppSettings.GetSection(SearchOptions.SectionName).Get<SearchOptions>().ShouldNotBeNull();
+        var expected = new SearchOptions();
+
+        shipped.RrfK.ShouldBe(expected.RrfK);
+        shipped.PerLegTopN.ShouldBe(expected.PerLegTopN);
+    }
+
+    [Fact]
+    public void ShippedDistillationSection_MatchesTheCodeDefaults()
+    {
+        var shipped = AppSettings.GetSection(DistillationOptions.SectionName)
+            .Get<DistillationOptions>().ShouldNotBeNull();
+
+        shipped.MergeMatchThreshold.ShouldBe(new DistillationOptions().MergeMatchThreshold);
     }
 }

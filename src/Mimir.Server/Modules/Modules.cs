@@ -1,4 +1,5 @@
 using Mimir.Server.Capture;
+using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 
 namespace Mimir.Server.Modules;
@@ -33,6 +34,7 @@ internal sealed class HarvestModule : IMimirModule
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<HarvestScanner>();
+        services.AddScoped<HarvestConverter>();
         services.AddSingleton<IHarvestScanTrigger, HarvestScanTrigger>();
         services.AddHostedService<HarvesterService>();
     }
@@ -50,6 +52,7 @@ internal sealed class DistillationModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddScoped<MergeGate>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)

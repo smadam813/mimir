@@ -53,9 +53,9 @@ internal sealed class HarvesterService(
 
     private async Task<bool> ScanAsync(CancellationToken cancellationToken)
     {
+        await using var scope = scopeFactory.CreateAsyncScope();
         try
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
             var scanner = scope.ServiceProvider.GetRequiredService<HarvestScanner>();
             var result = await scanner.ScanAsync(cancellationToken);
 
@@ -70,7 +70,6 @@ internal sealed class HarvesterService(
                     Changed = result.Changed,
                 },
             });
-            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -79,6 +78,30 @@ internal sealed class HarvesterService(
             // to degrade-and-retry, not a reason to tear the whole host down. This filter is the
             // inverse of ExecuteAsync's "genuine shutdown" catch — keep the two in sync.
             logger.LogWarning(ex, "Harvest scan failed; retrying in {RetryInterval}", FailureRetryInterval);
+            health.Update(snapshot => snapshot with
+            {
+                Harvester = snapshot.Harvester with
+                {
+                    State = HealthTileState.Degraded,
+                    Summary = ex.Message,
+                },
+            });
+            return false;
+        }
+
+        // The §5 handoff rides the scan cadence but reports separately: whatever the scan just
+        // put on the tile stands even if conversion fails — the embedding model still
+        // provisioning, say, must not masquerade as a failed scan or discard its fresh figures.
+        // The conversion marker means the retry picks up exactly where this run stopped.
+        try
+        {
+            var converter = scope.ServiceProvider.GetRequiredService<HarvestConverter>();
+            await converter.ConvertPendingAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Merge Gate conversion failed; retrying in {RetryInterval}", FailureRetryInterval);
             health.Update(snapshot => snapshot with
             {
                 Harvester = snapshot.Harvester with

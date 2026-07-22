@@ -22,6 +22,7 @@ public static class StorageRegistration
         services.AddDbContextFactory<MimirDbContext>(Configure);
         services.AddDbContext<MimirDbContext>(Configure);
         services.AddScoped<IStorageProbe, PostgresStorageProbe>();
+        services.AddScoped<WisdomSearch>();
         services.AddHostedService<StorageService>();
 
         return services;
