@@ -30,6 +30,9 @@ internal sealed class PromptRecallService(
 
         // The ranking is scope-unfiltered by design; the lane narrows its hits to the ambient
         // candidate universe before anything else — an ineligible match must not open the gate.
+        // The §3 search bounds the pool to its per-leg top-N first, so a large foreign-Project
+        // corpus near the prompt can crowd an eligible match out of both legs before this filter
+        // sees it. Accepted for v1; the §11 PerLegTopN knob widens the pool if it bites.
         var hitIds = ranked.Select(r => r.WisdomId).ToList();
         var eligibleIds = await AmbientCandidates.Of(db, projectId)
             .Where(w => hitIds.Contains(w.Id))
@@ -43,14 +46,8 @@ internal sealed class PromptRecallService(
             return "";
         }
 
-        var entries = eligible.Select(r => new InjectionEntry(
-            r.WisdomId,
-            r.Score,
-            r.Kind,
-            r.ScopeProjectId == Project.GlobalId,
-            r.LastConfirmedAt,
-            r.Text));
-        var (injection, included) = InjectionRenderer.Render(entries, options.Value.PromptBudgetChars);
+        var (injection, included) = InjectionRenderer.Render(
+            eligible.Select(r => r.ToInjectionEntry()), options.Value.PromptBudgetChars);
         if (included.Count == 0)
         {
             return "";

@@ -19,7 +19,11 @@ internal sealed record RankedWisdom(
     WisdomKind Kind,
     Guid ScopeProjectId,
     string Text,
-    DateTimeOffset LastConfirmedAt);
+    DateTimeOffset LastConfirmedAt)
+{
+    public InjectionEntry ToInjectionEntry()
+        => new(WisdomId, Score, Kind, ScopeProjectId == Project.GlobalId, LastConfirmedAt, Text);
+}
 
 /// <summary>
 /// The §7 query ranking as a shared service — the Prompt lane now, the Wisdom leg of

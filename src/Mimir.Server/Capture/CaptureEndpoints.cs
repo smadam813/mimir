@@ -55,11 +55,11 @@ internal static class CaptureEndpoints
         HookEventRequest request,
         CaptureService capture,
         PromptRecallService promptRecall,
-        ILogger<PromptRecallService> logger,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         var episode = await capture.ResumeEpisodeAsync(request, cancellationToken);
-        await capture.AppendEventAsync(request, EventType.UserPromptSubmit, cancellationToken);
+        await capture.AppendEventAsync(episode, request, EventType.UserPromptSubmit, cancellationToken);
 
         var injection = "";
         if (PromptOf(request.Payload) is { } prompt && !string.IsNullOrWhiteSpace(prompt))
@@ -71,7 +71,8 @@ internal static class CaptureEndpoints
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "Prompt-lane recall failed; injecting nothing (fail open, §7).");
+                loggerFactory.CreateLogger(typeof(CaptureEndpoints))
+                    .LogWarning(ex, "Prompt-lane recall failed; injecting nothing (fail open, §7).");
             }
         }
 

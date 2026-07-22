@@ -106,7 +106,7 @@ public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
             recallOptions,
             clock);
         return await CaptureEndpoints.UserPromptAsync(
-            request, capture, promptRecall, NullLogger<PromptRecallService>.Instance, Token);
+            request, capture, promptRecall, NullLoggerFactory.Instance, Token);
     }
 
     private static HookEventRequest Request(string? prompt)
