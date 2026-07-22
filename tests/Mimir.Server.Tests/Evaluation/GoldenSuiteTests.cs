@@ -15,8 +15,11 @@ namespace Mimir.Server.Tests.Evaluation;
 /// the injection log and hand-inserted alike — replayed through the shared §7 query ranking with
 /// the real embedding model, against the real Wisdom tier. The pass rate is reported either way;
 /// one failing case fails the test. Needs the compose stack up (postgres and ollama), and skips
-/// without it like every other integration test.
+/// without it like every other integration test. The trait keeps it out of CI's zero-skip run
+/// (.github/workflows/ci.yml): CI provides Postgres but never Ollama, so under FailSkips this
+/// dev-time suite would fail every build for a dependency CI is never meant to have.
 /// </summary>
+[Trait("requires", "ollama")]
 public sealed class GoldenSuiteTests(ITestOutputHelper output)
 {
     /// <summary>Ollama from the host, like <see cref="TestPostgres"/> reaches postgres.</summary>

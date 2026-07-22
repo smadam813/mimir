@@ -92,7 +92,10 @@ jobs:
         run: dotnet ef database update --project src/Mimir.Server/Mimir.Server.csproj --configuration Release --no-build
 
       - name: Test
-        run: dotnet test Mimir.slnx --configuration Release --no-build --settings .github/ci.runsettings
+        # The trait filter excludes the dev-time golden suite (§9): it needs Ollama, which CI
+        # deliberately lacks, and under FailSkips its honest skip would fail the build. Tests
+        # without the trait are unaffected by the != filter.
+        run: dotnet test Mimir.slnx --configuration Release --no-build --settings .github/ci.runsettings --filter "requires!=ollama"
 
   docker-build:
     name: Docker image build
