@@ -48,7 +48,9 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         }
         """);
 
-    private static readonly ChatOptions Options = new()
+    // Named apart from the primary constructor's IOptions<DistillationOptions> `options` — the
+    // two would otherwise read as one thing at call sites.
+    private static readonly ChatOptions ChatSettings = new()
     {
         Temperature = 0,
         ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "wisdom_candidates"),
@@ -113,7 +115,7 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
                 """),
         ];
 
-        var response = await chat.GetResponseAsync(messages, Options, cancellationToken);
+        var response = await chat.GetResponseAsync(messages, ChatSettings, cancellationToken);
         return Parse(response.Text, episode, chunk);
     }
 
@@ -173,7 +175,7 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
             candidates.Add(new WisdomCandidate(
                 ParseKind(candidate.Kind),
                 ParseScope(candidate.Scope, episode),
-                Cap(text),
+                ModelAnswer.Cap(text),
                 EpisodeId: episode.Id,
                 EventIds: eventIds is { Count: > 0 } ? eventIds : null));
         }
@@ -196,10 +198,6 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         "project" => episode.ProjectId,
         var other => throw new DistillerException($"unknown candidate scope '{other}'"),
     };
-
-    /// <summary>The §6 candidate text budget — the same 500 the arbiter caps rewrites at.</summary>
-    private static string Cap(string text)
-        => text.Length <= MergeArbiter.MaxTextLength ? text : text[..MergeArbiter.MaxTextLength].TrimEnd();
 
     private sealed record Answer(List<AnswerCandidate>? Candidates);
 

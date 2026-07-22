@@ -127,6 +127,7 @@ public class MimirOptionsTests
     [InlineData("Mimir:Distillation:StaleRunningAfter", "00:00:01")]
     [InlineData("Mimir:Distillation:CrashSealIdleAfter", "31.00:00:00")]
     [InlineData("Mimir:Distillation:ChunkTokens", "0")]
+    [InlineData("Mimir:Distillation:ChunkTokens", "20000")] // past num_ctx: would overflow, not chunk
     public void InvalidDistillerKnobs_FailValidation(string key, string value)
         => Should.Throw<OptionsValidationException>(
             () => Resolve<DistillationOptions>(new Dictionary<string, string?> { [key] = value }));

@@ -38,7 +38,7 @@ internal sealed class DistillationSweep(
             .Where(e => e.SealedAt == null
                 && (db.Events
                         .Where(ev => ev.EpisodeId == e.Id)
-                        .Max(ev => (DateTimeOffset?)ev.At) ?? e.StartedAt) <= idleCutoff)
+                        .Max(ev => (DateTimeOffset?)ev.At) ?? e.StartedAt) < idleCutoff)
             .ExecuteUpdateAsync(
                 update => update
                     .SetProperty(e => e.SealedAt, now)
@@ -51,7 +51,7 @@ internal sealed class DistillationSweep(
         var staleCutoff = now - options.Value.StaleRunningAfter;
         var staleReset = await db.Episodes
             .Where(e => e.Distillation == DistillationState.Running
-                && (e.DistillationStartedAt == null || e.DistillationStartedAt <= staleCutoff))
+                && (e.DistillationStartedAt == null || e.DistillationStartedAt < staleCutoff))
             .ExecuteUpdateAsync(
                 update => update
                     .SetProperty(e => e.Distillation, DistillationState.Pending)

@@ -32,8 +32,10 @@ public sealed class DistillationOptions
 
     /// <summary>
     /// §6: an Episode whose Event stream exceeds this is chunked chronologically and distilled
-    /// per chunk (~12K tokens, leaving prompt-and-answer room inside the 16384 context).
+    /// per chunk (~12K tokens, leaving prompt-and-answer room inside the 16384 context). The
+    /// range's ceiling is that context: the distiller pins <c>num_ctx</c> per §11, and a chunk
+    /// budget past it would silently overflow the window instead of chunking.
     /// </summary>
-    [Range(1024, 1_000_000)]
+    [Range(1024, 16_384)]
     public int ChunkTokens { get; init; } = 12_288;
 }
