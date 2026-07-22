@@ -69,7 +69,13 @@ public class AppSettingsTests
     {
         var shipped = AppSettings.GetSection(DistillationOptions.SectionName)
             .Get<DistillationOptions>().ShouldNotBeNull();
+        var expected = new DistillationOptions();
 
-        shipped.MergeMatchThreshold.ShouldBe(new DistillationOptions().MergeMatchThreshold);
+        shipped.MergeMatchThreshold.ShouldBe(expected.MergeMatchThreshold);
+        shipped.ContestedDuration.ShouldBe(expected.ContestedDuration);
+        shipped.SweepInterval.ShouldBe(expected.SweepInterval);
+        shipped.StaleRunningAfter.ShouldBe(expected.StaleRunningAfter);
+        shipped.CrashSealIdleAfter.ShouldBe(expected.CrashSealIdleAfter);
+        shipped.ChunkTokens.ShouldBe(expected.ChunkTokens);
     }
 }

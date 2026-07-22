@@ -111,6 +111,26 @@ public class MimirOptionsTests
         options.ScanInterval.ShouldBe(TimeSpan.FromMinutes(5));
     }
 
+    [Fact]
+    public void DistillerKnobs_DefaultToTheSpecd6h24h1hAnd12K()
+    {
+        var options = Resolve<DistillationOptions>();
+
+        options.SweepInterval.ShouldBe(TimeSpan.FromHours(6));
+        options.CrashSealIdleAfter.ShouldBe(TimeSpan.FromHours(24));
+        options.StaleRunningAfter.ShouldBe(TimeSpan.FromHours(1));
+        options.ChunkTokens.ShouldBe(12_288);
+    }
+
+    [Theory]
+    [InlineData("Mimir:Distillation:SweepInterval", "00:00:00")]
+    [InlineData("Mimir:Distillation:StaleRunningAfter", "00:00:01")]
+    [InlineData("Mimir:Distillation:CrashSealIdleAfter", "31.00:00:00")]
+    [InlineData("Mimir:Distillation:ChunkTokens", "0")]
+    public void InvalidDistillerKnobs_FailValidation(string key, string value)
+        => Should.Throw<OptionsValidationException>(
+            () => Resolve<DistillationOptions>(new Dictionary<string, string?> { [key] = value }));
+
     [Theory]
     [InlineData("Mimir:Harvest:Root", "")]
     [InlineData("Mimir:Harvest:ScanInterval", "00:00:00")]
