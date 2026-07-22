@@ -8,6 +8,10 @@
     --working: #d29922;
     --degraded: #f85149;
     --pending: #6e7681;
+    --kind-fact: #58a6ff;
+    --kind-preference: #d2a8ff;
+    --kind-lesson: #d29922;
+    --kind-procedure: #3fb950;
 }
 
 * {
@@ -401,6 +405,210 @@ h1:focus {
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Wisdom browser + curation (spec §8.1) */
+
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.filter-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+}
+
+.filter-search,
+.filter-bar select {
+    padding: 0.3rem 0.5rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+}
+
+.filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.wisdom-list {
+    display: grid;
+    gap: 0.6rem;
+}
+
+.wisdom-card {
+    padding: 0.6rem 0.8rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.wisdom-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+}
+
+.kind-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--pending);
+    color: var(--pending);
+}
+
+.kind-badge.fact { color: var(--kind-fact); border-color: var(--kind-fact); }
+.kind-badge.preference { color: var(--kind-preference); border-color: var(--kind-preference); }
+.kind-badge.lesson { color: var(--kind-lesson); border-color: var(--kind-lesson); }
+.kind-badge.procedure { color: var(--kind-procedure); border-color: var(--kind-procedure); }
+
+.wisdom-scope {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+}
+
+.wisdom-badge {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+}
+
+.wisdom-badge.retired {
+    color: var(--pending);
+    border-color: var(--pending);
+    text-decoration: line-through;
+}
+
+.wisdom-badge.contested {
+    color: var(--working);
+    border-color: var(--working);
+}
+
+.wisdom-badge.orphaned {
+    color: var(--degraded);
+    border-color: var(--degraded);
+}
+
+.wisdom-meta {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.provenance-item .wisdom-meta {
+    margin-left: 0;
+}
+
+.wisdom-text {
+    display: block;
+    color: var(--text);
+    text-decoration: none;
+    margin-bottom: 0.4rem;
+}
+
+.wisdom-text:hover {
+    text-decoration: underline;
+}
+
+.wisdom-current {
+    max-width: 44rem;
+    margin: 0 0 0.75rem;
+}
+
+.wisdom-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.wisdom-edit-text {
+    width: 100%;
+    max-width: 44rem;
+    min-height: 5rem;
+    margin-bottom: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+}
+
+.wisdom-error {
+    color: var(--degraded);
+    font-size: 0.85rem;
+}
+
+.wisdom-facts {
+    margin-top: 0.75rem;
+}
+
+.wisdom-section {
+    margin: 1.5rem 0 0.5rem;
+    font-size: 1.05rem;
+}
+
+.version-chain,
+.provenance-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+}
+
+.version-item {
+    padding: 0.6rem 0.8rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.version-text {
+    margin: 0.35rem 0 0;
+    color: var(--text-dim);
+}
+
+.provenance-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.provenance-item a {
+    color: var(--text);
+}
+
+.provenance-harvest {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
+.orphaned-note {
+    color: var(--degraded);
+    max-width: 44rem;
 }
 
 /* Buttons + confirmed deletes (spec §8.2) */

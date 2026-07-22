@@ -1,0 +1,100 @@
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+@inject WisdomBrowser Browser
+@inject EpisodeBrowser Projects
+
+@* Spec §8.1: search plus the five filters — kind, scope, project, contested, retired. The
+   project filter opens on the sidebar's Project (Global lands on Global-scoped Wisdom) and
+   widens from there; the contested filter is the adjudication review surface (§8.4). *@
+<div class="filter-bar" role="search">
+    <input class="filter-search" placeholder="Search Wisdom…" aria-label="Search Wisdom"
+           @bind="_search" @bind:after="RefreshAsync" />
+    <select aria-label="Kind" @bind="_kind" @bind:after="RefreshAsync">
+        <option value="">All kinds</option>
+        @foreach (var kind in Enum.GetValues<WisdomKind>())
+        {
+            <option value="@kind">@kind</option>
+        }
+    </select>
+    <select aria-label="Scope" @bind="_scope" @bind:after="RefreshAsync">
+        <option value="@WisdomScopeFilter.Any">All scopes</option>
+        <option value="@WisdomScopeFilter.Global">Global</option>
+        <option value="@WisdomScopeFilter.ProjectScoped">Project-scoped</option>
+    </select>
+    <select aria-label="Project" @bind="_projectFilter" @bind:after="RefreshAsync">
+        <option value="">All Projects</option>
+        @foreach (var project in _projects)
+        {
+            <option value="@project.Id">@project.DisplayName</option>
+        }
+    </select>
+    <select aria-label="Retired" @bind="_retirement" @bind:after="RefreshAsync">
+        <option value="@WisdomRetirementFilter.Active">Active</option>
+        <option value="@WisdomRetirementFilter.Retired">Retired</option>
+        <option value="@WisdomRetirementFilter.All">All</option>
+    </select>
+    <label class="filter-toggle">
+        <input type="checkbox" @bind="_contested" @bind:after="RefreshAsync" />
+        Contested only
+    </label>
+</div>
+
+@if (_entries.Count == 0)
+{
+    <p class="empty-note">
+        No Wisdom matches. The Merge Gate fills this surface as Episodes distill and Harvest
+        runs (§6) — or the filters above are simply this narrow.
+    </p>
+}
+else
+{
+    <div class="wisdom-list">
+        @foreach (var entry in _entries)
+        {
+            <WisdomCard @key="entry.Id" Entry="entry" OnChanged="RefreshAsync" />
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    private string _search = "";
+    private string _kind = "";
+    private WisdomScopeFilter _scope = WisdomScopeFilter.Any;
+    private string _projectFilter = "";
+    private WisdomRetirementFilter _retirement = WisdomRetirementFilter.Active;
+    private bool _contested;
+
+    private IReadOnlyList<ProjectListItem> _projects = [];
+    private IReadOnlyList<WisdomListEntry> _entries = [];
+    private Guid _boundProject;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _projects = await Projects.ListProjectsAsync(CancellationToken.None);
+
+        // Sidebar navigation re-anchors the project filter; filter changes on one tab do not.
+        if (_boundProject != ProjectId)
+        {
+            _boundProject = ProjectId;
+            _projectFilter = ProjectId.ToString();
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        var query = new WisdomQuery(
+            Search: string.IsNullOrWhiteSpace(_search) ? null : _search,
+            Kind: _kind.Length == 0 ? null : Enum.Parse<WisdomKind>(_kind),
+            Scope: _scope,
+            ProjectId: Guid.TryParse(_projectFilter, out var projectId) ? projectId : null,
+            ContestedOnly: _contested,
+            Retirement: _retirement);
+        _entries = await Browser.ListAsync(query, CancellationToken.None);
+        StateHasChanged();
+    }
+}

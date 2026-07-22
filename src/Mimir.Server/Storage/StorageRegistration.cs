@@ -19,8 +19,10 @@ public static class StorageRegistration
         void Configure(DbContextOptionsBuilder options) =>
             options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
 
+        // The options must stay Singleton alongside the factory: AddDbContext's default Scoped
+        // options registration would poison the singleton factory's root-provider resolution.
         services.AddDbContextFactory<MimirDbContext>(Configure);
-        services.AddDbContext<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
         services.AddScoped<IStorageProbe, PostgresStorageProbe>();
         services.AddScoped<WisdomSearch>();
         services.AddHostedService<StorageService>();

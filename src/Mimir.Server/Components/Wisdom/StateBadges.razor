@@ -1,0 +1,26 @@
+@using Mimir.Server.Ui
+
+@* The state a curator acts on, worn as badges: Retired (§10), Contested (§6.4 — the adjudication
+   review surface filters on it), and the §3 orphaned-provenance flag. *@
+@if (Entry.RetiredAt is not null)
+{
+    <span class="wisdom-badge retired" title="Excluded from recall and default search, reversibly (§10)">
+        retired
+    </span>
+}
+@if (Entry.ContestedAt is not null)
+{
+    <span class="wisdom-badge contested" title="Survived a recent adjudication (§6.4)">contested</span>
+}
+@if (Entry.OrphanedProvenance)
+{
+    <span class="wisdom-badge orphaned"
+          title="Every record this Wisdom derived from was hard-deleted; the Wisdom survives (§3)">
+        orphaned provenance
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required WisdomListEntry Entry { get; set; }
+}
