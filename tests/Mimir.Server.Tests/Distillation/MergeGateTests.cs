@@ -254,6 +254,29 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AnAgreementProposedAsGlobal_IsNotCrossProjectConfirmation_AndDoesNotPromote()
+    {
+        await Context.ResetWisdomAsync(Token);
+        // §6.3 promotes on confirmation from a *different Project*. A Global-scoped candidate
+        // carries no origin Project, so it cannot vouch for recurrence elsewhere.
+        var item = await AddHarvestedItemAsync();
+        var originalText = $"Tests need the daemon up {Guid.NewGuid():N}";
+        var confirmingText = $"The daemon must run for tests {Guid.NewGuid():N}";
+        _embeddings.Map(originalText, TestVectors.Basis);
+        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        _arbiter.Enqueue(new MergeRuling.Agreement(originalText));
+
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Procedure, item.ProjectId, originalText, HarvestedItemId: item.Id));
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Procedure, Project.GlobalId, confirmingText, HarvestedItemId: item.Id));
+
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == originalText, Token));
+        wisdom.ScopeProjectId.ShouldBe(item.ProjectId);
+        wisdom.Reinforcement.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task ASupersedeRuling_RetiresTheOldWisdom_AndInsertsTheCandidate()
     {
         await Context.ResetWisdomAsync(Token);

@@ -42,8 +42,8 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
           changed, or the existing note is wrong): {"verdict":"supersede"}
         - If they contradict but both hold in different scopes — one holds everywhere, the other
           only in one project: {"verdict":"scope_split","global_text":"...","project_text":"..."}
-          — each under 500 characters. Only choose this when a project is named in scope notes
-          below.
+          — each under 500 characters. Only choose this when at least one of the scope notes
+          below mentions a project.
 
         When unsure whether they contradict, prefer "agreement".
         """;

@@ -139,7 +139,13 @@ internal sealed class MergeGate(
     {
         wisdom.Reinforcement++;
         wisdom.LastConfirmedAt = clock.GetUtcNow();
-        if (wisdom.ScopeProjectId != Project.GlobalId && candidate.ScopeProjectId != wisdom.ScopeProjectId)
+
+        // Promotion needs confirmation from a *different Project* (§6.3). A candidate proposing
+        // Global scope carries no origin Project at all, so it cannot vouch for cross-Project
+        // recurrence — only a candidate scoped to some other Project promotes.
+        if (wisdom.ScopeProjectId != Project.GlobalId
+            && candidate.ScopeProjectId != Project.GlobalId
+            && candidate.ScopeProjectId != wisdom.ScopeProjectId)
         {
             wisdom.ScopeProjectId = Project.GlobalId;
         }
