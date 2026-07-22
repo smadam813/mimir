@@ -8,6 +8,11 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Locked only in CI (GitHub Actions sets CI=true): a stale or missing lock file fails the
+         pipeline loudly instead of silently drifting. Local restores stay mutable so bumping a
+         dependency regenerates the lock file as a normal, reviewable diff. -->
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 
 </Project>

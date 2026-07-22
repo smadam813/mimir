@@ -5,9 +5,9 @@ WORKDIR /src
 
 # Warm the NuGet cache against the project files alone, so editing source does not re-download
 # packages.
-COPY global.json Directory.Build.props Directory.Packages.props ./
-COPY src/Mimir.Contracts/Mimir.Contracts.csproj src/Mimir.Contracts/
-COPY src/Mimir.Server/Mimir.Server.csproj src/Mimir.Server/
+COPY global.json Directory.Build.props Directory.Packages.props nuget.config ./
+COPY src/Mimir.Contracts/Mimir.Contracts.csproj src/Mimir.Contracts/packages.lock.json src/Mimir.Contracts/
+COPY src/Mimir.Server/Mimir.Server.csproj src/Mimir.Server/packages.lock.json src/Mimir.Server/
 RUN dotnet restore src/Mimir.Server/Mimir.Server.csproj
 
 COPY src/Mimir.Contracts/ src/Mimir.Contracts/
@@ -17,6 +17,11 @@ COPY src/Mimir.Server/ src/Mimir.Server/
 # a static web asset manifest with no _framework/* routes, so blazor.web.js 404s and the app
 # silently degrades to static rendering with no SignalR circuit. Letting publish restore again
 # (a cache hit, thanks to the layer above) rebuilds the manifest against the real source tree.
+#
+# Locked here rather than on the cache-warming restore above: the implicit ASP.NET Core web-asset
+# package set is only fully resolvable once wwwroot/Components exist, so the earlier restore's
+# graph is a strict subset of the lock file and would fail RestoreLockedMode's exact-match check.
+ENV CI=true
 RUN dotnet publish src/Mimir.Server/Mimir.Server.csproj --configuration Release --output /app
 
 # Fail the build rather than ship a UI that looks fine and never updates. Whitespace-tolerant
