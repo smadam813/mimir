@@ -73,34 +73,34 @@ else
     {
         <p class="orphaned-note">
             Orphaned: every record this Wisdom derived from was hard-deleted (§3). The Wisdom and
-            its versions survive; only the trail back to sources is gone.
+            its versions survive; only the trail back to those records is gone.
         </p>
     }
     else
     {
         <ul class="provenance-list">
-            @foreach (var source in _detail.Sources)
+            @foreach (var link in _detail.Provenance)
             {
                 <li class="provenance-item">
-                    @if (source.EventId is not null)
+                    @if (link.EventId is not null)
                     {
-                        <a href="@EpisodeHref(source)">Event #@source.EventSeq · @source.EventType</a>
-                        <span class="wisdom-meta">in @source.SessionId</span>
+                        <a href="@EpisodeHref(link)">Event #@link.EventSeq · @link.EventType</a>
+                        <span class="wisdom-meta">in @link.SessionId</span>
                     }
-                    else if (source.EpisodeId is not null)
+                    else if (link.EpisodeId is not null)
                     {
-                        <a href="@EpisodeHref(source)">Episode @source.SessionId</a>
+                        <a href="@EpisodeHref(link)">Episode @link.SessionId</a>
                     }
-                    else if (source.HarvestedItemId is null)
+                    else if (link.HarvestedItemId is null)
                     {
                         <span class="wisdom-meta">
                             deliberate save — recorded outside any Episode (§7.1)
                         </span>
                     }
-                    @if (source.HarvestedPath is not null)
+                    @if (link.HarvestedPath is not null)
                     {
                         <span class="provenance-harvest" title="Harvested Item (§5)">
-                            harvested · @source.HarvestedPath
+                            harvested · @link.HarvestedPath
                         </span>
                     }
                 </li>
@@ -120,8 +120,10 @@ else
 
     private string BrowserHref => $"projects/{ProjectId}/wisdom";
 
-    private static string EpisodeHref(ProvenanceSource source)
-        => $"projects/{source.EpisodeProjectId}/episodes/{source.EpisodeId}";
+    /// <summary>The §8.1 drill to the underlying Event: its Episode page, anchored on the Event.</summary>
+    private static string EpisodeHref(ProvenanceEntry link)
+        => $"projects/{link.EpisodeProjectId}/episodes/{link.EpisodeId}"
+            + (link.EventId is { } eventId ? $"#event-{eventId}" : "");
 
     protected override Task OnParametersSetAsync() => RefreshAsync();
 

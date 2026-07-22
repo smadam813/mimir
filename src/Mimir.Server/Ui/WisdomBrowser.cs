@@ -56,11 +56,11 @@ public sealed record WisdomListEntry(
 
 /// <summary>
 /// One Provenance row resolved for display (§8.1): ids to link with, plus the words a human
-/// recognizes the source by. Every referenced record still exists — hard deletes cascade the
-/// Provenance rows that pointed at them (§3) — so the display fields are non-null wherever the
-/// matching id is.
+/// recognizes the referenced record by. Every referenced record still exists — hard deletes
+/// cascade the Provenance rows that pointed at them (§3) — so the display fields are non-null
+/// wherever the matching id is.
 /// </summary>
-public sealed record ProvenanceSource(
+public sealed record ProvenanceEntry(
     Guid Id,
     Guid? EpisodeId,
     Guid? EpisodeProjectId,
@@ -75,7 +75,7 @@ public sealed record ProvenanceSource(
 public sealed record WisdomDetail(
     WisdomListEntry Entry,
     IReadOnlyList<WisdomVersion> Versions,
-    IReadOnlyList<ProvenanceSource> Sources);
+    IReadOnlyList<ProvenanceEntry> Provenance);
 
 /// <summary>
 /// The read-and-curate surface behind the Wisdom browser (§8.1). Every method opens its own
@@ -134,41 +134,14 @@ public sealed class WisdomBrowser(
                 || EF.Functions.ILike(w.Text, pattern, @"\"));
         }
 
-        return await wisdom
-            .OrderByDescending(w => w.LastConfirmedAt)
-            .ThenBy(w => w.Id)
-            .Select(w => new WisdomListEntry(
-                w.Id,
-                w.Kind,
-                w.ScopeProjectId,
-                db.Projects.Where(p => p.Id == w.ScopeProjectId).Select(p => p.DisplayName).First(),
-                w.Text,
-                w.Reinforcement,
-                w.LastConfirmedAt,
-                w.ContestedAt,
-                w.RetiredAt,
-                w.SupersededBy,
-                !db.Provenance.Any(p => p.WisdomId == w.Id)))
+        return await ToEntries(db, wisdom.OrderByDescending(w => w.LastConfirmedAt).ThenBy(w => w.Id))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<WisdomDetail?> GetAsync(Guid wisdomId, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var entry = await db.Wisdom
-            .Where(w => w.Id == wisdomId)
-            .Select(w => new WisdomListEntry(
-                w.Id,
-                w.Kind,
-                w.ScopeProjectId,
-                db.Projects.Where(p => p.Id == w.ScopeProjectId).Select(p => p.DisplayName).First(),
-                w.Text,
-                w.Reinforcement,
-                w.LastConfirmedAt,
-                w.ContestedAt,
-                w.RetiredAt,
-                w.SupersededBy,
-                !db.Provenance.Any(p => p.WisdomId == w.Id)))
+        var entry = await ToEntries(db, db.Wisdom.Where(w => w.Id == wisdomId))
             .FirstOrDefaultAsync(cancellationToken);
         if (entry is null)
         {
@@ -182,7 +155,7 @@ public sealed class WisdomBrowser(
 
         // The drill-down resolves each link to the words a human recognizes it by. An Event link
         // fills the Episode side from the Event's own Episode when the row carries none.
-        var sources = await db.Provenance
+        var provenance = await db.Provenance
             .Where(p => p.WisdomId == wisdomId)
             .OrderBy(p => p.Id)
             .Select(p => new
@@ -198,7 +171,7 @@ public sealed class WisdomBrowser(
                 EpisodeId = p.EpisodeId
                     ?? db.Events.Where(e => e.Id == p.EventId).Select(e => (Guid?)e.EpisodeId).FirstOrDefault(),
             })
-            .Select(p => new ProvenanceSource(
+            .Select(p => new ProvenanceEntry(
                 p.Id,
                 p.EpisodeId,
                 db.Episodes.Where(e => e.Id == p.EpisodeId).Select(e => (Guid?)e.ProjectId).FirstOrDefault(),
@@ -210,8 +183,23 @@ public sealed class WisdomBrowser(
                 p.Path))
             .ToListAsync(cancellationToken);
 
-        return new WisdomDetail(entry, versions, sources);
+        return new WisdomDetail(entry, versions, provenance);
     }
+
+    /// <summary>The one projection both the listing and the detail read a Wisdom through.</summary>
+    private static IQueryable<WisdomListEntry> ToEntries(MimirDbContext db, IQueryable<Wisdom> wisdom)
+        => wisdom.Select(w => new WisdomListEntry(
+            w.Id,
+            w.Kind,
+            w.ScopeProjectId,
+            db.Projects.Where(p => p.Id == w.ScopeProjectId).Select(p => p.DisplayName).First(),
+            w.Text,
+            w.Reinforcement,
+            w.LastConfirmedAt,
+            w.ContestedAt,
+            w.RetiredAt,
+            w.SupersededBy,
+            !db.Provenance.Any(p => p.WisdomId == w.Id)));
 
     /// <summary>
     /// The §8.1 edit: the new text becomes current — re-embedded, appended to the chain as a

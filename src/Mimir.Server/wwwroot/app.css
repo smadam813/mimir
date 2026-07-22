@@ -422,7 +422,6 @@ h1:focus {
     min-width: 8rem;
 }
 
-.filter-bar input[type="text"],
 .filter-search,
 .filter-bar select {
     padding: 0.3rem 0.5rem;

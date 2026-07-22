@@ -24,6 +24,8 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
 
     private readonly FakeTimeProvider _clock = new(Now);
 
+    private FixtureContextFactory Contexts => new(fixture);
+
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -178,14 +180,14 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
         detail.Entry.ScopeName.ShouldBe(project.DisplayName);
         detail.Entry.OrphanedProvenance.ShouldBeFalse();
         detail.Versions.Select(v => v.Version).ShouldBe([2, 1]);
-        detail.Sources.Count.ShouldBe(2);
-        var fromEvent = detail.Sources.Single(s => s.EventId == evt.Id);
+        detail.Provenance.Count.ShouldBe(2);
+        var fromEvent = detail.Provenance.Single(s => s.EventId == evt.Id);
         fromEvent.EpisodeId.ShouldBe(episode.Id);
         fromEvent.EpisodeProjectId.ShouldBe(project.Id);
         fromEvent.SessionId.ShouldBe(episode.SessionId);
         fromEvent.EventSeq.ShouldBe(3);
         fromEvent.EventType.ShouldBe(EventType.PostToolUse);
-        var fromHarvest = detail.Sources.Single(s => s.HarvestedItemId == item.Id);
+        var fromHarvest = detail.Provenance.Single(s => s.HarvestedItemId == item.Id);
         fromHarvest.HarvestedPath.ShouldBe(item.Path);
     }
 
@@ -263,7 +265,7 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
         (await FromDb(db => db.Episodes.CountAsync(e => e.Id == episode.Id, Token))).ShouldBe(1);
     }
 
-    private WisdomBrowser Browser() => new(new FixtureContextFactory(fixture), _embeddings, _clock);
+    private WisdomBrowser Browser() => new(Contexts, _embeddings, _clock);
 
     private async Task<Wisdom> SeedWisdomAsync(
         WisdomKind kind = WisdomKind.Fact,
@@ -278,7 +280,7 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
             Id = Guid.CreateVersion7(),
             Kind = kind,
             ScopeProjectId = scopeProjectId ?? Project.GlobalId,
-            Text = text ?? $"a durable note {Guid.NewGuid():N}",
+            Text = text ?? $"a durable fact {Guid.NewGuid():N}",
             Embedding = new Vector(TestVectors.Basis),
             Reinforcement = 1,
             LastConfirmedAt = lastConfirmedAt ?? Now,
@@ -403,15 +405,7 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
         return await query(db);
     }
 
-    private MimirDbContext CreateContext()
-    {
-        if (fixture.UnavailableReason is { } reason)
-        {
-            Assert.Skip(TestPostgres.SkipMessage(reason));
-        }
-
-        return fixture.CreateContext();
-    }
+    private MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 }

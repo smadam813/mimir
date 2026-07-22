@@ -70,7 +70,8 @@ else
         }
         catch (Exception)
         {
-            _error = "The edit did not save: the new text must re-embed, and the embedding model was unreachable.";
+            _error = "The edit did not save: the new text must re-embed and persist. "
+                + "Check the health strip — Ollama and Postgres both have to be reachable.";
         }
         finally
         {
