@@ -41,6 +41,7 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     public async Task ASealedPendingEpisode_DistillsToDone_WithEventProvenance()
     {
         await Context.ResetWisdomAsync(Token);
+        await ParkQueueAsync();
         var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
         var evt = await AddEventAsync(episode, 1, EventType.UserPromptSubmit);
         var text = $"Always pin the SDK feature band {Guid.NewGuid():N}";
@@ -71,6 +72,7 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     public async Task TheQueue_TakesTheOldestSeal_AndIgnoresUnsealedAndDone()
     {
         await Context.ResetWisdomAsync(Token);
+        await ParkQueueAsync();
         var newer = await AddEpisodeAsync(sealedAt: Now.AddMinutes(-5));
         var older = await AddEpisodeAsync(sealedAt: Now.AddHours(-2));
         await AddEpisodeAsync(sealedAt: null);
@@ -90,6 +92,7 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     public async Task AFailure_MarksFailed_AndAdmitsNothing_EvenFromTheChunksThatParsed()
     {
         await Context.ResetWisdomAsync(Token);
+        await ParkQueueAsync();
         var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
         // Two chunks at this budget: the first answers cleanly, the second is garbage — the
         // Episode must fail whole, with the first chunk's candidate never admitted, so the
@@ -114,6 +117,7 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     public async Task LaterChunksCandidates_MergeWithEarlierChunksWisdom()
     {
         await Context.ResetWisdomAsync(Token);
+        await ParkQueueAsync();
         var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
         var first = await AddEventAsync(episode, 1, EventType.PostToolUse, PayloadOfChars(4000));
         var second = await AddEventAsync(episode, 2, EventType.PostToolUse, PayloadOfChars(4000));
@@ -176,6 +180,18 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
         requeued.Distillation.ShouldBe(DistillationState.Pending);
         requeued.DistillationStartedAt.ShouldBeNull();
     }
+
+    /// <summary>
+    /// Parks every Episode already queued in the class-shared database as done, so a claiming
+    /// test's <c>RunNextAsync</c> sees only its own rows. xUnit's test order differs across
+    /// machines, and another test's leftovers — BootRecovery's re-queued Episode, QueueDepth's
+    /// seeds — are otherwise claimable ahead of the test's own (the #20 CI ordering lesson).
+    /// </summary>
+    private async Task ParkQueueAsync()
+        => await Context.Episodes
+            .Where(e => e.Distillation != DistillationState.Done)
+            .ExecuteUpdateAsync(
+                update => update.SetProperty(e => e.Distillation, DistillationState.Done), Token);
 
     private DistillationRun NewRun(DistillationOptions? options = null)
     {
