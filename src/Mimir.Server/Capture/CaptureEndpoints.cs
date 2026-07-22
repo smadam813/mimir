@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
@@ -9,8 +10,7 @@ namespace Mimir.Server.Capture;
 /// <summary>
 /// The HTTP surface behind <c>mimir hook</c> (spec §4). The async capture POSTs land on
 /// <c>/api/capture/events</c>; the two synchronous hooks get their own routes because they answer
-/// with content to print — SessionStart the Brief, UserPromptSubmit its lane's injection (empty
-/// until the Prompt-lane ticket).
+/// with content to print — SessionStart the Brief, UserPromptSubmit the Prompt lane's injection.
 /// </summary>
 internal static class CaptureEndpoints
 {
@@ -48,16 +48,43 @@ internal static class CaptureEndpoints
 
     /// <summary>
     /// The single §4 round-trip: record the prompt Event and answer with any Prompt-lane
-    /// injection. The injection stays empty until the Prompt-lane ticket.
+    /// injection (§7). Recall fails open — a capture that succeeded answers with an empty
+    /// injection rather than an error, because memory must never break a session.
     /// </summary>
     public static async Task<UserPromptReply> UserPromptAsync(
         HookEventRequest request,
         CaptureService capture,
+        PromptRecallService promptRecall,
+        ILogger<PromptRecallService> logger,
         CancellationToken cancellationToken)
     {
+        var episode = await capture.ResumeEpisodeAsync(request, cancellationToken);
         await capture.AppendEventAsync(request, EventType.UserPromptSubmit, cancellationToken);
-        return new UserPromptReply();
+
+        var injection = "";
+        if (PromptOf(request.Payload) is { } prompt && !string.IsNullOrWhiteSpace(prompt))
+        {
+            try
+            {
+                injection = await promptRecall.ComposeInjectionAsync(
+                    episode.SessionId, episode.ProjectId, prompt, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Prompt-lane recall failed; injecting nothing (fail open, §7).");
+            }
+        }
+
+        return new UserPromptReply { Injection = injection };
     }
+
+    /// <summary>The prompt text from the hook's stdin JSON, or null when absent.</summary>
+    private static string? PromptOf(JsonElement payload)
+        => payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("prompt", out var value)
+            && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     /// <summary>
     /// Creates or resumes the session's Episode and answers with the Brief (§7). The

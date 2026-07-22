@@ -21,19 +21,7 @@ internal sealed class BriefService(
         string sessionId, Guid projectId, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        var candidates = await db.Wisdom
-            .Where(w => w.RetiredAt == null)
-            // The ambient candidate universe (§7): this Project plus Global — other Projects'
-            // Wisdom reaches here only via merge-gate promotion, never directly.
-            .Where(w => w.ScopeProjectId == projectId || w.ScopeProjectId == Project.GlobalId)
-            // Native-content exclusion (§7): Wisdom whose only Provenance is HarvestedItems of
-            // the current Project never injects ambiently — the built-in already loads that
-            // content. Orphaned provenance is not harvest-only, so it stays in.
-            .Where(w => !db.Provenance.Any(p => p.WisdomId == w.Id)
-                || db.Provenance.Any(p => p.WisdomId == w.Id
-                    && (p.HarvestedItemId == null
-                        || !db.HarvestedItems.Any(h =>
-                            h.Id == p.HarvestedItemId && h.ProjectId == projectId))))
+        var candidates = await AmbientCandidates.Of(db, projectId)
             .Select(w => new
             {
                 w.Id,

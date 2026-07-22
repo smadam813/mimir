@@ -3,8 +3,8 @@ using Mimir.Server.Configuration;
 namespace Mimir.Server.Recall;
 
 /// <summary>
-/// The §7 ranking factors as pure arithmetic. The Brief's query-free score lives here; the recency
-/// factor is shared with the Prompt lane's query formula when its ticket arrives.
+/// The §7 ranking factors as pure arithmetic: the Brief's query-free score and the query
+/// ranking's per-hit multiplier, sharing the recency factor.
 /// </summary>
 internal static class RecallScoring
 {
@@ -28,4 +28,26 @@ internal static class RecallScoring
         => Recency(lastConfirmedAt, now, options)
             * (salient ? options.SalienceBoost : 1.0)
             * (1 + Math.Log2(1 + reinforcement));
+
+    /// <summary>
+    /// §7 query ranking: <c>RRF(vector_rank, fts_rank) × affinity × recency × salience ×
+    /// (1 + ln(1 + reinforcement)/10)</c>. The fused rank arrives from the hybrid search; the
+    /// reinforcement damping is deliberately gentler than the Brief's — with a query in hand,
+    /// relevance leads and confirmation count only nudges.
+    /// </summary>
+    /// <param name="projectAffinity">Whether the Wisdom's scope is the affinity context's own
+    /// Project — never true for Global Wisdom (§7).</param>
+    public static double QueryScore(
+        double fusedScore,
+        bool projectAffinity,
+        int reinforcement,
+        bool salient,
+        DateTimeOffset lastConfirmedAt,
+        DateTimeOffset now,
+        RecallOptions options)
+        => fusedScore
+            * (projectAffinity ? options.AffinityBoost : 1.0)
+            * Recency(lastConfirmedAt, now, options)
+            * (salient ? options.SalienceBoost : 1.0)
+            * (1 + (Math.Log(1 + reinforcement) / 10));
 }
