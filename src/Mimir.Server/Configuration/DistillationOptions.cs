@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 namespace Mimir.Server.Configuration;
 
 /// <summary>
-/// Spec §11: the Merge Gate knob this ticket needs. The Distiller's own knobs (sweep cadence,
-/// chunking, contested duration) arrive with the Distiller ticket.
+/// Spec §11: the Merge Gate knobs. The Distiller's own knobs (sweep cadence, chunking) arrive
+/// with the Distiller ticket.
 /// </summary>
 public sealed class DistillationOptions
 {
@@ -17,4 +17,7 @@ public sealed class DistillationOptions
     /// </summary>
     [Range(0.0, 1.0)]
     public double MergeMatchThreshold { get; init; } = 0.80;
+
+    /// <summary>§6.4: how long adjudication's Contested flag lives before the sweep clears it.</summary>
+    public TimeSpan ContestedDuration { get; init; } = TimeSpan.FromDays(14);
 }

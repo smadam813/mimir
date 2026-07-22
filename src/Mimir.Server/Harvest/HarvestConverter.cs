@@ -79,8 +79,9 @@ internal sealed class HarvestConverter(
         var item = await db.HarvestedItems.FirstAsync(i => i.Id == itemId, cancellationToken);
         var candidates = HarvestCandidates.Of(item.Content, options.Value.CandidateCap);
 
-        // Embeddings depend only on the text, so the whole item embeds in one batched
-        // round-trip up front — no model calls while the transaction below holds the connection.
+        // Embeddings depend only on the text, so the whole item embeds in one batched round-trip
+        // up front. Matched candidates still reach the model from inside the transaction below —
+        // the gate's arbiter ruling and rewrite re-embedding depend on what the search finds.
         var vectors = candidates.Count == 0
             ? []
             : (await embeddings.GenerateAsync(
