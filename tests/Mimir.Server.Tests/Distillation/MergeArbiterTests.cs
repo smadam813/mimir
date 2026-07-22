@@ -79,7 +79,7 @@ public sealed class MergeArbiterTests
     }
 
     [Fact]
-    public async Task ThePrompt_CarriesBothTexts_NoThink_AndJsonMode()
+    public async Task ThePrompt_CarriesBothTexts_NoThink_AndTheVerdictSchema()
     {
         _chat.Reply("""{"verdict":"supersede"}""");
 
@@ -91,8 +91,13 @@ public sealed class MergeArbiterTests
         prompt.ShouldContain("new lesson text");
         prompt.ShouldContain("/no_think");
         options.ShouldNotBeNull();
-        options.ResponseFormat.ShouldBe(ChatResponseFormat.Json);
         options.Temperature.ShouldBe(0);
+
+        // Structured output: the schema rides the response format, so Ollama constrains
+        // generation to it instead of being merely asked for JSON.
+        var format = options.ResponseFormat.ShouldBeOfType<ChatResponseFormatJson>();
+        format.Schema.ShouldNotBeNull();
+        format.Schema.Value.GetRawText().ShouldContain("scope_split");
     }
 
     private async Task<MergeRuling> RuleAsync(

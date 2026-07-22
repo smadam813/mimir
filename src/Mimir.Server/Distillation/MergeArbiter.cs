@@ -6,9 +6,9 @@ namespace Mimir.Server.Distillation;
 
 /// <summary>
 /// <see cref="IMergeArbiter"/> on the distiller model through the §2 model-client layer: one
-/// JSON-mode call (qwen3:8b, <c>/no_think</c>, temperature 0) classifying the matched pair and
-/// producing the §6 rewrite or adjudication. Rewrites are capped at <see cref="MaxTextLength"/>;
-/// anything else unusable in the answer throws <see cref="MergeArbiterException"/>.
+/// schema-constrained JSON call (qwen3:8b, <c>/no_think</c>, temperature 0) classifying the
+/// matched pair and producing the §6 rewrite or adjudication. Rewrites are capped at
+/// <see cref="MaxTextLength"/>; anything else unusable throws <see cref="MergeArbiterException"/>.
 /// </summary>
 internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
 {
@@ -21,12 +21,31 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>
+    /// Structured output: Ollama grammar-constrains decoding to this schema (OllamaSharp passes
+    /// it through as the request's <c>format</c>), so the verdict enum and shape are enforced at
+    /// generation time. Deliberately flat — the per-verdict required texts are conditional, which
+    /// grammar constraint can't express, so <see cref="Parse"/> stays the arbiter of usability.
+    /// </summary>
+    private static readonly JsonElement Schema = JsonSerializer.Deserialize<JsonElement>("""
+        {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string", "enum": ["agreement", "supersede", "scope_split"] },
+            "merged_text": { "type": "string" },
+            "global_text": { "type": "string" },
+            "project_text": { "type": "string" }
+          },
+          "required": ["verdict"]
+        }
+        """);
+
     // Temperature 0 keeps the verdict as reproducible as the model allows; num_ctx is the §11
     // distiller context, mapped to Ollama by OllamaSharp's option passthrough.
     private static readonly ChatOptions Options = new()
     {
         Temperature = 0,
-        ResponseFormat = ChatResponseFormat.Json,
+        ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "merge_ruling"),
         AdditionalProperties = new AdditionalPropertiesDictionary { ["num_ctx"] = 16384 },
     };
 
