@@ -1,0 +1,92 @@
+@using Mimir.Server.Ui
+@inject WisdomBrowser Browser
+
+@* The §8 curation affordance that follows Wisdom wherever it renders: inline edit (new
+   WisdomVersion, cause=edited, re-embed) and reversible Retire. Delete stays on the detail page —
+   it is the one permanent act (§10). *@
+@if (_editing)
+{
+    <div class="wisdom-edit">
+        <textarea class="wisdom-edit-text" @bind="_draft" aria-label="Edited Wisdom text"></textarea>
+        <div class="wisdom-actions">
+            <button class="button" disabled="@_saving" @onclick="SaveAsync">Save edit</button>
+            <button class="button" disabled="@_saving" @onclick="() => _editing = false">Cancel</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="wisdom-actions">
+        <button class="button" @onclick="BeginEdit">Edit</button>
+        @if (Entry.RetiredAt is null)
+        {
+            <button class="button" title="Reversibly exclude from recall and default search (§10)"
+                    @onclick="RetireAsync">
+                Retire
+            </button>
+        }
+        else
+        {
+            <button class="button" @onclick="UnretireAsync">Unretire</button>
+        }
+    </div>
+}
+@if (_error is not null)
+{
+    <p class="wisdom-error" role="alert">@_error</p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required WisdomListEntry Entry { get; set; }
+
+    /// <summary>Raised after any curation lands, so the host re-reads whatever it renders.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private bool _editing;
+    private bool _saving;
+    private string _draft = "";
+    private string? _error;
+
+    private void BeginEdit()
+    {
+        _draft = Entry.Text;
+        _error = null;
+        _editing = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            // The edit re-embeds the new text (§8.1), so this is the one curation action that
+            // needs Ollama up; the failure stays inline and the draft stays editable.
+            await Browser.EditAsync(Entry.Id, _draft, CancellationToken.None);
+            _editing = false;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception)
+        {
+            _error = "The edit did not save: the new text must re-embed, and the embedding model was unreachable.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RetireAsync()
+    {
+        await Browser.RetireAsync(Entry.Id, CancellationToken.None);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task UnretireAsync()
+    {
+        await Browser.UnretireAsync(Entry.Id, CancellationToken.None);
+        await OnChanged.InvokeAsync();
+    }
+}

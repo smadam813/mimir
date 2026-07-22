@@ -6,6 +6,7 @@ public static class UiRegistration
     public static IServiceCollection AddMimirUi(this IServiceCollection services)
     {
         services.AddSingleton<EpisodeBrowser>();
+        services.AddSingleton<WisdomBrowser>();
         return services;
     }
 }

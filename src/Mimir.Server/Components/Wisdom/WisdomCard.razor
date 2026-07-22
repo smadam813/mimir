@@ -1,0 +1,25 @@
+@using Mimir.Server.Ui
+
+@* One Wisdom anywhere it renders (§8): kind and state badges, the text linking to its detail,
+   and the inline curation affordance. Browser rows use it today; injection-log items and other
+   Provenance drill-downs drop the same card in when their tickets land. *@
+<article class="wisdom-card">
+    <header class="wisdom-head">
+        <KindBadge Kind="Entry.Kind" />
+        <span class="wisdom-scope" title="Scope (§3)">@Entry.ScopeName</span>
+        <StateBadges Entry="Entry" />
+        <span class="wisdom-meta">
+            ×@Entry.Reinforcement · @EpisodeDisplay.Stamp(Entry.LastConfirmedAt)
+        </span>
+    </header>
+    <a class="wisdom-text" href="@($"projects/{Entry.ScopeProjectId}/wisdom/{Entry.Id}")">@Entry.Text</a>
+    <WisdomCuration Entry="Entry" OnChanged="OnChanged" />
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public required WisdomListEntry Entry { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+}

@@ -228,17 +228,4 @@ public sealed class EpisodeBrowserTests(CaptureDatabaseFixture fixture)
     }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private sealed class FixtureContextFactory(CaptureDatabaseFixture fixture) : IDbContextFactory<MimirDbContext>
-    {
-        public MimirDbContext CreateDbContext()
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return fixture.CreateContext();
-        }
-    }
 }

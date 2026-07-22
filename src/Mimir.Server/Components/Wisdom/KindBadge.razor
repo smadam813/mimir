@@ -1,0 +1,9 @@
+@using Mimir.Server.Storage.Entities
+
+@* Spec §8: kind badges everywhere — the one way a Wisdom's kind ever renders. *@
+<span class="kind-badge @Kind.ToString().ToLowerInvariant()">@Kind</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public WisdomKind Kind { get; set; }
+}

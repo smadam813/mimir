@@ -1,0 +1,139 @@
+@page "/projects/{ProjectId:guid}/wisdom/{WisdomId:guid}"
+@using Mimir.Server.Components.Episodes
+@using Mimir.Server.Components.Wisdom
+@using Mimir.Server.Ui
+@inject WisdomBrowser Browser
+@inject NavigationManager Nav
+
+<PageTitle>Wisdom · Mimir</PageTitle>
+
+@if (_detail is null)
+{
+    <h1>Wisdom not found</h1>
+    <p class="lede">Nothing lives at this id — most likely it was deleted with its chain (§10).</p>
+    <p><a href="@BrowserHref">Back to the Wisdom browser</a></p>
+}
+else
+{
+    var entry = _detail.Entry;
+
+    <nav class="crumbs"><a href="@BrowserHref">← Wisdom</a></nav>
+    <div class="wisdom-head">
+        <KindBadge Kind="entry.Kind" />
+        <span class="wisdom-scope" title="Scope (§3)">@entry.ScopeName</span>
+        <StateBadges Entry="entry" />
+    </div>
+
+    <p class="wisdom-current">@entry.Text</p>
+
+    <WisdomCuration Entry="entry" OnChanged="RefreshAsync" />
+
+    <dl class="episode-facts wisdom-facts">
+        <div><dt>Reinforcement</dt><dd>×@entry.Reinforcement</dd></div>
+        <div><dt>Last confirmed</dt><dd>@EpisodeDisplay.Stamp(entry.LastConfirmedAt)</dd></div>
+        @if (entry.ContestedAt is { } contestedAt)
+        {
+            <div><dt>Contested since</dt><dd>@EpisodeDisplay.Stamp(contestedAt)</dd></div>
+        }
+        @if (entry.RetiredAt is { } retiredAt)
+        {
+            <div><dt>Retired since</dt><dd>@EpisodeDisplay.Stamp(retiredAt)</dd></div>
+        }
+        @if (entry.SupersededBy is { } successor)
+        {
+            <div>
+                <dt>Superseded by</dt>
+                <dd><a href="@($"projects/{ProjectId}/wisdom/{successor}")">the ruling's survivor</a></dd>
+            </div>
+        }
+    </dl>
+
+    @* Spec §8.1: Delete is the permanent act — confirmed, cascading the version chain (§10). *@
+    <ConfirmDelete Label="Delete Wisdom"
+                   Prompt="@($"Hard-delete this Wisdom and its {_detail.Versions.Count}-version chain forever?")"
+                   OnConfirm="DeleteAsync" />
+
+    <h2 class="wisdom-section">Versions</h2>
+    <ol class="version-chain">
+        @foreach (var version in _detail.Versions)
+        {
+            <li class="version-item">
+                <div class="event-head">
+                    <span class="event-seq">v@(version.Version)</span>
+                    <span class="event-type">@version.Cause.ToString().ToLowerInvariant()</span>
+                    <span class="event-at">@EpisodeDisplay.Stamp(version.CreatedAt)</span>
+                </div>
+                <p class="version-text">@version.Text</p>
+            </li>
+        }
+    </ol>
+
+    <h2 class="wisdom-section">Provenance</h2>
+    @if (entry.OrphanedProvenance)
+    {
+        <p class="orphaned-note">
+            Orphaned: every record this Wisdom derived from was hard-deleted (§3). The Wisdom and
+            its versions survive; only the trail back to sources is gone.
+        </p>
+    }
+    else
+    {
+        <ul class="provenance-list">
+            @foreach (var source in _detail.Sources)
+            {
+                <li class="provenance-item">
+                    @if (source.EventId is not null)
+                    {
+                        <a href="@EpisodeHref(source)">Event #@source.EventSeq · @source.EventType</a>
+                        <span class="wisdom-meta">in @source.SessionId</span>
+                    }
+                    else if (source.EpisodeId is not null)
+                    {
+                        <a href="@EpisodeHref(source)">Episode @source.SessionId</a>
+                    }
+                    else if (source.HarvestedItemId is null)
+                    {
+                        <span class="wisdom-meta">
+                            deliberate save — recorded outside any Episode (§7.1)
+                        </span>
+                    }
+                    @if (source.HarvestedPath is not null)
+                    {
+                        <span class="provenance-harvest" title="Harvested Item (§5)">
+                            harvested · @source.HarvestedPath
+                        </span>
+                    }
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid ProjectId { get; set; }
+
+    [Parameter]
+    public Guid WisdomId { get; set; }
+
+    private WisdomDetail? _detail;
+
+    private string BrowserHref => $"projects/{ProjectId}/wisdom";
+
+    private static string EpisodeHref(ProvenanceSource source)
+        => $"projects/{source.EpisodeProjectId}/episodes/{source.EpisodeId}";
+
+    protected override Task OnParametersSetAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _detail = await Browser.GetAsync(WisdomId, CancellationToken.None);
+        StateHasChanged();
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Browser.DeleteAsync(WisdomId, CancellationToken.None);
+        Nav.NavigateTo(BrowserHref);
+    }
+}
