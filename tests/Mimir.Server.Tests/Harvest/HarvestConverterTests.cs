@@ -160,6 +160,7 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
             Context,
             _embeddings,
             new WisdomSearch(Context, Options.Create(new SearchOptions())),
+            new FakeArbiter(),
             Options.Create(new DistillationOptions()),
             _clock);
         return new HarvestConverter(

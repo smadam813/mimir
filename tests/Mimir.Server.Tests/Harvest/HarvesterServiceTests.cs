@@ -155,6 +155,7 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         // whole graph rides along — with deterministic fake embeddings in place of Ollama.
         services.AddScoped<HarvestConverter>();
         services.AddScoped<MergeGate>();
+        services.AddScoped<IMergeArbiter>(_ => new FakeArbiter());
         services.AddScoped<WisdomSearch>();
         services.AddSingleton(embeddings ?? new FakeEmbeddings());
         services.AddSingleton(Options.Create(new SearchOptions()));
