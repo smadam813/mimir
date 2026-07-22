@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mimir.Contracts.Hooks;
@@ -27,8 +26,19 @@ internal sealed class CaptureService(
         HookEventRequest request,
         EventType type,
         CancellationToken cancellationToken)
+        => await AppendEventAsync(
+            await GetOrCreateEpisodeAsync(request, cancellationToken), request, type, cancellationToken);
+
+    /// <summary>
+    /// Append to an Episode the caller already resolved — the §4 single round-trip resolves once
+    /// and shares it between capture and recall rather than looking it up twice on the 500 ms path.
+    /// </summary>
+    public async Task<Event> AppendEventAsync(
+        Episode episode,
+        HookEventRequest request,
+        EventType type,
+        CancellationToken cancellationToken)
     {
-        var episode = await GetOrCreateEpisodeAsync(request, cancellationToken);
         var truncated = PayloadTruncator.Truncate(request.Payload, options.Value);
 
         for (var attempt = 1; ; attempt++)
@@ -78,12 +88,7 @@ internal sealed class CaptureService(
         }
 
         var sealedAt = clock.GetUtcNow();
-        var reason =
-            request.Payload.ValueKind == JsonValueKind.Object
-            && request.Payload.TryGetProperty("reason", out var value)
-            && value.ValueKind == JsonValueKind.String
-                ? value.GetString()
-                : null;
+        var reason = request.Payload.StringProperty("reason");
 
         // The WHERE guard is first-seal-wins made atomic: a duplicate that lost the race updates
         // zero rows instead of overwriting the session's real end.
