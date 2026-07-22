@@ -56,7 +56,12 @@ internal sealed class DistillationModule : IMimirModule
         services.AddScoped<MergeGate>();
         services.AddScoped<IMergeArbiter, MergeArbiter>();
         services.AddScoped<ContestedSweep>();
-        services.AddHostedService<ContestedSweepService>();
+        services.AddScoped<EpisodeDistiller>();
+        services.AddScoped<DistillationRun>();
+        services.AddScoped<DistillationSweep>();
+        services.AddSingleton<IDistillationTrigger, DistillationTrigger>();
+        services.AddHostedService<DistillerService>();
+        services.AddHostedService<DistillationSweepService>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)

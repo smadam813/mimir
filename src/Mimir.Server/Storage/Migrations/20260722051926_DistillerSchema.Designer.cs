@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mimir.Server.Storage;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -13,9 +14,11 @@ using Pgvector;
 namespace Mimir.Server.Storage.Migrations
 {
     [DbContext(typeof(MimirDbContext))]
-    partial class MimirDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722051926_DistillerSchema")]
+    partial class DistillerSchema
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -188,55 +191,6 @@ namespace Mimir.Server.Storage.Migrations
                     b.HasIndex("ProjectId");
 
                     b.ToTable("harvested_items", (string)null);
-                });
-
-            modelBuilder.Entity("Mimir.Server.Storage.Entities.Injection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("At")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("at");
-
-                    b.Property<int>("Chars")
-                        .HasColumnType("integer")
-                        .HasColumnName("chars");
-
-                    b.Property<string>("Lane")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("lane");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("project_id");
-
-                    b.Property<string>("QueryContext")
-                        .HasColumnType("text")
-                        .HasColumnName("query_context");
-
-                    b.Property<string>("SessionId")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("session_id");
-
-                    b.Property<string>("Verdict")
-                        .HasColumnType("text")
-                        .HasColumnName("verdict");
-
-                    b.Property<DateTimeOffset?>("VerdictAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("verdict_at");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("SessionId");
-
-                    b.ToTable("injections", (string)null);
                 });
 
             modelBuilder.Entity("Mimir.Server.Storage.Entities.Project", b =>
@@ -439,40 +393,6 @@ namespace Mimir.Server.Storage.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Mimir.Server.Storage.Entities.Injection", b =>
-                {
-                    b.HasOne("Mimir.Server.Storage.Entities.Project", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.OwnsMany("Mimir.Server.Storage.Entities.InjectionItem", "Items", b1 =>
-                        {
-                            b1.Property<Guid>("InjectionId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<double>("Score");
-
-                            b1.Property<Guid>("WisdomId");
-
-                            b1.HasKey("InjectionId", "__synthesizedOrdinal");
-
-                            b1.ToTable("injections");
-
-                            b1
-                                .ToJson("items")
-                                .HasColumnType("jsonb");
-
-                            b1.WithOwner()
-                                .HasForeignKey("InjectionId");
-                        });
-
-                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Mimir.Server.Storage.Entities.Provenance", b =>

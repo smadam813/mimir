@@ -8,13 +8,11 @@ namespace Mimir.Server.Distillation;
 /// <see cref="IMergeArbiter"/> on the distiller model through the §2 model-client layer: one
 /// schema-constrained JSON call (qwen3:8b, <c>/no_think</c>, temperature 0) classifying the
 /// matched pair and producing the §6 rewrite or adjudication. Rewrites are capped at
-/// <see cref="MaxTextLength"/>; anything else unusable throws <see cref="MergeArbiterException"/>.
+/// <see cref="ModelAnswer.MaxTextLength"/>; anything else unusable throws
+/// <see cref="MergeArbiterException"/>.
 /// </summary>
 internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
 {
-    /// <summary>The §6 candidate text budget, applied to every rewrite the model returns.</summary>
-    public const int MaxTextLength = 500;
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -100,7 +98,7 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
         Verdict? verdict;
         try
         {
-            verdict = JsonSerializer.Deserialize<Verdict>(Unfence(answer), JsonOptions);
+            verdict = JsonSerializer.Deserialize<Verdict>(ModelAnswer.Unfence(answer), JsonOptions);
         }
         catch (JsonException ex)
         {
@@ -121,27 +119,7 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
     private static string RequireText(string? text, string field)
         => string.IsNullOrWhiteSpace(text)
             ? throw new MergeArbiterException($"the verdict needs a non-empty '{field}'")
-            : Cap(text.Trim());
-
-    private static string Cap(string text)
-        => text.Length <= MaxTextLength ? text : text[..MaxTextLength].TrimEnd();
-
-    /// <summary>JSON mode should preclude fences, but a stray ```json wrapper is cheap to shed.</summary>
-    private static string Unfence(string answer)
-    {
-        var text = answer.Trim();
-        if (text.StartsWith("```", StringComparison.Ordinal))
-        {
-            var open = text.IndexOf('\n');
-            var close = text.LastIndexOf("```", StringComparison.Ordinal);
-            if (open >= 0 && close > open)
-            {
-                text = text[open..close].Trim();
-            }
-        }
-
-        return text;
-    }
+            : ModelAnswer.Cap(text.Trim());
 
     private sealed record Verdict(string? MergedText, string? GlobalText, string? ProjectText)
     {

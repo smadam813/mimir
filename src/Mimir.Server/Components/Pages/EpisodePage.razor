@@ -48,7 +48,8 @@ else
         <ol class="event-stream">
             @foreach (var evt in _detail.Events)
             {
-                <li class="event-item">
+                @* The id anchors Provenance drill-downs (§8.1) straight to the Event. *@
+                <li class="event-item" id="event-@evt.Id">
                     <div class="event-head">
                         <span class="event-seq">#@evt.Seq</span>
                         <span class="event-type">@evt.Type</span>

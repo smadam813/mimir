@@ -7,6 +7,9 @@ namespace Mimir.Server.Storage.Entities;
 /// </summary>
 public sealed class Episode
 {
+    /// <summary>The §4 seal reason the sweep writes when it closes a crashed session's Episode.</summary>
+    public const string CrashSweptReason = "crash-swept";
+
     public Guid Id { get; set; }
 
     /// <summary>Claude Code's session id. Unique — one Episode per session.</summary>
@@ -25,6 +28,13 @@ public sealed class Episode
 
     /// <summary>Spec §6 bookkeeping — the distillation queue is this column.</summary>
     public DistillationState Distillation { get; set; }
+
+    /// <summary>
+    /// When the worker claimed this Episode (<see cref="DistillationState.Running"/>). The §6
+    /// sweep reads it to reset a claim gone stale — a worker that died mid-run leaves Running
+    /// standing, and this timestamp is how "stale > 1 h" is measurable across restarts.
+    /// </summary>
+    public DateTimeOffset? DistillationStartedAt { get; set; }
 
     public DateTimeOffset? DistilledAt { get; set; }
 }

@@ -1,4 +1,5 @@
 using Mimir.Contracts.Hooks;
+using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage.Entities;
@@ -17,6 +18,7 @@ internal static class CaptureEndpoints
         HookEventRequest request,
         CaptureService capture,
         IHarvestScanTrigger harvestTrigger,
+        IDistillationTrigger distillationTrigger,
         CancellationToken cancellationToken)
     {
         switch (request.HookEvent)
@@ -32,8 +34,10 @@ internal static class CaptureEndpoints
             case HookEvents.SessionEnd:
                 await capture.SealEpisodeAsync(request, cancellationToken);
                 // §5: every SessionEnd asks the Harvester for an opportunistic scan — the session
-                // may just have written auto-memory. Fire-and-forget; sealing never waits on it.
+                // may just have written auto-memory. §6: Sealing queued the Episode, so the
+                // Distiller is worth waking too. Fire-and-forget; sealing never waits on either.
                 harvestTrigger.Request();
+                distillationTrigger.Request();
                 return Results.Accepted();
 
             default:

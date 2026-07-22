@@ -1,19 +1,19 @@
 namespace Mimir.Contracts.Health;
 
-/// <summary>
-/// The live half of the spec §8 health strip. The Distillation tile is an inert placeholder until
-/// its pipeline stage exists, so it carries no state here yet.
-/// </summary>
+/// <summary>The live spec §8 health strip: all four tiles.</summary>
 public sealed record HealthSnapshot
 {
     public static readonly HealthSnapshot Pending = new()
     {
         Ollama = OllamaTile.Pending,
+        Distillation = DistillationTile.Pending,
         Harvester = HarvesterTile.Pending,
         Storage = StorageTile.Pending,
     };
 
     public required OllamaTile Ollama { get; init; }
+
+    public required DistillationTile Distillation { get; init; }
 
     public required HarvesterTile Harvester { get; init; }
 
@@ -80,6 +80,30 @@ public enum ModelProvisioningState
 
     /// <summary>Provisioning failed; the model is not usable.</summary>
     Failed,
+}
+
+/// <summary>
+/// Spec §8: Distillation queue depth + last run. A failed run goes Degraded but keeps the last
+/// good figures, same as the Harvester tile.
+/// </summary>
+public sealed record DistillationTile
+{
+    public static readonly DistillationTile Pending = new()
+    {
+        State = HealthTileState.Pending,
+        Summary = "Waiting for the first pass",
+    };
+
+    public required HealthTileState State { get; init; }
+
+    /// <summary>One line for the tile face.</summary>
+    public required string Summary { get; init; }
+
+    /// <summary>Sealed Episodes still owed distillation (pending + running). Null until known.</summary>
+    public int? QueueDepth { get; init; }
+
+    /// <summary>When the last distillation attempt finished, well or badly. Null until one has.</summary>
+    public DateTimeOffset? LastRunAt { get; init; }
 }
 
 /// <summary>
