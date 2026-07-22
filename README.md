@@ -27,13 +27,20 @@ Compose needs `USERPROFILE` set to your home directory; Windows sets it for you.
 
 ### What works today
 
-The walking skeleton plus the capture path and Harvest: the Compose topology, the server shell, a
-health strip whose Ollama, Storage and Harvester tiles are real, `mimir hook` recording sessions
-as Episodes with their Events (see below), and one-way ingestion of Claude Code's built-in
-auto-memory into HarvestedItems — scanned from the read-only `/harvest` mount every 5 minutes and
-opportunistically on every SessionEnd, with the first scan doubling as the Backfill. The
-Distillation tile is an inert placeholder, and there is no Project sidebar yet — Distillation and
-Recall arrive with the tickets that own them.
+The whole v1 pipeline. `mimir hook` records sessions as Episodes with their Events (see below);
+the Harvester one-way-ingests Claude Code's built-in auto-memory from the read-only `/harvest`
+mount, every 5 minutes and on every SessionEnd, the first scan doubling as the Backfill. The
+Distiller turns Sealed Episodes into Wisdom candidates on `qwen3:8b`, and every candidate —
+distilled or harvested — enters the Wisdom tier through the Merge Gate, which inserts what is
+new, rewrites agreeing matches (reinforcement up, prior text versioned), and adjudicates
+contradictions by Supersede or Scope-split. Recall runs both ambient lanes, provenance-labeled
+and logged: the Brief at SessionStart and the cosine-gated Prompt-lane injection mid-session.
+The UI has the Project sidebar with the Wisdom browser and curation (search, filters, inline
+edit, Retire, Delete) and the Episode timeline with Event drill-down and hard delete, under a
+four-tile health strip that is real end to end (Ollama, Distillation queue, Harvester, Storage).
+In review: the MCP tools (`mimir mcp`,
+[#26](https://github.com/smadam813/mimir/issues/26)) and the injection log with verdict marks
+and the golden set ([#27](https://github.com/smadam813/mimir/issues/27)).
 
 ## Capturing your sessions
 
@@ -50,8 +57,7 @@ address and defaults to `http://127.0.0.1:6464`.
 
 Register the hooks in your **user-level** `~/.claude/settings.json` per the spec §4 table — the
 capture hooks are async fire-and-forget; SessionStart and UserPromptSubmit are synchronous because
-their replies (the Brief and the Prompt-lane injection, both arriving with the Recall tickets) are
-printed into the session:
+their replies (the Brief and the Prompt-lane injection) are printed into the session:
 
 ```json
 {
