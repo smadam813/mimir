@@ -119,6 +119,25 @@ public class MimirOptionsTests
         => Should.Throw<OptionsValidationException>(
             () => Resolve<HarvestOptions>(new Dictionary<string, string?> { [key] = value }));
 
+    [Fact]
+    public void RecallKnobs_DefaultToTheSpecdBriefBudgetAndRankingFactors()
+    {
+        var options = Resolve<RecallOptions>();
+
+        options.BriefBudgetChars.ShouldBe(4000);
+        options.RecencyHalfLifeDays.ShouldBe(90);
+        options.RecencyFloor.ShouldBe(0.3);
+        options.SalienceBoost.ShouldBe(1.3);
+    }
+
+    [Theory]
+    [InlineData("Mimir:Recall:BriefBudgetChars", "0")]
+    [InlineData("Mimir:Recall:RecencyFloor", "1.5")]
+    [InlineData("Mimir:Recall:SalienceBoost", "0.5")]
+    public void InvalidRecallOptions_FailValidation(string key, string value)
+        => Should.Throw<OptionsValidationException>(
+            () => Resolve<RecallOptions>(new Dictionary<string, string?> { [key] = value }));
+
     private static TOptions Resolve<TOptions>(Dictionary<string, string?>? settings = null)
         where TOptions : class
         => Resolve<TOptions>(new ConfigurationBuilder().AddInMemoryCollection(settings ?? []).Build());

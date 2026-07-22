@@ -72,4 +72,16 @@ public class AppSettingsTests
 
         shipped.MergeMatchThreshold.ShouldBe(new DistillationOptions().MergeMatchThreshold);
     }
+
+    [Fact]
+    public void ShippedRecallSection_MatchesTheCodeDefaults()
+    {
+        var shipped = AppSettings.GetSection(RecallOptions.SectionName).Get<RecallOptions>().ShouldNotBeNull();
+        var expected = new RecallOptions();
+
+        shipped.BriefBudgetChars.ShouldBe(expected.BriefBudgetChars);
+        shipped.RecencyHalfLifeDays.ShouldBe(expected.RecencyHalfLifeDays);
+        shipped.RecencyFloor.ShouldBe(expected.RecencyFloor);
+        shipped.SalienceBoost.ShouldBe(expected.SalienceBoost);
+    }
 }

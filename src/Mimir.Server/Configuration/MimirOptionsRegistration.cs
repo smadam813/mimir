@@ -22,6 +22,7 @@ public static class MimirOptionsRegistration
         services.AddSection<HarvestOptions>(configuration, HarvestOptions.SectionName);
         services.AddSection<SearchOptions>(configuration, SearchOptions.SectionName);
         services.AddSection<DistillationOptions>(configuration, DistillationOptions.SectionName);
+        services.AddSection<RecallOptions>(configuration, RecallOptions.SectionName);
         return services;
     }
 

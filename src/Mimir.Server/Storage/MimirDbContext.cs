@@ -25,6 +25,8 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
 
     public DbSet<Provenance> Provenance => Set<Provenance>();
 
+    public DbSet<Injection> Injections => Set<Injection>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasPostgresExtension("vector");
@@ -185,6 +187,29 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             provenance.HasOne<Event>().WithMany().HasForeignKey(p => p.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
             provenance.HasOne<HarvestedItem>().WithMany().HasForeignKey(p => p.HarvestedItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Injection>(injection =>
+        {
+            injection.ToTable("injections");
+            injection.Property(i => i.Id).HasColumnName("id").ValueGeneratedNever();
+            injection.Property(i => i.SessionId).HasColumnName("session_id");
+            injection.Property(i => i.ProjectId).HasColumnName("project_id");
+            injection.Property(i => i.At).HasColumnName("at");
+            injection.Property(i => i.Lane).HasColumnName("lane").HasConversion<string>();
+            injection.Property(i => i.QueryContext).HasColumnName("query_context");
+            injection.Property(i => i.Chars).HasColumnName("chars");
+            injection.Property(i => i.Verdict).HasColumnName("verdict").HasConversion<string>();
+            injection.Property(i => i.VerdictAt).HasColumnName("verdict_at");
+
+            // The §3 items — wisdom ids + scores — as one jsonb document on the row.
+            injection.OwnsMany(i => i.Items, items => items.ToJson("items"));
+
+            // The injection-log UI (§8.3) reads per session and per Project.
+            injection.HasIndex(i => i.SessionId);
+            injection.HasIndex(i => i.ProjectId);
+            injection.HasOne<Project>().WithMany().HasForeignKey(i => i.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
