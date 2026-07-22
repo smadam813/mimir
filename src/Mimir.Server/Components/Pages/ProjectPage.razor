@@ -1,6 +1,7 @@
 @page "/projects/{ProjectId:guid}"
 @page "/projects/{ProjectId:guid}/{Tab}"
 @using Mimir.Server.Components.Episodes
+@using Mimir.Server.Components.Injections
 @using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @inject EpisodeBrowser Browser
@@ -16,8 +17,7 @@ else
 {
     <h1>@_project.DisplayName</h1>
 
-    @* Spec §8: the three tabs, in spec order. Injections stays a stub until the Recall tickets;
-       Episodes remains the default landing. *@
+    @* Spec §8: the three tabs, in spec order. Episodes remains the default landing. *@
     <nav class="tab-strip" aria-label="Project surfaces">
         <a class="tab @(ActiveTab == "wisdom" ? "active" : null)" href="@Href("wisdom")">Wisdom</a>
         <a class="tab @(ActiveTab == "episodes" ? "active" : null)" href="@Href("episodes")">Episodes</a>
@@ -31,7 +31,7 @@ else
             break;
 
         case "injections":
-            <p class="tab-stub">The Injection log arrives with the Recall tickets.</p>
+            <InjectionLogTab ProjectId="ProjectId" />
             break;
 
         default:

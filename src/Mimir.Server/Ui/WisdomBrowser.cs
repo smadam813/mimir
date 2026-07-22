@@ -186,8 +186,12 @@ public sealed class WisdomBrowser(
         return new WisdomDetail(entry, versions, provenance);
     }
 
-    /// <summary>The one projection both the listing and the detail read a Wisdom through.</summary>
-    private static IQueryable<WisdomListEntry> ToEntries(MimirDbContext db, IQueryable<Wisdom> wisdom)
+    /// <summary>
+    /// The one projection every surface reads a Wisdom through — the browser's listing and
+    /// detail, and the injection log's items, so curation affordances follow Wisdom everywhere
+    /// it renders (§8).
+    /// </summary>
+    internal static IQueryable<WisdomListEntry> ToEntries(MimirDbContext db, IQueryable<Wisdom> wisdom)
         => wisdom.Select(w => new WisdomListEntry(
             w.Id,
             w.Kind,

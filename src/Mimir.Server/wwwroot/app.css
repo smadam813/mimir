@@ -611,6 +611,115 @@ h1:focus {
     max-width: 44rem;
 }
 
+/* Injection log (spec §8.3) */
+
+.injection-precision {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin: 0 0 1rem;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+}
+
+.injection-precision strong {
+    color: var(--text);
+    font-size: 1rem;
+}
+
+.injection-session {
+    margin-bottom: 1.5rem;
+}
+
+.injection-session-id {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.injection-entries {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+}
+
+.injection-entry {
+    padding: 0.6rem 0.8rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.injection-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+}
+
+.lane-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+}
+
+.lane-badge.brief { color: var(--working); border-color: var(--working); }
+.lane-badge.prompt { color: var(--ready); border-color: var(--ready); }
+.lane-badge.mcp { color: var(--pending); border-color: var(--pending); }
+
+.injection-query {
+    margin: 0 0 0.5rem;
+    max-width: 44rem;
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+.injection-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.button.verdict-active {
+    color: var(--ready);
+    border-color: var(--ready);
+}
+
+.injection-promoted {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--ready);
+    color: var(--ready);
+}
+
+.injection-items {
+    display: grid;
+    gap: 0.6rem;
+}
+
+.injection-item .wisdom-meta {
+    margin-left: 0;
+    font-size: 0.75rem;
+}
+
+.injection-gone {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
 /* Buttons + confirmed deletes (spec §8.2) */
 
 .button {

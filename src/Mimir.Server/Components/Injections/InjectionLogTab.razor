@@ -1,0 +1,142 @@
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+@using Mimir.Server.Components.Wisdom
+@inject InjectionBrowser Browser
+
+@* Spec §8.3: per-session/lane entries with sizes and items, one-click useful/noise verdicts,
+   and promote-to-golden. Items render the same Wisdom card as the browser — curation follows
+   Wisdom wherever it appears (§8). *@
+@* _view is null only while the first load is in flight — render nothing rather than flash the
+   empty-note. *@
+@if (_view is { Sessions.Count: 0 })
+{
+    <p class="empty-note">
+        No injections recorded for this Project yet. The Recall lanes fill this surface as
+        sessions run (§7) — and empty decisions leave no trace, only actual injections land here.
+    </p>
+}
+else if (_view is { } view)
+{
+    <p class="injection-precision" title="Injection precision: useful / marked (§9)">
+        Injection precision:
+        @if (view.Precision is { } precision)
+        {
+            <strong>@precision.ToString("P0")</strong>
+            <span class="wisdom-meta">(@view.Useful useful / @view.Marked marked)</span>
+        }
+        else
+        {
+            <span class="wisdom-meta">no verdicts yet — mark entries useful or noise below</span>
+        }
+    </p>
+
+    @foreach (var session in view.Sessions)
+    {
+        <section class="injection-session">
+            <h2 class="injection-session-id" title="Claude Code session id">@session.SessionId</h2>
+            <ol class="injection-entries">
+                @foreach (var entry in session.Entries)
+                {
+                    <li class="injection-entry" @key="entry.Id">
+                        <div class="injection-head">
+                            <span class="lane-badge @entry.Lane.ToString().ToLowerInvariant()"
+                                  title="Recall lane (§3)">@entry.Lane</span>
+                            <span class="wisdom-meta">
+                                @EpisodeDisplay.Stamp(entry.At)
+                                · @entry.Chars chars
+                                · @(entry.Items.Count == 1 ? "1 item" : $"{entry.Items.Count} items")
+                            </span>
+                        </div>
+
+                        @if (entry.QueryContext is { } query)
+                        {
+                            <p class="injection-query" title="query_context (§3)">“@query”</p>
+                        }
+
+                        <div class="injection-actions">
+                            <button class="button @(entry.Verdict == InjectionVerdict.Useful ? "verdict-active" : null)"
+                                    title="Mark the whole entry useful (§9)"
+                                    @onclick="() => MarkAsync(entry.Id, InjectionVerdict.Useful)">
+                                Useful
+                            </button>
+                            <button class="button @(entry.Verdict == InjectionVerdict.Noise ? "verdict-active" : null)"
+                                    title="Mark the whole entry noise (§9)"
+                                    @onclick="() => MarkAsync(entry.Id, InjectionVerdict.Noise)">
+                                Noise
+                            </button>
+                            @if (entry.VerdictAt is { } verdictAt)
+                            {
+                                <span class="wisdom-meta">marked @EpisodeDisplay.Stamp(verdictAt)</span>
+                            }
+
+                            @if (entry.PromotedCaseId is not null)
+                            {
+                                <span class="injection-promoted" title="A GoldenCase carries this entry's query (§9)">
+                                    promoted to golden
+                                </span>
+                            }
+                            else
+                            {
+                                <button class="button" disabled="@(!entry.CanPromote)"
+                                        title="@(entry.CanPromote
+                                            ? "Create a GoldenCase from this entry's query_context + project_id (§8.3)"
+                                            : "Brief entries carry no query to replay (§8.3)")"
+                                        @onclick="() => PromoteAsync(entry.Id)">
+                                    Promote to golden
+                                </button>
+                            }
+                        </div>
+
+                        <div class="injection-items">
+                            @foreach (var item in entry.Items)
+                            {
+                                @if (item.Wisdom is { } wisdom)
+                                {
+                                    <div class="injection-item" @key="item.WisdomId">
+                                        <span class="wisdom-meta" title="The §7 score that ranked it">
+                                            score @item.Score.ToString("0.0000")
+                                        </span>
+                                        <WisdomCard Entry="wisdom" OnChanged="RefreshAsync" />
+                                    </div>
+                                }
+                                else
+                                {
+                                    <p class="injection-gone" @key="item.WisdomId">
+                                        A Wisdom hard-deleted since (§10) — the injection still happened.
+                                    </p>
+                                }
+                            }
+                        </div>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    private InjectionLogView? _view;
+
+    protected override Task OnParametersSetAsync() => RefreshAsync();
+
+    private async Task MarkAsync(Guid injectionId, InjectionVerdict verdict)
+    {
+        await Browser.MarkAsync(injectionId, verdict, CancellationToken.None);
+        await RefreshAsync();
+    }
+
+    private async Task PromoteAsync(Guid injectionId)
+    {
+        await Browser.PromoteAsync(injectionId, CancellationToken.None);
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _view = await Browser.ListAsync(ProjectId, CancellationToken.None);
+        StateHasChanged();
+    }
+}
