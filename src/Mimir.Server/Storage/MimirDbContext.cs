@@ -62,10 +62,15 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             episode.Property(e => e.SealReason).HasColumnName("seal_reason");
             episode.Property(e => e.Cwd).HasColumnName("cwd");
             episode.Property(e => e.Distillation).HasColumnName("distillation").HasConversion<string>();
+            episode.Property(e => e.DistillationStartedAt).HasColumnName("distillation_started_at");
             episode.Property(e => e.DistilledAt).HasColumnName("distilled_at");
 
             episode.HasIndex(e => e.SessionId).IsUnique();
             episode.HasIndex(e => e.ProjectId);
+            // The §6 queue's working set: sealed Episodes still owed distillation. Done rows —
+            // the table's eventual bulk — stay out of the index.
+            episode.HasIndex(e => e.Distillation)
+                .HasFilter("sealed_at IS NOT NULL AND distillation <> 'Done'");
             episode.HasOne<Project>().WithMany().HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
 

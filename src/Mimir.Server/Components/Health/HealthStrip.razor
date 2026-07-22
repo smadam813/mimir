@@ -16,7 +16,22 @@
         }
     </HealthTile>
 
-    <HealthTile Title="Distillation" Placeholder="Arrives with the Distiller" />
+    <HealthTile Title="Distillation" State="_snapshot.Distillation.State" Summary="@_snapshot.Distillation.Summary">
+        @if (_snapshot.Distillation.QueueDepth is { } queueDepth)
+        {
+            <div class="detail-row">
+                <span class="detail-name">queue</span>
+                <span class="detail-value">@queueDepth</span>
+            </div>
+        }
+        @if (_snapshot.Distillation.LastRunAt is { } lastRun)
+        {
+            <div class="detail-row">
+                <span class="detail-name">last run</span>
+                <span class="detail-value">@lastRun.LocalDateTime.ToString("HH:mm:ss")</span>
+            </div>
+        }
+    </HealthTile>
 
     <HealthTile Title="Harvester" State="_snapshot.Harvester.State" Summary="@_snapshot.Harvester.Summary">
         @if (_snapshot.Harvester.LastScanAt is { } lastScan)
