@@ -1,6 +1,7 @@
 using Mimir.Server.Capture;
 using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
+using Mimir.Server.Recall;
 
 namespace Mimir.Server.Modules;
 
@@ -76,6 +77,7 @@ internal sealed class RecallModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddScoped<BriefService>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)

@@ -1,6 +1,7 @@
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
+using Mimir.Server.Recall;
 using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Capture;
@@ -8,7 +9,8 @@ namespace Mimir.Server.Capture;
 /// <summary>
 /// The HTTP surface behind <c>mimir hook</c> (spec §4). The async capture POSTs land on
 /// <c>/api/capture/events</c>; the two synchronous hooks get their own routes because they answer
-/// with content to print. Their replies are empty until the Recall tickets fill them in.
+/// with content to print — SessionStart the Brief, UserPromptSubmit its lane's injection (empty
+/// until the Prompt-lane ticket).
 /// </summary>
 internal static class CaptureEndpoints
 {
@@ -58,14 +60,21 @@ internal static class CaptureEndpoints
     }
 
     /// <summary>
-    /// Creates or resumes the session's Episode. The Brief stays empty until its ticket (§7).
+    /// Creates or resumes the session's Episode and answers with the Brief (§7). The
+    /// <c>source: "compact"</c> re-fire arrives here identically — the hook carries the same
+    /// session id, so it resumes the Episode and gets a fresh Brief.
     /// </summary>
     public static async Task<SessionStartReply> SessionStartAsync(
         HookEventRequest request,
         CaptureService capture,
+        BriefService brief,
         CancellationToken cancellationToken)
     {
-        await capture.ResumeEpisodeAsync(request, cancellationToken);
-        return new SessionStartReply();
+        var episode = await capture.ResumeEpisodeAsync(request, cancellationToken);
+        return new SessionStartReply
+        {
+            Brief = await brief.ComposeBriefAsync(
+                episode.SessionId, episode.ProjectId, cancellationToken),
+        };
     }
 }

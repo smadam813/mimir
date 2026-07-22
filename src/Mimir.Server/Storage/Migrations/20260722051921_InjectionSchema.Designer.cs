@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mimir.Server.Storage;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -13,9 +14,11 @@ using Pgvector;
 namespace Mimir.Server.Storage.Migrations
 {
     [DbContext(typeof(MimirDbContext))]
-    partial class MimirDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722051921_InjectionSchema")]
+    partial class InjectionSchema
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,10 +43,6 @@ namespace Mimir.Server.Storage.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("distillation");
-
-                    b.Property<DateTimeOffset?>("DistillationStartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("distillation_started_at");
 
                     b.Property<DateTimeOffset?>("DistilledAt")
                         .HasColumnType("timestamp with time zone")
@@ -71,9 +70,6 @@ namespace Mimir.Server.Storage.Migrations
                         .HasColumnName("started_at");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Distillation")
-                        .HasFilter("sealed_at IS NOT NULL AND distillation <> 'Done'");
 
                     b.HasIndex("ProjectId");
 
