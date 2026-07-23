@@ -285,7 +285,7 @@ public sealed class HarvestScannerTests(CaptureDatabaseFixture fixture)
             DisplayName = name,
         };
 
-        await using var db = fixture.CreateContext();
+        await using var db = NewContext();
         db.Projects.Add(project);
         await db.SaveChangesAsync(Token);
         return (project, rootPath);
@@ -314,22 +314,25 @@ public sealed class HarvestScannerTests(CaptureDatabaseFixture fixture)
 
     private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
     {
-        await using var context = fixture.CreateContext();
+        await using var context = NewContext();
         return await query(context);
     }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
+    private MimirDbContext Context => _context ??= NewContext();
 
-            return _context ??= fixture.CreateContext();
+    /// <summary>
+    /// Every context a test opens goes through here, so the no-Postgres skip fires even in tests
+    /// that seed the database before their first scan touches <see cref="Context"/>.
+    /// </summary>
+    private MimirDbContext NewContext()
+    {
+        if (fixture.UnavailableReason is { } reason)
+        {
+            Assert.Skip(TestPostgres.SkipMessage(reason));
         }
+
+        return fixture.CreateContext();
     }
 }
