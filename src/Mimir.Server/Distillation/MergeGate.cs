@@ -271,12 +271,18 @@ internal sealed class MergeGate(
 
     private readonly record struct ProvenanceLink(Guid? EpisodeId, Guid? EventId, Guid? HarvestedItemId);
 
-    /// <summary>One Provenance row per provenance Event (§6); no Events means one row.</summary>
+    /// <summary>
+    /// One Provenance row per provenance Event (§6); no Events means one row. A candidate carrying
+    /// nothing at all — a <c>mimir_remember</c> with no live Episode (§7.1) — yields no rows: born
+    /// with the "orphaned provenance" the UI already flags, never an all-null link.
+    /// </summary>
     private static IEnumerable<ProvenanceLink> LinksOf(WisdomCandidate candidate)
         => candidate.EventIds is { Count: > 0 }
             ? candidate.EventIds.Distinct()
                 .Select(eventId => new ProvenanceLink(candidate.EpisodeId, eventId, candidate.HarvestedItemId))
-            : [new ProvenanceLink(candidate.EpisodeId, null, candidate.HarvestedItemId)];
+            : candidate.EpisodeId is null && candidate.HarvestedItemId is null
+                ? []
+                : [new ProvenanceLink(candidate.EpisodeId, null, candidate.HarvestedItemId)];
 
     private static Provenance NewProvenance(Guid wisdomId, ProvenanceLink link) => new()
     {

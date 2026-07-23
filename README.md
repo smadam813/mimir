@@ -86,6 +86,29 @@ prompt and tool use, Sealed with its reason at SessionEnd. Everything fails open
 3 s and always exit 0, so sessions never break or slow when Mimir is down (spec §1). With Mimir
 stopped the hooks simply print nothing and your session proceeds bare.
 
+## Searching your memory from a session
+
+`mimir mcp` serves the deliberate-recall tools (spec §7) over stdio. Register it once at **user
+scope** so every project gets it:
+
+```sh
+claude mcp add --scope user mimir -- mimir mcp
+```
+
+(use the full path to `mimir.exe` if it is not on your `PATH`). Claude Code spawns the server in
+the project directory, which is how it knows which Project anchors the affinity boost and where a
+`mimir_remember` lands (spec §7.1). Three tools:
+
+- **`mimir_search(query, …)`** — hybrid search over distilled Wisdom (every project's, not just
+  the current one) and raw Episode events; filters for `project`, `kind`, `since`; Retired Wisdom
+  only with `include_retired`.
+- **`mimir_timeline(project?, since?)`** — recent Episodes, newest first, with seal state.
+- **`mimir_remember(content, kind)`** — an explicit, salient save: onto the live Episode when one
+  exists, otherwise straight through the Merge Gate into the Wisdom tier.
+
+Unlike the fail-open hooks this lane is deliberate: with Mimir down the tools answer an honest
+error instead of silence.
+
 ## Developing
 
 ```sh
@@ -110,7 +133,7 @@ Layout, per spec §2:
 | Project | What it is |
 |---|---|
 | `src/Mimir.Server` | The modular monolith: pipeline modules, hosted workers, and the Blazor UI |
-| `src/Mimir.Cli` | The host companion — `mimir hook` is live, `mimir mcp` arrives with Recall |
+| `src/Mimir.Cli` | The host companion — `mimir hook` relays the hooks, `mimir mcp` serves the MCP tools |
 | `src/Mimir.Contracts` | DTOs shared by the two |
 
 Configuration follows the spec §11 knob table. Each section is an options class under
