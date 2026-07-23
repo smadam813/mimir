@@ -17,4 +17,8 @@ public sealed class SearchOptions
     /// <summary>Candidates each leg (vector KNN, FTS) contributes before fusion (§3).</summary>
     [Range(1, 1000)]
     public int PerLegTopN { get; init; } = 50;
+
+    /// <summary>§9: a GoldenCase passes when its expected Wisdom ranks within this many.</summary>
+    [Range(1, 1000)]
+    public int GoldenSetK { get; init; } = 5;
 }

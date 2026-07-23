@@ -27,6 +27,8 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
 
     public DbSet<Injection> Injections => Set<Injection>();
 
+    public DbSet<GoldenCase> GoldenCases => Set<GoldenCase>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasPostgresExtension("vector");
@@ -216,6 +218,33 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             injection.HasIndex(i => i.ProjectId);
             injection.HasOne<Project>().WithMany().HasForeignKey(i => i.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<GoldenCase>(goldenCase =>
+        {
+            goldenCase.ToTable("golden_cases");
+            goldenCase.Property(g => g.Id).HasColumnName("id").ValueGeneratedNever();
+            goldenCase.Property(g => g.QueryContext).HasColumnName("query_context");
+            goldenCase.Property(g => g.ProjectId).HasColumnName("project_id");
+            goldenCase.Property(g => g.ExpectedWisdomId).HasColumnName("expected_wisdom_id");
+            goldenCase.Property(g => g.CreatedFromInjectionId).HasColumnName("created_from_injection_id");
+            goldenCase.Property(g => g.Note).HasColumnName("note");
+
+            // Partial unique: at most one promoted case per injection, making PromoteAsync's
+            // idempotency durable against concurrent clicks — hand-inserted cases (§9) carry no
+            // breadcrumb and stay unconstrained.
+            goldenCase.HasIndex(g => g.CreatedFromInjectionId).IsUnique()
+                .HasFilter("created_from_injection_id IS NOT NULL");
+            goldenCase.HasOne<Project>().WithMany().HasForeignKey(g => g.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // A case expecting a hard-deleted Wisdom (§8.1) could never pass again, so it goes
+            // with the Wisdom rather than poisoning the suite.
+            goldenCase.HasOne<Wisdom>().WithMany().HasForeignKey(g => g.ExpectedWisdomId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // The promotion link is a breadcrumb, not the case's substance: losing the source
+            // entry (nothing deletes Injections in v1) must not take the case with it.
+            goldenCase.HasOne<Injection>().WithMany().HasForeignKey(g => g.CreatedFromInjectionId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         base.OnModelCreating(modelBuilder);

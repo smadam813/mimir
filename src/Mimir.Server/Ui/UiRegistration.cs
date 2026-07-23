@@ -7,6 +7,7 @@ public static class UiRegistration
     {
         services.AddSingleton<EpisodeBrowser>();
         services.AddSingleton<WisdomBrowser>();
+        services.AddSingleton<InjectionBrowser>();
         return services;
     }
 }
