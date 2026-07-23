@@ -8,6 +8,11 @@ WORKDIR /src
 COPY global.json Directory.Build.props Directory.Packages.props nuget.config ./
 COPY src/Mimir.Contracts/Mimir.Contracts.csproj src/Mimir.Contracts/packages.lock.json src/Mimir.Contracts/
 COPY src/Mimir.Server/Mimir.Server.csproj src/Mimir.Server/packages.lock.json src/Mimir.Server/
+# Must stay unlocked: CI is deliberately left unset until right before the publish step below,
+# once the full source tree is present. This restore only sees the .csproj files, so its package
+# graph is a strict subset of the committed lock file (missing implicit web-asset packages that
+# only resolve once wwwroot/Components exist) — locking it here would fail with NU1004. Do not
+# hoist `ENV CI=true` above this line, and do not set CI via a build arg or base image.
 RUN dotnet restore src/Mimir.Server/Mimir.Server.csproj
 
 COPY src/Mimir.Contracts/ src/Mimir.Contracts/
