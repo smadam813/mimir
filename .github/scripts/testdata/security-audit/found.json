@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "parameters": "--vulnerable --include-transitive",
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "projects": [
+    {
+      "path": "/home/runner/work/mimir/mimir/src/Mimir.Server/Mimir.Server.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Npgsql.EntityFrameworkCore.PostgreSQL",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3",
+              "vulnerabilities": [
+                {
+                  "severity": "High",
+                  "advisoryurl": "https://github.com/advisories/GHSA-aaaa-1111-bbbb"
+                }
+              ]
+            }
+          ],
+          "transitivePackages": [
+            {
+              "id": "System.Text.Json",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "severity": "High",
+                  "advisoryurl": "https://github.com/advisories/GHSA-hh1t-2222-cccc"
+                },
+                {
+                  "severity": "Critical",
+                  "advisoryurl": "https://github.com/advisories/GHSA-cc1t-3333-dddd"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/home/runner/work/mimir/mimir/src/Mimir.Cli/Mimir.Cli.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "transitivePackages": [
+            {
+              "id": "System.Text.Json",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {
+                  "severity": "High",
+                  "advisoryurl": "https://github.com/advisories/GHSA-hh1t-2222-cccc"
+                },
+                {
+                  "severity": "Critical",
+                  "advisoryurl": "https://github.com/advisories/GHSA-cc1t-3333-dddd"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
