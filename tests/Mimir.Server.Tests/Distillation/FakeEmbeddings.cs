@@ -18,6 +18,9 @@ internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<flo
 
     public void Map(string text, float[] vector) => _mapped[text] = vector;
 
+    /// <summary>Batches served — lets a test assert an embedding was reused, not regenerated.</summary>
+    public int Batches { get; private set; }
+
     /// <summary>Any batch containing this text throws — a deterministically unembeddable item.</summary>
     public void Poison(string text) => _poisoned.Add(text);
 
@@ -26,6 +29,7 @@ internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<flo
         EmbeddingGenerationOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        Batches++;
         var texts = values.ToList();
         if (texts.Any(_poisoned.Contains))
         {

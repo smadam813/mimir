@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
+using Npgsql;
 
 namespace Mimir.Server.Ui;
 
@@ -24,18 +25,27 @@ public sealed record InjectionLogEntry(
     Guid? PromotedCaseId,
     IReadOnlyList<InjectedWisdom> Items)
 {
-    /// <summary>§8.3: promotion needs a query to replay, and Brief entries carry none (§3).</summary>
-    public bool CanPromote => QueryContext is not null;
+    /// <summary>
+    /// §8.3: promotion needs a query to replay (Brief entries carry none, §3) and a live Wisdom
+    /// to expect — recall never surfaces a retired or hard-deleted row (§7), so an entry whose
+    /// items all went that way has nothing a GoldenCase could ever rank.
+    /// </summary>
+    public bool CanPromote => QueryContext is not null
+        && Items.Any(i => i.Wisdom is { RetiredAt: null });
 }
 
 /// <summary>One session's entries, newest first (§8.3).</summary>
 public sealed record InjectionSession(string SessionId, IReadOnlyList<InjectionLogEntry> Entries);
 
 /// <summary>The §8.3 tab: per-session entries plus the §9 injection-precision inputs.</summary>
-public sealed record InjectionLogView(IReadOnlyList<InjectionSession> Sessions, int Useful, int Marked)
+public sealed record InjectionLogView(
+    IReadOnlyList<InjectionSession> Sessions, int Useful, int Marked, int TotalEntries)
 {
     /// <summary>§9 injection precision: useful / marked. Null until anything is marked.</summary>
     public double? Precision => Marked == 0 ? null : (double)Useful / Marked;
+
+    /// <summary>True when entries older than the recent-entry bound fell off the listing.</summary>
+    public bool Truncated => Sessions.Sum(s => s.Entries.Count) < TotalEntries;
 }
 
 /// <summary>
@@ -46,29 +56,40 @@ public sealed record InjectionLogView(IReadOnlyList<InjectionSession> Sessions, 
 /// </summary>
 public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts, TimeProvider clock)
 {
+    /// <summary>
+    /// Bounds the listing: the log accrues one row per non-empty recall decision across every
+    /// session — the fastest-growing surface in the schema — so the tab renders only the most
+    /// recent entries and says when older ones are cut. The §9 precision inputs deliberately
+    /// stay whole-history; a display bound must not move the stat.
+    /// </summary>
+    internal const int RecentEntryLimit = 100;
+
     public async Task<InjectionLogView> ListAsync(Guid projectId, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var rows = await db.Injections.AsNoTracking()
-            .Where(i => i.ProjectId == projectId)
+        var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == projectId);
+        var rows = await scoped
             .OrderByDescending(i => i.At).ThenByDescending(i => i.Id)
+            .Take(RecentEntryLimit)
             .ToListAsync(cancellationToken);
+        var totalEntries = await scoped.CountAsync(cancellationToken);
+        var useful = await scoped
+            .CountAsync(i => i.Verdict == InjectionVerdict.Useful, cancellationToken);
+        var marked = await scoped.CountAsync(i => i.Verdict != null, cancellationToken);
 
         var wisdomIds = rows.SelectMany(i => i.Items.Select(x => x.WisdomId)).Distinct().ToList();
         var wisdom = await WisdomBrowser
             .ToEntries(db, db.Wisdom.Where(w => wisdomIds.Contains(w.Id)))
             .ToDictionaryAsync(w => w.Id, cancellationToken);
 
-        // Promotion is idempotent, but hand-inserted cases (§9) may carry the same breadcrumb —
-        // any case for the entry counts as "promoted", so duplicates collapse instead of throwing.
+        // The partial unique index on created_from_injection_id caps the breadcrumb at one case
+        // per entry, so this lookup cannot collide.
         var entryIds = rows.Select(i => i.Id).ToList();
-        var promoted = (await db.GoldenCases
-                .Where(g => g.CreatedFromInjectionId != null
-                    && entryIds.Contains(g.CreatedFromInjectionId.Value))
-                .Select(g => new { InjectionId = g.CreatedFromInjectionId!.Value, g.Id })
-                .ToListAsync(cancellationToken))
-            .GroupBy(g => g.InjectionId)
-            .ToDictionary(g => g.Key, g => g.First().Id);
+        var promoted = await db.GoldenCases
+            .Where(g => g.CreatedFromInjectionId != null
+                && entryIds.Contains(g.CreatedFromInjectionId.Value))
+            .ToDictionaryAsync(
+                g => g.CreatedFromInjectionId!.Value, g => g.Id, cancellationToken);
 
         // Rows arrive newest first, so sessions order by their latest entry and entries stay
         // newest-first within each session.
@@ -92,10 +113,7 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
                     .ToList()))
             .ToList();
 
-        return new InjectionLogView(
-            sessions,
-            Useful: rows.Count(i => i.Verdict == InjectionVerdict.Useful),
-            Marked: rows.Count(i => i.Verdict != null));
+        return new InjectionLogView(sessions, useful, marked, totalEntries);
     }
 
     /// <summary>
@@ -116,9 +134,11 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
 
     /// <summary>
     /// §8.3 promote-to-golden: a GoldenCase filled from the entry's <c>query_context</c> and
-    /// <c>project_id</c>, expecting the entry's top-ranked still-existing Wisdom. Idempotent —
-    /// a repeat click returns the existing case. Null when the entry cannot promote: no
-    /// <c>query_context</c> (Brief entries), or every injected Wisdom hard-deleted since.
+    /// <c>project_id</c>, expecting the entry's top-ranked still-live Wisdom — neither retired
+    /// nor hard-deleted, because recall filters retired rows (§7) and a case expecting one
+    /// could never pass. Idempotent — a repeat click returns the existing case. Null when the
+    /// entry cannot promote: no <c>query_context</c> (Brief entries), or no injected Wisdom
+    /// left alive.
     /// </summary>
     public async Task<Guid?> PromoteAsync(Guid injectionId, CancellationToken cancellationToken)
     {
@@ -144,7 +164,7 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             .Select(x => x.WisdomId)
             .ToList();
         var surviving = await db.Wisdom
-            .Where(w => rankedIds.Contains(w.Id))
+            .Where(w => rankedIds.Contains(w.Id) && w.RetiredAt == null)
             .Select(w => w.Id)
             .ToListAsync(cancellationToken);
         var expected = rankedIds.FirstOrDefault(surviving.Contains);
@@ -166,7 +186,21 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
                 + injection.At.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         };
         db.GoldenCases.Add(goldenCase);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // A concurrent click won the insert; the partial unique breadcrumb index makes
+            // the idempotency durable, so yield to the case that landed.
+            return await db.GoldenCases
+                .Where(g => g.CreatedFromInjectionId == injectionId)
+                .Select(g => (Guid?)g.Id)
+                .FirstAsync(cancellationToken);
+        }
+
         return goldenCase.Id;
     }
 }

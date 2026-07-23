@@ -167,7 +167,9 @@ namespace Mimir.Server.Storage.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedFromInjectionId");
+                    b.HasIndex("CreatedFromInjectionId")
+                        .IsUnique()
+                        .HasFilter("created_from_injection_id IS NOT NULL");
 
                     b.HasIndex("ExpectedWisdomId");
 

@@ -720,6 +720,10 @@ h1:focus {
     font-style: italic;
 }
 
+.injection-truncated {
+    margin: 1rem 0 0;
+}
+
 /* Buttons + confirmed deletes (spec §8.2) */
 
 .button {

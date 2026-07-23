@@ -134,6 +134,22 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task CasesSharingAQueryAndProject_ReplayOneRanking()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        var near = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
+        var far = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.5);
+        await AddCaseAsync(project.Id, near.Id);
+        await AddCaseAsync(project.Id, far.Id);
+
+        var report = await RunAsync();
+
+        report.Results.Count.ShouldBe(2);
+        _embeddings.Batches.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task EmptySuite_PassesVacuously()
     {
         await Context.ResetWisdomAsync(Token);

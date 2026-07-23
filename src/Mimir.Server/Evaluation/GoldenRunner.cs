@@ -44,11 +44,21 @@ internal sealed class GoldenRunner(
             .OrderBy(c => c.Id)
             .ToListAsync(cancellationToken);
 
+        // Cases often share a query — repeated promotions of one query_context, or a hand-built
+        // suite around one scenario — and a ranking is pure given (query, affinity project), so
+        // each distinct pair embeds and searches once instead of per case. Sequential on purpose:
+        // the runner and the ranking share one context.
+        var rankings = new Dictionary<(string Query, Guid ProjectId), IReadOnlyList<RankedWisdom>>();
         var results = new List<GoldenResult>(cases.Count);
         foreach (var goldenCase in cases)
         {
-            var ranked = await ranking.RankAsync(
-                goldenCase.QueryContext, goldenCase.ProjectId, cancellationToken);
+            var key = (goldenCase.QueryContext, goldenCase.ProjectId);
+            if (!rankings.TryGetValue(key, out var ranked))
+            {
+                ranked = await ranking.RankAsync(
+                    goldenCase.QueryContext, goldenCase.ProjectId, cancellationToken);
+                rankings[key] = ranked;
+            }
             int? rank = null;
             for (var i = 0; i < ranked.Count; i++)
             {

@@ -80,7 +80,9 @@ else if (_view is { } view)
                                 <button class="button" disabled="@(!entry.CanPromote)"
                                         title="@(entry.CanPromote
                                             ? "Create a GoldenCase from this entry's query_context + project_id (§8.3)"
-                                            : "Brief entries carry no query to replay (§8.3)")"
+                                            : entry.QueryContext is null
+                                                ? "Brief entries carry no query to replay (§8.3)"
+                                                : "Every injected Wisdom retired or hard-deleted since — nothing left for a GoldenCase to expect (§9)")"
                                         @onclick="() => PromoteAsync(entry.Id)">
                                     Promote to golden
                                 </button>
@@ -111,6 +113,14 @@ else if (_view is { } view)
                 }
             </ol>
         </section>
+    }
+
+    @if (view.Truncated)
+    {
+        <p class="wisdom-meta injection-truncated">
+            Showing the latest @InjectionBrowser.RecentEntryLimit of @view.TotalEntries entries —
+            the precision stat still counts them all.
+        </p>
     }
 }
 

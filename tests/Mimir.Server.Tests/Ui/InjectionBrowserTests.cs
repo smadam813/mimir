@@ -208,6 +208,89 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task Promoting_SkipsARetiredWisdom_RecallWouldNeverSurfaceIt()
+    {
+        var project = await SeedProjectAsync();
+        var top = await SeedWisdomAsync(project.Id);
+        var runnerUp = await SeedWisdomAsync(project.Id);
+        var injection = await SeedInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
+            items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
+        await RetireAsync(top.Id);
+
+        var caseId = await Browser().PromoteAsync(injection.Id, Token);
+
+        var goldenCase = await FromDb(db =>
+            db.GoldenCases.SingleAsync(g => g.CreatedFromInjectionId == injection.Id, Token));
+        goldenCase.Id.ShouldBe(caseId.ShouldNotBeNull());
+        goldenCase.ExpectedWisdomId.ShouldBe(runnerUp.Id);
+    }
+
+    [Fact]
+    public async Task AnEntryWithNoLiveWisdomLeft_CannotPromote()
+    {
+        var project = await SeedProjectAsync();
+        var retired = await SeedWisdomAsync(project.Id);
+        var deleted = await SeedWisdomAsync(project.Id);
+        var injection = await SeedInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
+            items: [(retired.Id, 0.03), (deleted.Id, 0.02)]);
+        await RetireAsync(retired.Id);
+        await IntoDb(db => db.Wisdom.Where(w => w.Id == deleted.Id).ExecuteDeleteAsync(Token));
+
+        var entry = (await Browser().ListAsync(project.Id, Token))
+            .Sessions.ShouldHaveSingleItem().Entries.ShouldHaveSingleItem();
+        entry.CanPromote.ShouldBeFalse();
+
+        var caseId = await Browser().PromoteAsync(injection.Id, Token);
+
+        caseId.ShouldBeNull();
+        (await FromDb(db =>
+                db.GoldenCases.AnyAsync(g => g.CreatedFromInjectionId == injection.Id, Token)))
+            .ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task TheListing_BoundsToTheMostRecentEntries_PrecisionCountsThemAll()
+    {
+        var project = await SeedProjectAsync();
+        var wisdom = await SeedWisdomAsync(project.Id);
+        var oldest = await SeedInjectionAsync(
+            project.Id, "sess-old", InjectionLane.Prompt, "the cut entry", Now.AddMinutes(-1),
+            items: [(wisdom.Id, 0.03)]);
+        await Browser().MarkAsync(oldest.Id, InjectionVerdict.Useful, Token);
+        await IntoDb(db =>
+        {
+            for (var i = 0; i < InjectionBrowser.RecentEntryLimit; i++)
+            {
+                db.Injections.Add(new Injection
+                {
+                    Id = Guid.CreateVersion7(),
+                    SessionId = "sess-a",
+                    ProjectId = project.Id,
+                    At = Now,
+                    Lane = InjectionLane.Prompt,
+                    QueryContext = $"prompt {i}",
+                    Chars = 240,
+                    Items = [new InjectionItem { WisdomId = wisdom.Id, Score = 0.03 }],
+                });
+            }
+
+            return db.SaveChangesAsync(Token);
+        });
+
+        var view = await Browser().ListAsync(project.Id, Token);
+
+        view.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        view.Truncated.ShouldBeTrue();
+        view.Sessions.Sum(s => s.Entries.Count).ShouldBe(InjectionBrowser.RecentEntryLimit);
+        view.Sessions.SelectMany(s => s.Entries).ShouldAllBe(e => e.Id != oldest.Id);
+        // The cut entry's mark still feeds the §9 precision inputs.
+        view.Useful.ShouldBe(1);
+        view.Marked.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task ABriefEntry_CannotPromote_ThereIsNoQueryToReplay()
     {
         var project = await SeedProjectAsync();
@@ -301,6 +384,11 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
         });
         return injection;
     }
+
+    private Task RetireAsync(Guid wisdomId)
+        => IntoDb(db => db.Wisdom.Where(w => w.Id == wisdomId)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(w => w.RetiredAt, (DateTimeOffset?)Now), Token));
 
     private async Task IntoDb(Func<MimirDbContext, Task> mutate)
     {

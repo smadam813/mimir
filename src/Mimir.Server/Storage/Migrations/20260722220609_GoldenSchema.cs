@@ -48,7 +48,9 @@ namespace Mimir.Server.Storage.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_golden_cases_created_from_injection_id",
                 table: "golden_cases",
-                column: "created_from_injection_id");
+                column: "created_from_injection_id",
+                unique: true,
+                filter: "created_from_injection_id IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_golden_cases_expected_wisdom_id",

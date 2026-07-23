@@ -230,7 +230,11 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             goldenCase.Property(g => g.CreatedFromInjectionId).HasColumnName("created_from_injection_id");
             goldenCase.Property(g => g.Note).HasColumnName("note");
 
-            goldenCase.HasIndex(g => g.CreatedFromInjectionId);
+            // Partial unique: at most one promoted case per injection, making PromoteAsync's
+            // idempotency durable against concurrent clicks — hand-inserted cases (§9) carry no
+            // breadcrumb and stay unconstrained.
+            goldenCase.HasIndex(g => g.CreatedFromInjectionId).IsUnique()
+                .HasFilter("created_from_injection_id IS NOT NULL");
             goldenCase.HasOne<Project>().WithMany().HasForeignKey(g => g.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             // A case expecting a hard-deleted Wisdom (§8.1) could never pass again, so it goes
