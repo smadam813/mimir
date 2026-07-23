@@ -1,0 +1,147 @@
+name: Security audit
+
+# Scheduled advisory audit, decoupled from the commit cadence (issue #50, the reserve move named
+# by ADR 0007). Detection only: it reports findings on a rolling issue and never bumps a package
+# or opens a remediation PR. ADR 0008 records why fetch failure fails this run loudly while the
+# build treats the same NU1900 as fail-soft.
+
+on:
+  schedule:
+    # Weekly, Monday 06:17 UTC — off the top of the hour to dodge cron congestion. `schedule`
+    # only fires from the default branch; use workflow_dispatch to exercise it elsewhere.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+# Queue (never cancel) overlapping runs: two runs racing between "find the open issue" and
+# "create one" could double-create the rolling issue.
+concurrency:
+  group: ${{ github.workflow }}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: Advisory audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Self-test the report script
+        # The scheduled run is this script's only production execution. A parser broken by drift
+        # in the `dotnet list --format json` shape would report "nothing found" forever — the
+        # silent-blindness failure this workflow exists to escape — so prove it against the
+        # committed fixtures before trusting it with real output.
+        run: bash .github/scripts/security-audit-report.test.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore (locked mode)
+        # Locked-mode against the committed lock files: the audit's subject is the exact shipped
+        # graph, and a stale lock file fails the restore loudly — a legitimate signal in its own
+        # right. NU1900 (advisory data could not be fetched) leaves restore green per ADR 0007's
+        # carve-out, but a blind audit is indistinguishable from a clean one downstream, so this
+        # job overrides the carve-out — every other audit code stays a warning, NU1900 becomes a
+        # native restore error under the ambient TreatWarningsAsErrors (the embedded quotes keep
+        # MSBuild from reading the semicolons as switch separators). The greps below only pick
+        # the retry path and the error message; if their pattern ever drifts the run still fails,
+        # just less specifically. The retry runs against a fresh HTTP cache because NuGet serves
+        # advisory responses from cache regardless of --force, so a plain retry can replay the
+        # same cached failure. --force on every attempt: without it a second restore against
+        # already-written assets is a no-op ("All projects are up-to-date") that skips the audit
+        # entirely.
+        run: |
+          set -o pipefail
+          restore() {
+            dotnet restore Mimir.slnx --locked-mode --force \
+              "-p:WarningsNotAsErrors=\"NU1901;NU1902;NU1903;NU1904\"" "$@" 2>&1 | tee restore.log
+          }
+          if restore; then
+            exit 0
+          fi
+          if ! grep -q 'NU1900' restore.log; then
+            echo "::error::dotnet restore failed — see log above."
+            exit 1
+          fi
+          echo "::warning::NU1900 on restore attempt 1: advisory data could not be fetched. Retrying against a fresh HTTP cache."
+          if restore --no-http-cache; then
+            exit 0
+          fi
+          if grep -q 'NU1900' restore.log; then
+            echo "::error::Advisory data could not be fetched (NU1900) after 2 attempts. This run is blind, not clean — failing loudly per ADR 0008."
+          else
+            echo "::error::dotnet restore failed on the retry — see log above."
+          fi
+          exit 1
+
+      - name: Prove the audit can see (canary)
+        # `dotnet list package --vulnerable` performs its own advisory fetch, independent of the
+        # restore the NU1900 gate above just guarded — and a reachable source that returns no
+        # vulnerability data produces output byte-identical to a genuinely clean run (exit 0, no
+        # warning, no problems array; ADR 0008). The only way to tell those apart is a positive
+        # control: audit a committed project that pins a known-vulnerable package, and refuse to
+        # trust a clean result on the real graph unless the canary comes back flagged.
+        run: |
+          canary=.github/scripts/testdata/security-audit/canary/canary.csproj
+          dotnet restore "$canary"
+          dotnet list "$canary" package --vulnerable --format json > canary.json
+          set +e
+          bash .github/scripts/security-audit-report.sh canary.json > /dev/null
+          status=$?
+          set -e
+          if [ "$status" -ne 10 ]; then
+            echo "::error::The canary (Newtonsoft.Json 12.0.1, known High advisory) was not flagged (report script exit ${status}). The audit's advisory fetch is blind, not clean — failing loudly per ADR 0008."
+            exit 1
+          fi
+          echo "Canary flagged as vulnerable — advisory data is flowing."
+
+      - name: Audit the locked graph
+        # Same advisory source and dependency graph the build's NuGetAudit evaluates, so this job
+        # and the build agree by construction about what "vulnerable" means. The exit code is not
+        # a found/none signal (the command exits 0 either way) — but a hard failure here, e.g. an
+        # unreachable feed, is a real error and fails the step.
+        run: dotnet list Mimir.slnx package --vulnerable --include-transitive --format json > vulnerable.json
+
+      - name: Report findings on the rolling issue
+        # One rolling issue keyed by the security-audit label (exact-match dedup): update the open
+        # one in place, create one if none is open, and never auto-close — a human closes it once
+        # they've acted, and a later finding after that opens a fresh one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          export AUDIT_TIMESTAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          set +e
+          bash .github/scripts/security-audit-report.sh vulnerable.json > body.md
+          status=$?
+          set -e
+          case "$status" in
+            0)
+              echo "No known vulnerabilities in the locked dependency graph."
+              ;;
+            10)
+              gh label create security-audit --force --color B60205 \
+                --description "Rolling marker for the scheduled vulnerability audit (issue #50)"
+              number="$(gh issue list --label security-audit --state open --limit 1 --json number --jq '.[0].number // empty')"
+              if [ -n "$number" ]; then
+                gh issue edit "$number" --body-file body.md
+                echo "::warning::Vulnerable dependencies detected — updated issue #${number}."
+              else
+                url="$(gh issue create --title 'Vulnerable dependencies detected' --label security-audit --body-file body.md)"
+                echo "::warning::Vulnerable dependencies detected — opened ${url}."
+              fi
+              ;;
+            *)
+              echo "::error::security-audit-report.sh failed (exit $status) — refusing to read unparsed output as clean."
+              exit "$status"
+              ;;
+          esac
