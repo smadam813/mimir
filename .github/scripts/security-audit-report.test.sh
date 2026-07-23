@@ -68,6 +68,20 @@ out="$(printf 'not json' | bash "$script" /dev/stdin 2>/dev/null)"
 status=$?
 { [ "$status" -ne 0 ] && [ "$status" -ne 10 ]; } || fail "invalid JSON: expected a failure exit code, got $status"
 
+# A zero-byte file is the dangerous case: jq applies the row filter zero times over zero
+# top-level values and exits 0, which would read a truncated redirect as all-clear.
+tmp="$(mktemp -d)"
+: > "$tmp/empty.json"
+out="$(bash "$script" "$tmp/empty.json" 2>/dev/null)"
+status=$?
+{ [ "$status" -ne 0 ] && [ "$status" -ne 10 ]; } || fail "empty file: expected a failure exit code, got $status"
+
+printf '{"foo": 1}' > "$tmp/drifted.json"
+out="$(bash "$script" "$tmp/drifted.json" 2>/dev/null)"
+status=$?
+{ [ "$status" -ne 0 ] && [ "$status" -ne 10 ]; } || fail "shape drift (no projects key): expected a failure exit code, got $status"
+rm -rf "$tmp"
+
 # --------------------------------------------------------------------------------------------
 if [ "$failures" -gt 0 ]; then
   echo "$failures test(s) failed" >&2

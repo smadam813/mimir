@@ -16,6 +16,14 @@ set -euo pipefail
 
 json_file="${1:?usage: security-audit-report.sh <json-file>}"
 
+# A zero-byte or shape-drifted file must fail here, not fall through as clean: over zero
+# top-level JSON values jq applies the row filter zero times and exits 0, which would read a
+# truncated redirect as all-clear.
+jq -e 'type == "object" and has("projects")' "$json_file" >/dev/null || {
+  echo "security-audit-report: $json_file is not 'dotnet list package' JSON output" >&2
+  exit 2
+}
+
 # One row per (package, relation, version, severity, advisory): the same transitive advisory
 # shows up once per project that pulls it in, which would otherwise mean five identical rows.
 rows="$(jq -r '
