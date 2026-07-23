@@ -53,23 +53,28 @@ internal sealed partial class McpSearchService(
             request.ProjectIdentity, request.ProjectRoot, cancellationToken);
         var affinityProjectId = requester?.Id ?? Project.GlobalId;
 
-        // The Wisdom-leg filters apply after the ranking, whose pool the §3 search already bounded
-        // to its per-leg top-N — a narrow filter over a large corpus can come back empty even
-        // though deeper matches exist. The Prompt lane accepts the same crowding for v1; the §11
-        // PerLegTopN knob widens the pool if it bites. (The Episode leg filters in SQL, pre-limit.)
+        // Npgsql refuses a non-UTC DateTimeOffset against timestamptz; the CLI normalizes, but
+        // the endpoint is open to any local client.
+        var since = request.Since?.ToUniversalTime();
+
+        // Both legs filter in SQL, before their LIMIT — a narrow filter over a large corpus
+        // finds deep matches instead of emptying an unfiltered top-N pool.
         var ranked = await ranking.RankAsync(
-            request.Query, affinityProjectId, request.IncludeRetired, cancellationToken);
-        var wisdom = ranked
-            .Where(r => kind is null || r.Kind == kind)
-            .Where(r => filter is null || r.ScopeProjectId == filter.Id)
-            .Where(r => request.Since is null || r.LastConfirmedAt >= request.Since)
-            .Take(MaxWisdom)
-            .ToList();
+            request.Query,
+            affinityProjectId,
+            new WisdomSearchFilter
+            {
+                IncludeRetired = request.IncludeRetired,
+                Kind = kind,
+                ScopeProjectId = filter?.Id,
+                Since = since,
+            },
+            cancellationToken);
+        var wisdom = ranked.Take(MaxWisdom).ToList();
 
         IReadOnlyList<EventSearchHit> eventHits = request.IncludeEpisodes
-            ? (await events.SearchAsync(request.Query, filter?.Id, request.Since, cancellationToken))
-                .Take(MaxEventHits)
-                .ToList()
+            ? await events.SearchAsync(
+                request.Query, filter?.Id, since, MaxEventHits, cancellationToken)
             : [];
 
         if (wisdom.Count == 0 && eventHits.Count == 0)

@@ -22,9 +22,12 @@ internal sealed class McpTimelineService(MimirDbContext db, McpProjects projects
             return miss;
         }
 
+        // Npgsql refuses a non-UTC DateTimeOffset against timestamptz; the CLI normalizes, but
+        // the endpoint is open to any local client.
+        var since = request.Since?.ToUniversalTime();
         var episodes = await db.Episodes
             .Where(e => filter == null || e.ProjectId == filter.Id)
-            .Where(e => request.Since == null || e.StartedAt >= request.Since)
+            .Where(e => since == null || e.StartedAt >= since)
             .OrderByDescending(e => e.StartedAt)
             .ThenByDescending(e => e.Id)
             .Take(MaxEpisodes)

@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mimir.Contracts.Hooks;
@@ -40,7 +42,32 @@ internal sealed class CaptureService(
         CancellationToken cancellationToken)
     {
         var truncated = PayloadTruncator.Truncate(request.Payload, options.Value);
+        return await AppendAsync(episode, truncated.Json, truncated.FullSizeBytes, type, cancellationToken);
+    }
 
+    /// <summary>
+    /// Append a server-composed payload untouched — the <c>mimir_remember</c> lane (§7.1), whose
+    /// payload the server itself just built. Truncation is a hook-surface concern (§4, untrusted
+    /// tool output of any size); a deliberate save is never dropped, nor clipped.
+    /// </summary>
+    public async Task<Event> AppendVerbatimEventAsync(
+        Episode episode,
+        JsonElement payload,
+        EventType type,
+        CancellationToken cancellationToken)
+    {
+        var json = payload.GetRawText();
+        return await AppendAsync(
+            episode, json, Encoding.UTF8.GetByteCount(json), type, cancellationToken);
+    }
+
+    private async Task<Event> AppendAsync(
+        Episode episode,
+        string payloadJson,
+        int fullSizeBytes,
+        EventType type,
+        CancellationToken cancellationToken)
+    {
         for (var attempt = 1; ; attempt++)
         {
             var lastSeq = await db.Events
@@ -54,8 +81,8 @@ internal sealed class CaptureService(
                 Seq = lastSeq + 1,
                 Type = type,
                 At = clock.GetUtcNow(),
-                Payload = truncated.Json,
-                PayloadFullSize = truncated.FullSizeBytes,
+                Payload = payloadJson,
+                PayloadFullSize = fullSizeBytes,
                 Salient = type == EventType.Remember,
             };
             db.Events.Add(evt);

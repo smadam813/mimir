@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Mimir.Server.Configuration;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -22,6 +20,8 @@ public sealed class EventSearchHit
 
     public DateTimeOffset At { get; set; }
 
+    /// <summary>The payload JSON clipped server-side to a preview — stored payloads run to tens
+    /// of KB (prompts are whole, §4) and every consumer renders a snippet.</summary>
     public required string Payload { get; set; }
 
     public required string SessionId { get; set; }
@@ -38,17 +38,22 @@ public sealed class EventSearchHit
 /// <summary>
 /// The Episode leg of <c>mimir_search</c> (§7): FTS-only over <c>Event.tsv</c> plus metadata
 /// filters — Events carry no embeddings in v1, so there is nothing to fuse with and rank is
-/// <c>ts_rank_cd</c> alone. Bounded per leg like the §3 hybrid search.
+/// <c>ts_rank_cd</c> alone. Filters and rank are wholly in SQL with no cross-leg fusion, so the
+/// caller's cap is the query's LIMIT — no over-fetch.
 /// </summary>
-public sealed class EventSearch(MimirDbContext db, IOptions<SearchOptions> options)
+public sealed class EventSearch(MimirDbContext db)
 {
+    /// <summary>Chars of payload text per hit — a margin over the caller's rendered snippet,
+    /// which collapses whitespace before clipping.</summary>
+    private const int PayloadPreviewChars = 1000;
+
     private const string Sql = """
         SELECT e.id AS "EventId",
                e.episode_id AS "EpisodeId",
                e.seq AS "Seq",
                e.type AS "Type",
                e.at AS "At",
-               e.payload::text AS "Payload",
+               left(e.payload::text, @payload_chars) AS "Payload",
                ep.session_id AS "SessionId",
                ep.project_id AS "ProjectId",
                ep.started_at AS "StartedAt",
@@ -65,8 +70,9 @@ public sealed class EventSearch(MimirDbContext db, IOptions<SearchOptions> optio
 
     /// <param name="projectId">Narrow to one Project's Episodes; null reaches every Project.</param>
     /// <param name="since">Keep only Events captured at or after this instant.</param>
+    /// <param name="topN">The caller's cap, applied as the query LIMIT.</param>
     public async Task<IReadOnlyList<EventSearchHit>> SearchAsync(
-        string query, Guid? projectId, DateTimeOffset? since, CancellationToken cancellationToken)
+        string query, Guid? projectId, DateTimeOffset? since, int topN, CancellationToken cancellationToken)
         => await db.Database
             .SqlQueryRaw<EventSearchHit>(
                 Sql,
@@ -79,6 +85,7 @@ public sealed class EventSearch(MimirDbContext db, IOptions<SearchOptions> optio
                 {
                     Value = (object?)since ?? DBNull.Value,
                 },
-                new NpgsqlParameter("top_n", options.Value.PerLegTopN))
+                new NpgsqlParameter("top_n", topN),
+                new NpgsqlParameter("payload_chars", PayloadPreviewChars))
             .ToListAsync(cancellationToken);
 }

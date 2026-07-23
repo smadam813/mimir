@@ -13,9 +13,6 @@ public sealed record McpRememberRequest
     /// <summary>The repo root when in a repository, else the resolved directory. Always absolute.</summary>
     public required string ProjectRoot { get; init; }
 
-    /// <summary>The MCP server's working directory, kept for the Episode-less create path.</summary>
-    public required string Cwd { get; init; }
-
     public required string Content { get; init; }
 
     /// <summary>The Wisdom kind (<c>Fact | Preference | Lesson | Procedure</c>).</summary>

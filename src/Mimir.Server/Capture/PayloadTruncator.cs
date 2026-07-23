@@ -11,11 +11,11 @@ internal sealed record TruncatedPayload(string Json, int FullSizeBytes);
 /// <summary>
 /// Spec §4 fidelity: every string field over the cap keeps its head and tail around a
 /// <c>…[truncated N bytes]…</c> marker; the top-level prompt is exempt because prompts are stored
-/// in full, and the top-level content of a <c>Remember</c> Event likewise — a deliberate save is
-/// never dropped (§7.1), and clipping its middle would drop exactly what the user asked to keep.
-/// Assistant messages — the other §4 stored-in-full class — never arrive on the hook surface at
-/// all, an accepted v1 loss (§4 declines to read the transcript, ADR-0003). Cuts land on
-/// character boundaries — a truncated payload is still honest UTF-8.
+/// in full. This is a hook-surface concern only — server-composed payloads (the §7.1 Remember
+/// lane) bypass the truncator via <c>CaptureService.AppendVerbatimEventAsync</c>. Assistant
+/// messages — the other §4 stored-in-full class — never arrive on the hook surface at all, an
+/// accepted v1 loss (§4 declines to read the transcript, ADR-0003). Cuts land on character
+/// boundaries — a truncated payload is still honest UTF-8.
 /// </summary>
 internal static class PayloadTruncator
 {
@@ -43,7 +43,7 @@ internal static class PayloadTruncator
                 foreach (var property in element.EnumerateObject())
                 {
                     writer.WritePropertyName(property.Name);
-                    if (topLevel && (property.NameEquals("prompt") || property.NameEquals("content")))
+                    if (topLevel && property.NameEquals("prompt"))
                     {
                         property.Value.WriteTo(writer);
                     }

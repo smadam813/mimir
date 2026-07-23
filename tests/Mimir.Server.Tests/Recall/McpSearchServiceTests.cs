@@ -106,6 +106,25 @@ public sealed class McpSearchServiceTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AFilter_FindsMatchesTheUnfilteredTopNWouldHaveCrowdedOut()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
+        var lesson = await AddWisdomAsync(
+            project.Id, "unrelated filler two", cosine: 0.8, WisdomKind.Lesson);
+
+        // PerLegTopN = 1: the unfiltered pool holds only the Fact. The kind filter must apply
+        // in SQL, before that limit, so the Lesson still surfaces — never a false "no matches".
+        var text = await SearchAsync(
+            project,
+            new() { Kind = "Lesson", IncludeEpisodes = false },
+            new SearchOptions { PerLegTopN = 1 });
+
+        text.ShouldContain(lesson.Text, customMessage: "filters run pre-limit in the search SQL");
+    }
+
+    [Fact]
     public async Task ProjectFilter_NarrowsBothLegs_AndAMissNamesTheKnownProjects()
     {
         await Context.ResetWisdomAsync(Token);
@@ -189,17 +208,18 @@ public sealed class McpSearchServiceTests(CaptureDatabaseFixture fixture)
         public bool IncludeRetired { get; init; }
     }
 
-    private async Task<string> SearchAsync(Project requester, Overrides overrides)
+    private async Task<string> SearchAsync(
+        Project requester, Overrides overrides, SearchOptions? searchOptions = null)
     {
         var service = new McpSearchService(
             Context,
             new QueryRanking(
                 Context,
                 _embeddings,
-                new WisdomSearch(Context, Options.Create(new SearchOptions())),
+                new WisdomSearch(Context, Options.Create(searchOptions ?? new SearchOptions())),
                 Options.Create(new RecallOptions()),
                 new FakeTimeProvider(Now)),
-            new EventSearch(Context, Options.Create(new SearchOptions())),
+            new EventSearch(Context),
             new McpProjects(Context),
             new FakeTimeProvider(Now));
         return await service.SearchAsync(

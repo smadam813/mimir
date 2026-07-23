@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Mimir.Contracts.Hooks;
 using Mimir.Contracts.Mcp;
 using Mimir.Server.Capture;
 using Mimir.Server.Distillation;
@@ -56,17 +55,11 @@ internal sealed class McpRememberService(
 
         if (target is not null)
         {
-            var hookShaped = new HookEventRequest
-            {
-                SessionId = target.SessionId,
-                Cwd = request.Cwd,
-                ProjectIdentity = request.ProjectIdentity,
-                ProjectRoot = request.ProjectRoot,
-                HookEvent = "Remember",
-                Payload = JsonSerializer.SerializeToElement(
-                    new { content = request.Content, kind = kind.ToString() }),
-            };
-            await capture.AppendEventAsync(target, hookShaped, EventType.Remember, cancellationToken);
+            // Verbatim: this payload is server-composed, not untrusted hook output — §4
+            // truncation does not apply, and a deliberate save is never clipped (§7.1).
+            var payload = JsonSerializer.SerializeToElement(
+                new { content = request.Content, kind = kind.ToString() });
+            await capture.AppendVerbatimEventAsync(target, payload, EventType.Remember, cancellationToken);
             return $"Remembered ({kind}, salient) in the live episode of {project.DisplayName}"
                 + $" (session {target.SessionId}).";
         }

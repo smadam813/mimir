@@ -48,16 +48,17 @@ internal sealed class QueryRanking(
     /// the session's Project for the ambient lane, the case's for the golden runner.</param>
     public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
         string query, Guid affinityProjectId, CancellationToken cancellationToken)
-        => await RankAsync(query, affinityProjectId, includeRetired: false, cancellationToken);
+        => await RankAsync(query, affinityProjectId, WisdomSearchFilter.None, cancellationToken);
 
-    /// <param name="includeRetired">§7: only <c>mimir_search</c> with <c>include_retired</c> ranks
-    /// Retired Wisdom; every other consumer keeps "Retired never ranks" via the overload above.</param>
+    /// <param name="filter">The <c>mimir_search</c> narrowings, pushed into the §3 search's SQL so
+    /// they apply before the per-leg top-N — a filtered rank is over the whole corpus, never the
+    /// filtered residue of an unfiltered pool. Every other consumer takes the overload above.</param>
     public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
-        string query, Guid affinityProjectId, bool includeRetired, CancellationToken cancellationToken)
+        string query, Guid affinityProjectId, WisdomSearchFilter filter, CancellationToken cancellationToken)
     {
         var embedding = new Vector(
             await embeddings.GenerateVectorAsync(query, cancellationToken: cancellationToken));
-        var hits = await search.SearchAsync(embedding, query, includeRetired, cancellationToken);
+        var hits = await search.SearchAsync(embedding, query, filter, cancellationToken);
         if (hits.Count == 0)
         {
             return [];

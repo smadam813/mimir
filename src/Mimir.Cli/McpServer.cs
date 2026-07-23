@@ -23,7 +23,11 @@ internal sealed class McpServer(
     /// <summary>Generous next to the hooks' 3 s: nothing here blocks a session (§1).</summary>
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>The newest protocol revision this build knows; echoed when the client's is unknown.</summary>
+    /// <summary>
+    /// The one protocol revision this build serves. Earlier revisions allow request batching,
+    /// which this line loop does not speak — so <c>initialize</c> always answers this version,
+    /// never an echo (the MCP handshake rule: answer a version the server supports).
+    /// </summary>
     private const string ProtocolVersion = "2025-06-18";
 
     /// <summary>The §3 Wisdom kinds, restated client-side for the tool schemas' enum.</summary>
@@ -85,6 +89,22 @@ internal sealed class McpServer(
         using (document)
         {
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                // Valid JSON, but not a request object — a batch array (pre-2025-06-18) or a bare
+                // scalar. There is no id to echo, so the error carries null per JSON-RPC.
+                return new
+                {
+                    jsonrpc = "2.0",
+                    id = (object?)null,
+                    error = new
+                    {
+                        code = -32600,
+                        message = "Invalid Request: expected a single JSON-RPC object (batching is not supported)",
+                    },
+                };
+            }
+
             var method = root.TryGetProperty("method", out var m) ? m.GetString() : null;
             var hasId = root.TryGetProperty("id", out var idElement);
             object? id = hasId ? idElement.Clone() : null;
@@ -97,7 +117,7 @@ internal sealed class McpServer(
 
             return method switch
             {
-                "initialize" => Result(id, Initialize(root)),
+                "initialize" => Result(id, Initialize()),
                 "ping" => Result(id, new { }),
                 "tools/list" => Result(id, ToolCatalog()),
                 "tools/call" => await CallToolAsync(id, root),
@@ -106,26 +126,22 @@ internal sealed class McpServer(
         }
     }
 
-    private object Initialize(JsonElement root)
+    private static object Initialize() => new
     {
-        // Echo a requested version we can serve; offer our newest otherwise (MCP handshake rule).
-        var requested = root.TryGetProperty("params", out var p)
-            && p.TryGetProperty("protocolVersion", out var v)
-            && v.ValueKind == JsonValueKind.String
-            ? v.GetString()
-            : null;
-        return new
-        {
-            protocolVersion = requested is { Length: > 0 } ? requested : ProtocolVersion,
-            capabilities = new { tools = new { } },
-            serverInfo = new { name = "mimir", version = "1.0" },
-        };
-    }
+        protocolVersion = ProtocolVersion,
+        capabilities = new { tools = new { } },
+        serverInfo = new { name = "mimir", version = "1.0" },
+    };
 
     private async Task<object> CallToolAsync(object? id, JsonElement root)
     {
+        // Anything short of {"params":{"name":"…"}} is the client's mistake, answered with
+        // -32602 — never a throw, which would kill the stdio loop for the rest of the session.
         if (!root.TryGetProperty("params", out var parameters)
-            || parameters.GetProperty("name").GetString() is not { } tool)
+            || parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("name", out var name)
+            || name.ValueKind != JsonValueKind.String
+            || name.GetString() is not { Length: > 0 } tool)
         {
             return Error(id, -32602, "tools/call needs a tool name");
         }
@@ -206,7 +222,6 @@ internal sealed class McpServer(
         {
             ProjectIdentity = location.Identity,
             ProjectRoot = location.Root,
-            Cwd = Environment.CurrentDirectory,
             Content = content,
             Kind = kind,
         });
@@ -220,7 +235,20 @@ internal sealed class McpServer(
             return ToolError(id, $"Mimir answered {(int)response.StatusCode} for {route}.");
         }
 
-        var reply = await response.Content.ReadFromJsonAsync<McpToolReply>(Wire);
+        McpToolReply? reply;
+        try
+        {
+            reply = await response.Content.ReadFromJsonAsync<McpToolReply>(Wire);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            // A 200 whose body is not a Mimir reply — a proxy or captive portal answering for
+            // it, say. The deliberate lane degrades to the same honest tool error as downtime.
+            return ToolError(id,
+                $"Mimir's reply for {route} was not readable — is something else answering at"
+                + $" {http.BaseAddress}? ({ex.Message})");
+        }
+
         return Result(id, new
         {
             content = new object[] { new { type = "text", text = reply?.Text ?? "" } },
@@ -243,7 +271,9 @@ internal sealed class McpServer(
             return false;
         }
 
-        since = parsed;
+        // Normalize to UTC: Npgsql refuses a non-UTC DateTimeOffset against timestamptz, so a
+        // legal "+02:00" input must not survive to the server as-is.
+        since = parsed.ToUniversalTime();
         return true;
     }
 
@@ -351,9 +381,10 @@ internal sealed class McpServer(
             new
             {
                 name = "mimir_remember",
-                description = "Deliberately save something to Mimir's memory (salient — it "
-                    + "outranks inferred memories). Attaches to the live session's Episode; with "
-                    + "none, it goes straight to the Wisdom tier.",
+                description = "Deliberately save something to Mimir's memory. Attached to the "
+                    + "live session's Episode it is salient — it outranks inferred memories; "
+                    + "with no live Episode it goes straight to the Wisdom tier as an ordinary "
+                    + "candidate.",
                 inputSchema = new
                 {
                     type = "object",

@@ -87,6 +87,23 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task LongContent_IsStoredVerbatim_NeverTruncated()
+    {
+        var project = await AddProjectAsync();
+        var episode = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
+        // Well past the §4 per-field cap (4 KB) — hook payloads would be clipped at this size.
+        var content = new string('c', 10_000);
+
+        await RememberAsync(project, content, "Fact");
+
+        var saved = await FromDb(db => db.Events
+            .SingleAsync(e => e.EpisodeId == episode.Id && e.Type == EventType.Remember, Token));
+        saved.Payload.ShouldContain(content, customMessage:
+            "spec §7.1: a deliberate save is never dropped — nor clipped");
+        saved.Payload.ShouldNotContain("…[truncated");
+    }
+
+    [Fact]
     public async Task AnUnknownDirectory_StillLands_ByCreatingItsProject()
     {
         await Context.ResetWisdomAsync(Token);
@@ -99,7 +116,6 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
             {
                 ProjectIdentity = identity,
                 ProjectRoot = $@"C:\roots\unseen-{suffix}",
-                Cwd = $@"C:\roots\unseen-{suffix}",
                 Content = content,
                 Kind = "Fact",
             },
@@ -133,7 +149,6 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
             {
                 ProjectIdentity = project.Identity,
                 ProjectRoot = project.RootPaths.FirstOrDefault() ?? $@"C:\roots\{project.DisplayName}",
-                Cwd = @"C:\work",
                 Content = content,
                 Kind = kind,
             },

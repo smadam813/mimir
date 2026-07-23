@@ -5,6 +5,7 @@
 // MIMIR_URL: a hook that fails must never break or slow the session that invoked it (spec §1, §4).
 // `mcp` is the deliberate lane: it may fail loudly — Claude Code surfaces a dead MCP server.
 
+using System.Text;
 using Mimir.Cli;
 
 const string Usage = """
@@ -44,9 +45,17 @@ switch (args)
     case ["mcp"]:
         using (var http = new HttpClient { BaseAddress = ServiceAddress(), Timeout = McpServer.RequestTimeout })
         {
+            // MCP stdio is UTF-8 by contract; Console.In/Out would inherit the Windows console
+            // code page and mojibake anything non-ASCII — permanently, for remembered content.
+            // No-BOM encodings, and "\n" framing (the writer would otherwise emit "\r\n").
+            using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+            using var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))
+            {
+                NewLine = "\n",
+            };
             var location = await McpServer.ResolveProjectAsync(CancellationToken.None);
             var sessionId = $"mcp-{Guid.NewGuid():N}";
-            return await new McpServer(http, Console.In, Console.Out, location, sessionId).RunAsync();
+            return await new McpServer(http, stdin, stdout, location, sessionId).RunAsync();
         }
 
     default:

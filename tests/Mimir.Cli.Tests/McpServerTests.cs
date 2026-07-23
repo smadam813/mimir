@@ -15,15 +15,17 @@ public class McpServerTests
     private static readonly ProjectLocation Location = new("github.com/test/repo", @"C:\repo");
 
     [Fact]
-    public async Task Initialize_EchoesTheClientsProtocolVersion_AndNamesTheServer()
+    public async Task Initialize_AnswersTheOneServedProtocolVersion_NeverAnEcho()
     {
+        // 2025-03-26 allows request batching, which this server does not speak — affirming it
+        // would license the client to send a batch. The handshake rule: answer a served version.
         var responses = await RunAsync(
             ReplyingHandler(),
             """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{}}}""",
             """{"jsonrpc":"2.0","method":"notifications/initialized"}""");
 
         var result = responses.ShouldHaveSingleItem().RootElement.GetProperty("result");
-        result.GetProperty("protocolVersion").GetString().ShouldBe("2025-03-26");
+        result.GetProperty("protocolVersion").GetString().ShouldBe("2025-06-18");
         result.GetProperty("serverInfo").GetProperty("name").GetString().ShouldBe("mimir");
         result.GetProperty("capabilities").TryGetProperty("tools", out _).ShouldBeTrue();
     }
@@ -123,6 +125,82 @@ public class McpServerTests
     }
 
     [Fact]
+    public async Task MalformedToolsCallParams_AnswerInvalidParams_AndTheLoopSurvives()
+    {
+        var handler = ReplyingHandler();
+
+        var responses = await RunAsync(
+            handler,
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call"}""",
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}""",
+            """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":[]}""",
+            """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":5}}""",
+            """{"jsonrpc":"2.0","id":5,"method":"ping"}""");
+
+        handler.Requests.ShouldBeEmpty();
+        responses.Count.ShouldBe(5, "every malformed call is answered; none kills the server");
+        foreach (var malformed in responses.Take(4))
+        {
+            malformed.RootElement.GetProperty("error").GetProperty("code").GetInt32()
+                .ShouldBe(-32602);
+        }
+
+        responses[4].RootElement.TryGetProperty("result", out _)
+            .ShouldBeTrue("the loop still serves the next request");
+    }
+
+    [Fact]
+    public async Task AValidJsonNonObjectLine_AnswersInvalidRequest_AndTheLoopSurvives()
+    {
+        var responses = await RunAsync(
+            ReplyingHandler(),
+            """[{"jsonrpc":"2.0","id":1,"method":"ping"}]""",
+            "42",
+            """{"jsonrpc":"2.0","id":2,"method":"ping"}""");
+
+        responses.Count.ShouldBe(3);
+        foreach (var invalid in responses.Take(2))
+        {
+            invalid.RootElement.GetProperty("error").GetProperty("code").GetInt32()
+                .ShouldBe(-32600, "a batch array or bare scalar is an invalid request, not a crash");
+        }
+
+        responses[2].RootElement.TryGetProperty("result", out _).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ASuccessResponseWithANonJsonBody_AnswersAnHonestToolError()
+    {
+        // A reverse proxy or captive portal answering 200 with HTML in Mimir's stead.
+        var handler = new RecordingHandler("<html>you are on hotel wifi</html>", "text/html");
+
+        var responses = await RunAsync(
+            handler,
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mimir_search","arguments":{"query":"anything"}}}""");
+
+        var result = responses.ShouldHaveSingleItem().RootElement.GetProperty("result");
+        result.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        result.GetProperty("content")[0].GetProperty("text").GetString()!
+            .ShouldContain("not readable");
+    }
+
+    [Fact]
+    public async Task ASinceWithANonUtcOffset_ReachesTheServerAsUtc()
+    {
+        var handler = ReplyingHandler();
+
+        await RunAsync(
+            handler,
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mimir_timeline","arguments":{"since":"2026-07-22T09:00:00+02:00"}}}""");
+
+        var (_, body) = handler.Requests.ShouldHaveSingleItem();
+        using var posted = JsonDocument.Parse(body);
+        var since = posted.RootElement.GetProperty("since").GetDateTimeOffset();
+        since.Offset.ShouldBe(TimeSpan.Zero, "Npgsql refuses non-UTC offsets against timestamptz");
+        since.ShouldBe(new DateTimeOffset(2026, 7, 22, 7, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
     public async Task UnknownMethodsAndGarbage_AnswerJsonRpcErrors_ButUnknownNotificationsStaySilent()
     {
         var responses = await RunAsync(
@@ -166,7 +244,8 @@ public class McpServerTests
         return new Uri($"http://127.0.0.1:{port}");
     }
 
-    private sealed class RecordingHandler(string replyJson) : HttpMessageHandler
+    private sealed class RecordingHandler(string reply, string contentType = "application/json")
+        : HttpMessageHandler
     {
         public List<(Uri? Uri, string Body)> Requests { get; } = [];
 
@@ -176,7 +255,7 @@ public class McpServerTests
             Requests.Add((request.RequestUri, await request.Content!.ReadAsStringAsync(cancellationToken)));
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(replyJson, Encoding.UTF8, "application/json"),
+                Content = new StringContent(reply, Encoding.UTF8, contentType),
             };
         }
     }

@@ -1,10 +1,33 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
+using Mimir.Server.Storage.Entities;
 using Npgsql;
+using NpgsqlTypes;
 using Pgvector;
 
 namespace Mimir.Server.Storage;
+
+/// <summary>
+/// Optional narrowing of the §3 search, applied in SQL <em>before</em> the per-leg LIMIT — a
+/// filtered search ranks the best matching rows of the whole corpus, never the filtered residue
+/// of an unfiltered top-N (which can be empty while matches exist deeper).
+/// </summary>
+public sealed record WisdomSearchFilter
+{
+    public static readonly WisdomSearchFilter None = new();
+
+    /// <summary>§7: Retired Wisdom surfaces only for <c>mimir_search</c> with
+    /// <c>include_retired</c>; every other caller keeps "Retired never ranks".</summary>
+    public bool IncludeRetired { get; init; }
+
+    public WisdomKind? Kind { get; init; }
+
+    public Guid? ScopeProjectId { get; init; }
+
+    /// <summary>Keep only Wisdom confirmed at or after this instant.</summary>
+    public DateTimeOffset? Since { get; init; }
+}
 
 /// <summary>
 /// One fused row of the hybrid search. <see cref="FusedScore"/> is a rank-fusion value (max ≈
@@ -41,6 +64,9 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                    row_number() OVER (ORDER BY embedding <=> CAST(@embedding AS vector), id) AS rank
             FROM wisdom
             WHERE (@include_retired OR retired_at IS NULL)
+              AND (@kind IS NULL OR kind = @kind)
+              AND (@scope_project_id IS NULL OR scope_project_id = @scope_project_id)
+              AND (@since IS NULL OR last_confirmed_at >= @since)
             ORDER BY embedding <=> CAST(@embedding AS vector), id
             LIMIT @top_n
         ),
@@ -50,6 +76,9 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                        ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', @query)) DESC, id) AS rank
             FROM wisdom
             WHERE (@include_retired OR retired_at IS NULL)
+              AND (@kind IS NULL OR kind = @kind)
+              AND (@scope_project_id IS NULL OR scope_project_id = @scope_project_id)
+              AND (@since IS NULL OR last_confirmed_at >= @since)
               AND tsv @@ plainto_tsquery('english', @query)
             ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', @query)) DESC, id
             LIMIT @top_n
@@ -67,12 +96,10 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <param name="query">The query text, for the FTS leg.</param>
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding, string query, CancellationToken cancellationToken)
-        => await SearchAsync(embedding, query, includeRetired: false, cancellationToken);
+        => await SearchAsync(embedding, query, WisdomSearchFilter.None, cancellationToken);
 
-    /// <param name="includeRetired">§7: Retired Wisdom surfaces only for <c>mimir_search</c> with
-    /// <c>include_retired</c>; every other caller keeps the exclusion via the overload above.</param>
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
-        Vector embedding, string query, bool includeRetired, CancellationToken cancellationToken)
+        Vector embedding, string query, WisdomSearchFilter filter, CancellationToken cancellationToken)
     {
         // The vector arrives as its text form and is cast in SQL, so the query needs no vector
         // type mapping on the raw-SQL path (Vector.ToString is the pgvector input syntax).
@@ -83,7 +110,19 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                 new NpgsqlParameter("query", query),
                 new NpgsqlParameter("top_n", options.Value.PerLegTopN),
                 new NpgsqlParameter("k", options.Value.RrfK),
-                new NpgsqlParameter("include_retired", includeRetired))
+                new NpgsqlParameter("include_retired", filter.IncludeRetired),
+                new NpgsqlParameter("kind", NpgsqlDbType.Text)
+                {
+                    Value = (object?)filter.Kind?.ToString() ?? DBNull.Value,
+                },
+                new NpgsqlParameter("scope_project_id", NpgsqlDbType.Uuid)
+                {
+                    Value = (object?)filter.ScopeProjectId ?? DBNull.Value,
+                },
+                new NpgsqlParameter("since", NpgsqlDbType.TimestampTz)
+                {
+                    Value = (object?)filter.Since ?? DBNull.Value,
+                })
             .ToListAsync(cancellationToken);
         return hits;
     }
