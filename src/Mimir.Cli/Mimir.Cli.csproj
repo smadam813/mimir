@@ -6,8 +6,19 @@
     <RootNamespace>Mimir.Cli</RootNamespace>
 
     <!-- Spec §13: self-contained single-file win-x64 executable. Conditioned on publish so that
-         ordinary builds (and the test project's reference) stay framework-dependent. -->
-    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+         ordinary builds (and the test project's reference) stay framework-dependent.
+         Both win-x64 and linux-x64 listed here (not just win-x64) because the SDK always folds
+         the *building machine's* RID into the restore graph regardless of what's declared —
+         a Windows dev machine's restore only shows win-x64, but CI's Linux runner folds in
+         linux-x64 too, and packages.lock.json's RID set must match whichever OS wrote it or
+         RestoreLockedMode fails with NU1004 on the other one. Listing both up front keeps the
+         restore graph (and thus the lock file) identical across the two hosts that actually
+         regenerate it today: Windows dev machines and the Linux CI runner. This does NOT cover
+         every possible dev host — the SDK still folds in a third host's own RID (e.g. osx-arm64,
+         linux-arm64) regardless of this list, so restoring on one produces a lock file with an
+         extra RID section that CI's locked restore can't reproduce. Regenerate lock files on
+         Windows or inside a linux-x64 SDK container, not on an unlisted host RID. -->
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     <PublishSingleFile>true</PublishSingleFile>
     <RuntimeIdentifier Condition="'$(_IsPublishing)' == 'true'">win-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(_IsPublishing)' == 'true'">true</SelfContained>

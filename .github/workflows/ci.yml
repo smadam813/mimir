@@ -68,9 +68,7 @@ jobs:
         with:
           global-json-file: global.json
           cache: true
-          cache-dependency-path: |
-            Directory.Packages.props
-            **/*.csproj
+          cache-dependency-path: '**/packages.lock.json'
 
       - name: Show resolved SDK version
         run: dotnet --version

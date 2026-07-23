@@ -11,7 +11,10 @@
 
   <ItemGroup Label="Storage (spec §3)">
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
-    <!-- Kept in lockstep with the EF Core version Npgsql 10.0.3 resolves, to avoid a binding conflict. -->
+    <!-- Kept in lockstep with the EF Core version Npgsql 10.0.3 resolves, to avoid a binding conflict.
+         When bumping Npgsql, edit the EntityFrameworkCore.Design version to match in the same
+         commit, then regenerate packages.lock.json (dotnet restore, all five projects) so the
+         lock files reflect the new pair together. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
   </ItemGroup>

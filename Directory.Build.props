@@ -8,6 +8,17 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Locked only in CI (GitHub Actions sets CI=true): a stale or missing lock file fails the
+         pipeline loudly instead of silently drifting. Local restores stay mutable so bumping a
+         dependency regenerates the lock file as a normal, reviewable diff.
+         Bumping global.json's SDK version is a dependency bump too: implicit SDK-delivered
+         packages (e.g. Microsoft.NET.ILLink.Tasks, pulled in by PublishSingleFile) are pinned in
+         each packages.lock.json at whatever version the SDK resolved. An SDK bump changes that
+         resolution locally and succeeds quietly (restores are unlocked here), but CI's locked
+         restore then fails against the stale pin. Regenerate every packages.lock.json
+         (dotnet restore, all five projects) in the same commit as any global.json SDK bump. -->
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 
 </Project>
