@@ -6,16 +6,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- NuGet advisory/audit codes stay loud warnings but must not fail the build: they are
-         raised against live advisory data from the feed, so a newly published advisory against
-         an unchanged (typically transitive) dependency would otherwise turn a previously green
-         commit red on a day nobody touched the repository. Lock files don't help — audit
-         evaluates the locked graph against today's advisories on every restore. Do not "fix"
-         this back into TreatWarningsAsErrors, and do not convert it into NoWarn (which would
-         hide the advisories entirely). NU1901–NU1904 = vulnerability advisories by severity;
-         NU1603 = package resolved higher than requested, the same time-dependent class.
-         See docs/adr/0007-nuget-audit-warnings-not-errors.md. -->
-    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904;NU1603</WarningsNotAsErrors>
+    <!-- NuGet audit codes (NU1900 = advisory-data fetch failure, NU1901–NU1904 = advisories by
+         severity) depend on live nuget.org state, so escalating them lets an advisory published —
+         or a network blip — on a day nobody touched the repository redden a green commit. Keep
+         them loud warnings: do not move them back into TreatWarningsAsErrors, and do not NoWarn
+         them. Rationale, rejected alternatives, and why NU1603 is deliberately NOT here:
+         docs/adr/0007-nuget-audit-warnings-not-errors.md. -->
+    <WarningsNotAsErrors>NU1900;NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
