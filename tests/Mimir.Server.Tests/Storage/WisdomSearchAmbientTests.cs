@@ -74,8 +74,36 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AmbientUniverse_RestrictsBeforeThePerLegLimit_NotAfterFusion()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var (project, foreign) = (await AddProjectAsync(), await AddProjectAsync());
+        // Three foreign rows outrank the ambient two on both legs: nearer vectors, denser matches.
+        foreach (var cosine in (double[])[0.99, 0.97, 0.95])
+        {
+            await AddWisdomAsync(foreign.Id, "ibex ibex ibex ibex", cosine: cosine);
+        }
+
+        var projectScoped = await AddWisdomAsync(project.Id, "ibex sighting", cosine: 0.5);
+        var global = await AddWisdomAsync(Project.GlobalId, "ibex report", cosine: 0.4);
+
+        var hits = await Search(perLegTopN: 2).SearchAsync(
+            new Vector(TestVectors.Basis),
+            "ibex",
+            new WisdomSearchFilter { AmbientProjectId = project.Id },
+            Token);
+
+        // Applied after the per-leg LIMIT, the universe would be the filtered residue of an
+        // unfiltered top-2 — both legs full of foreign rows, ambient recall empty while eligible
+        // matches sit deeper. Applied before it, both ambient rows fill the legs and rank.
+        hits.Select(h => h.WisdomId).ShouldBe(
+            [projectScoped.Id, global.Id], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task AmbientUniverse_RejectsIncludeRetired()
     {
+        await using var db = DisconnectedContext();
         var filter = new WisdomSearchFilter
         {
             AmbientProjectId = Guid.CreateVersion7(),
@@ -83,12 +111,14 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
         };
 
         await Should.ThrowAsync<ArgumentException>(
-            () => Search().SearchAsync(new Vector(TestVectors.Basis), "yak", filter, Token));
+            () => new WisdomSearch(db, Options.Create(new SearchOptions()))
+                .SearchAsync(new Vector(TestVectors.Basis), "yak", filter, Token));
     }
 
     [Fact]
     public async Task AmbientUniverse_RejectsAScopeNarrowing()
     {
+        await using var db = DisconnectedContext();
         var filter = new WisdomSearchFilter
         {
             AmbientProjectId = Guid.CreateVersion7(),
@@ -96,11 +126,22 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
         };
 
         await Should.ThrowAsync<ArgumentException>(
-            () => Search().SearchAsync(new Vector(TestVectors.Basis), "yak", filter, Token));
+            () => new WisdomSearch(db, Options.Create(new SearchOptions()))
+                .SearchAsync(new Vector(TestVectors.Basis), "yak", filter, Token));
     }
 
-    private WisdomSearch Search()
-        => new(Context, Options.Create(new SearchOptions { PerLegTopN = 50 }));
+    private WisdomSearch Search(int perLegTopN = 50)
+        => new(Context, Options.Create(new SearchOptions { PerLegTopN = perLegTopN }));
+
+    /// <summary>
+    /// The argument checks throw before any SQL is issued, so their tests run even without
+    /// Postgres — over a context that is never connected. Deleting a guard turns them red
+    /// everywhere (a connection failure), never into a local skip.
+    /// </summary>
+    private static MimirDbContext DisconnectedContext()
+        => new(new DbContextOptionsBuilder<MimirDbContext>()
+            .UseNpgsql("Host=guard-checks-never-connect")
+            .Options);
 
     private async Task<Project> AddProjectAsync()
     {
@@ -111,7 +152,7 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
     }
 
     private async Task<Wisdom> AddWisdomAsync(
-        Guid scopeProjectId, string text, DateTimeOffset? retiredAt = null)
+        Guid scopeProjectId, string text, DateTimeOffset? retiredAt = null, double cosine = 1.0)
     {
         var wisdom = new Wisdom
         {
@@ -119,7 +160,7 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
             Kind = WisdomKind.Fact,
             ScopeProjectId = scopeProjectId,
             Text = text,
-            Embedding = new Vector(TestVectors.Basis),
+            Embedding = new Vector(TestVectors.WithCosine(cosine)),
             Reinforcement = 1,
             LastConfirmedAt = Now,
             RetiredAt = retiredAt,

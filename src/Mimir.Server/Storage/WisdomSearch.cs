@@ -63,14 +63,17 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
 {
     /// <summary>
     /// The ambient Candidate Universe (§7) in SQL, shared verbatim by both legs so the rule
-    /// cannot drift into two rules: scope is the session's Project or Global, minus the
-    /// native-content exclusion — Wisdom whose only Provenance is HarvestedItems of the session's
-    /// Project never ranks ambiently; orphaned provenance is not harvest-only, so it stays in.
-    /// <c>AmbientCandidates</c> owns the EF form; a parity test pins this clause to it.
+    /// cannot drift into two rules — self-contained, carrying all three of the universe's
+    /// predicates: scope is the session's Project or Global, non-Retired (making the base
+    /// predicate's <c>@include_retired</c> guard a redundancy here, not the rule's only keeper),
+    /// minus the native-content exclusion — Wisdom whose only Provenance is HarvestedItems of the
+    /// session's Project never ranks ambiently; orphaned provenance is not harvest-only, so it
+    /// stays in. <c>AmbientCandidates</c> owns the EF form; a parity test pins this clause to it.
     /// </summary>
     private const string AmbientClause = """
         (@ambient_project_id IS NULL
                   OR ((scope_project_id = @ambient_project_id OR scope_project_id = @global_id)
+                      AND retired_at IS NULL
                       AND (NOT EXISTS (
                               SELECT 1 FROM provenance p WHERE p.wisdom_id = wisdom.id)
                           OR EXISTS (
