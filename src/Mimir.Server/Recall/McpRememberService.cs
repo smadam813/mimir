@@ -64,7 +64,13 @@ internal sealed class McpRememberService(
                 + $" (session {target.SessionId}).";
         }
 
-        await gate.AdmitAsync(new WisdomCandidate(kind, project.Id, request.Content), cancellationToken);
+        // A one-element Admission batch with nothing to finalize: the deliberate save gets the
+        // same transaction and the same serialization as every pipeline admission (§7.1). This
+        // is the one interactive caller of the gate, so it can wait out an in-flight background
+        // batch — arbiter rulings included — before its own admits; accepted, since only this
+        // no-live-Episode path reaches the gate at all and the save is never dropped.
+        await gate.AdmitAllAsync(
+            [new WisdomCandidate(kind, project.Id, request.Content)], finalizer: null, cancellationToken);
         return $"No live episode for {project.DisplayName} — the content went straight to the"
             + $" Merge Gate as a {kind} candidate.";
     }

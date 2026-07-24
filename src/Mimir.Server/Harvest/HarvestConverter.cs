@@ -1,25 +1,23 @@
 using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
-using Pgvector;
 
 namespace Mimir.Server.Harvest;
 
 /// <summary>
 /// The §5 handoff from HarvestedItems to the Merge Gate. Works the conversion marker: every
 /// version with <c>converted_at IS NULL</c> — new, or stored before the Wisdom tier shipped (the
-/// Backfill's memory) — is split into candidates, gated, and marked, all in one transaction per
-/// item. A crash mid-run redoes at most the in-flight item; everything committed is marked and
-/// never gated again, which is what "exactly once" means across restarts.
+/// Backfill's memory) — is split into candidates and handed to the gate as one Admission batch
+/// per item, the marker riding along as the batch's finalizer. A crash mid-run redoes at most the
+/// in-flight item; everything committed is marked and never gated again, which is what "exactly
+/// once" means across restarts.
 /// </summary>
 internal sealed class HarvestConverter(
     MimirDbContext db,
     MergeGate gate,
-    IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IOptions<HarvestOptions> options,
     TimeProvider clock,
     ILogger<HarvestConverter> logger)
@@ -59,8 +57,9 @@ internal sealed class HarvestConverter(
             }
             finally
             {
-                // The scoped context outlives the whole run, and no entity is needed across
-                // items — a failed item's rolled-back rows especially must not stay tracked.
+                // The scoped context outlives the whole run and no entity is needed across
+                // items — the gate clears what its own rolled-back batch staged, this drops the
+                // rest, item included, so nothing from one item rides another's admission.
                 db.ChangeTracker.Clear();
             }
         }
@@ -79,31 +78,18 @@ internal sealed class HarvestConverter(
         var item = await db.HarvestedItems.FirstAsync(i => i.Id == itemId, cancellationToken);
         var candidates = HarvestCandidates.Of(item.Content, options.Value.CandidateCap);
 
-        // Embeddings depend only on the text, so the whole item embeds in one batched round-trip
-        // up front. Matched candidates still reach the model from inside the transaction below —
-        // the gate's arbiter ruling and rewrite re-embedding depend on what the search finds.
-        var vectors = candidates.Count == 0
-            ? []
-            : (await embeddings.GenerateAsync(
-                    candidates.Select(c => c.Text), cancellationToken: cancellationToken))
-                .Select(e => new Vector(e.Vector))
-                .ToList();
-
-        // One transaction per item: the marker commits with the item's Wisdom or not at all. The
-        // gate's save after each candidate stays inside it — flushed rows are visible to the next
-        // candidate's search on this connection, so near-identical sections of one file merge
-        // instead of duplicating.
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        foreach (var (candidate, embedding) in candidates.Zip(vectors))
-        {
-            await gate.AdmitAsync(
-                new WisdomCandidate(candidate.Kind, item.ProjectId, candidate.Text, HarvestedItemId: item.Id),
-                embedding,
-                cancellationToken);
-        }
-
-        item.ConvertedAt = clock.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        // One Admission batch per item: the finalizer's marker commits with the item's Wisdom or
+        // not at all, and the gate's save after each candidate keeps near-identical sections of
+        // one file merging instead of duplicating.
+        await gate.AdmitAllAsync(
+            candidates
+                .Select(c => new WisdomCandidate(c.Kind, item.ProjectId, c.Text, HarvestedItemId: item.Id))
+                .ToList(),
+            _ =>
+            {
+                item.ConvertedAt = clock.GetUtcNow();
+                return Task.CompletedTask;
+            },
+            cancellationToken);
     }
 }

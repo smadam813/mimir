@@ -628,9 +628,12 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         throw new TimeoutException("no session ever waited on the gate's advisory lock");
     }
 
-    /// <summary>The gate saves per admission itself, so the helper only builds and calls it.</summary>
+    /// <summary>
+    /// One candidate as its own Admission batch — the gate owns the embedding, the transaction,
+    /// and the commit, so the helper only builds a gate and calls it.
+    /// </summary>
     private async Task AdmitAsync(WisdomCandidate candidate)
-        => await NewGate(Context).AdmitAsync(candidate, Token);
+        => await NewGate(Context).AdmitAllAsync([candidate], finalizer: null, Token);
 
     /// <summary>A gate on <paramref name="context"/> — its own search, the shared fakes.</summary>
     private MergeGate NewGate(MimirDbContext context) => new(

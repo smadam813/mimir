@@ -29,19 +29,17 @@ internal sealed record WisdomCandidate(
 /// adjudicates by Supersede or Scope-split, leaving the survivors Contested.
 /// </summary>
 /// <remarks>
-/// The gate saves after every admission, on the caller's <see cref="MimirDbContext"/> and inside
-/// whatever transaction the caller opened — so the §5 conversion marker still commits atomically
-/// with the Wisdom the item produced, while the search's raw SQL is guaranteed to see what earlier
-/// candidates staged (the save-between-candidates rule is enforced here, not left to callers).
-/// A matched admission calls the arbiter — and re-embeds rewrites — inside that transaction; the
-/// wait is accepted, since only background workers drive the gate and Postgres is local. Arbiter
-/// failures propagate: the caller's retry (the §5 marker, the §6 queue) redoes the admission
-/// rather than letting a contradiction silently pass as a mechanical merge.
-/// The per-candidate overloads do not serialize admissions from separate callers against each
-/// other — those callers own their transactions and lean on §6's single-worker rule.
-/// <see cref="AdmitAllAsync"/> is the replacing contract: the gate owns the transaction and a
-/// gate-wide advisory lock serializes whole batches across callers and processes. The callers
-/// move onto it next; the overloads leave with them.
+/// <see cref="AdmitAllAsync"/> is the whole interface: the gate owns the embedding round-trip,
+/// the transaction, and the gate-wide advisory lock that serializes whole batches across every
+/// caller and process — so ADR-0004's single-writer convergence rule is mechanism, not a comment,
+/// and a caller cannot forget a transaction it never opens. The gate saves after every admission,
+/// so the search's raw SQL is guaranteed to see what earlier candidates staged (§6's
+/// merge-gate-as-reduce is enforced here, not left to callers), while nothing becomes visible
+/// outside unless the whole batch commits — the §5 conversion marker and the §6 done marker ride
+/// in as finalizers. A matched admission calls the arbiter — and re-embeds rewrites — inside that
+/// transaction; the wait is accepted, since Postgres is local and the batch already holds the
+/// lock. Arbiter failures propagate: the caller's retry (the §5 marker, the §6 queue) redoes the
+/// Admission rather than letting a contradiction silently pass as a mechanical merge.
 /// </remarks>
 internal sealed class MergeGate(
     MimirDbContext db,
@@ -125,18 +123,11 @@ internal sealed class MergeGate(
         }
     }
 
-    public async Task AdmitAsync(WisdomCandidate candidate, CancellationToken cancellationToken)
-    {
-        var embedding = new Vector(
-            await embeddings.GenerateVectorAsync(candidate.Text, cancellationToken: cancellationToken));
-        await AdmitAsync(candidate, embedding, cancellationToken);
-    }
-
     /// <summary>
-    /// Admission with a caller-supplied embedding, for callers that batch a whole item's
-    /// embeddings in one round-trip before opening their transaction.
+    /// One candidate's Admission, inside the batch's transaction and with the embedding the batch
+    /// already generated for it.
     /// </summary>
-    public async Task AdmitAsync(WisdomCandidate candidate, Vector embedding, CancellationToken cancellationToken)
+    private async Task AdmitAsync(WisdomCandidate candidate, Vector embedding, CancellationToken cancellationToken)
     {
         var hits = await search.SearchAsync(embedding, candidate.Text, cancellationToken);
 
