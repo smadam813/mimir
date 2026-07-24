@@ -62,8 +62,9 @@ internal sealed class MergeGate(
     /// One Admission batch (see CONTEXT.md): the gate embeds every candidate text in a single
     /// round-trip, then admits the whole batch in its own transaction, serialized against every
     /// other batch — any caller, any process — by the advisory lock. All or nothing: a failure
-    /// anywhere rolls back every admission and the finalizer's staged changes, and propagates
-    /// unchanged so the caller's retry semantics (the §5 marker, the §6 queue) still apply.
+    /// anywhere rolls back every admission and the finalizer's staged changes, clears the
+    /// batch's entities from the change tracker, and propagates unchanged so the caller's retry
+    /// semantics (the §5 marker, the §6 queue) still apply.
     /// </summary>
     /// <param name="finalizer">Runs inside the transaction; its staged changes commit atomically
     /// with the admissions. Callers stage their completion marker here.</param>
@@ -83,25 +84,45 @@ internal sealed class MergeGate(
                 .Select(e => new Vector(e.Vector))
                 .ToList();
 
+        // Zip below truncates to the shorter side: a generator returning a short batch would
+        // silently skip trailing candidates and still commit the marker — a permanent loss,
+        // since the caller's retry keys off that marker. Fail loudly instead, before the lock.
+        if (vectors.Count != candidates.Count)
+        {
+            throw new InvalidOperationException(
+                $"the embedding batch returned {vectors.Count} vector(s) for {candidates.Count} candidate(s)");
+        }
+
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await db.Database.ExecuteSqlAsync(
-            $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
-
-        // The save after each admission stays inside this transaction: a later candidate's
-        // search sees what earlier ones staged (§6's merge-gate-as-reduce), while nothing
-        // becomes visible outside unless the whole batch commits.
-        foreach (var (candidate, embedding) in candidates.Zip(vectors))
+        try
         {
-            await AdmitAsync(candidate, embedding, cancellationToken);
-        }
+            await db.Database.ExecuteSqlAsync(
+                $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
 
-        if (finalizer is not null)
+            // The save after each admission stays inside this transaction: a later candidate's
+            // search sees what earlier ones staged (§6's merge-gate-as-reduce), while nothing
+            // becomes visible outside unless the whole batch commits.
+            foreach (var (candidate, embedding) in candidates.Zip(vectors))
+            {
+                await AdmitAsync(candidate, embedding, cancellationToken);
+            }
+
+            if (finalizer is not null)
+            {
+                await finalizer(cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
         {
-            await finalizer(cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
+            // The rolled-back batch must not stay tracked on the shared scoped context: an
+            // Added entity left behind would ride the caller's next save back in, bypassing
+            // the gate, and a saved one would linger as a phantom the database no longer has.
+            db.ChangeTracker.Clear();
+            throw;
         }
-
-        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task AdmitAsync(WisdomCandidate candidate, CancellationToken cancellationToken)

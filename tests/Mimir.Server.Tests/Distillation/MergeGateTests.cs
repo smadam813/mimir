@@ -498,6 +498,64 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AFinalizerFailure_RollsBackTheWrittenMarker_WithTheAdmissions()
+    {
+        // Whole-table assertion below; parking other tests' leftovers first.
+        await Context.ResetWisdomAsync(Token);
+        var item = await AddHarvestedItemAsync();
+        var text = $"A fact the marker must not outlive {Guid.NewGuid():N}";
+
+        // The finalizer writes the marker to the database inside the transaction and then
+        // fails — so the rollback has a genuinely written marker to take back, not one that
+        // was never staged.
+        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate(Context).AdmitAllAsync(
+            [new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id)],
+            async ct =>
+            {
+                item.ConvertedAt = Now;
+                await Context.SaveChangesAsync(ct);
+                throw new InvalidOperationException("the finalizer failed after writing the marker");
+            },
+            Token));
+
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
+        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+            .ConvertedAt.ShouldBeNull("the written marker rolls back with the admissions");
+    }
+
+    [Fact]
+    public async Task APoisonedRewriteEmbedding_FailsTheBatch_LeavingTheContextClean()
+    {
+        // Whole-table assertions below; parking other tests' leftovers first.
+        await Context.ResetWisdomAsync(Token);
+        var first = await AddHarvestedItemAsync();
+        var second = await AddHarvestedItemAsync(first.ProjectId);
+        var originalText = $"A settled position {Guid.NewGuid():N}";
+        var matchingText = $"The position restated {Guid.NewGuid():N}";
+        var mergedText = $"The unembeddable rewrite {Guid.NewGuid():N}";
+        _embeddings.Map(originalText, TestVectors.Basis);
+        _embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
+        _embeddings.Poison(mergedText);
+        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate(Context).AdmitAllAsync(
+            [
+                new WisdomCandidate(WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id),
+                new WisdomCandidate(WisdomKind.Fact, second.ProjectId, matchingText, HarvestedItemId: second.Id),
+            ],
+            finalizer: null,
+            Token));
+
+        // The failure struck mid-merge, with staged-but-unsaved rows in the tracker. The gate
+        // clears them on its way out, so a later save on the same scoped context re-inserts
+        // nothing — left dirty, it would push Provenance at a rolled-back Wisdom.
+        await Context.SaveChangesAsync(Token);
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
+        (await FromDb(db => db.WisdomVersions.CountAsync(Token))).ShouldBe(0);
+        (await FromDb(db => db.Provenance.CountAsync(Token))).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task ParallelNearDuplicateBatches_ConvergeOnOneWisdom_ReinforcedTwice()
     {
         // Whole-table assertions below; parking other tests' leftovers first.
