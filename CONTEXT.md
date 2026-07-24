@@ -72,6 +72,10 @@ _Avoid_: hit count, weight
 The Merge Gate's ruling on a contradiction: **Supersede** (old Wisdom retired to history with a superseded-by link) or **Scope-split** (both rewritten with explicit Scopes). A recently adjudicated Wisdom is **Contested**.
 _Avoid_: conflict resolution, overwrite
 
+**Admission**:
+The Merge Gate's processing of one candidate — new Wisdom, Reinforcement, or Adjudication. Admissions happen in gate-owned atomic batches: all of a batch's admissions, and the caller's completion marker, commit together or not at all, and batches never interleave.
+_Avoid_: write, insert, upsert
+
 ### Recall
 
 **Brief**:
@@ -81,6 +85,10 @@ _Avoid_: context dump, preamble
 **Recall**:
 How memories reach a session: the Brief, per-prompt retrieval above a confidence threshold, and deliberate tool calls. Ambient recall carries Wisdom only; Episodes surface only through tools. Recall fails open — when Mimir is down, sessions proceed with nothing injected.
 _Avoid_: retrieval (for the whole surface), RAG
+
+**Candidate Universe**:
+The set of Wisdom a recall surface may draw from. **Ambient** (the Brief and the Prompt lane): the session's Project plus Global, non-Retired, minus the native-content exclusion. **Everything** (`mimir_search`, the golden runner): the whole tier, optionally narrowed. The universe restricts the search itself, never a ranked result after the fact.
+_Avoid_: pool, corpus, scope filter
 
 ### Structure
 
