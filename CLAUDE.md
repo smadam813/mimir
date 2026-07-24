@@ -19,3 +19,6 @@ Single-context layout — `CONTEXT.md` and `docs/adr/` at the repo root. See `do
 - A test that pins a mechanism (a lock, a rollback, a cleanup) gets mutation-checked before review: remove the mechanism, confirm the test fails, restore. Review rounds reject vacuous assertions (#61).
 - Whoever owns a transaction on the shared scoped DbContext also owns `ChangeTracker.Clear()` on failure — rolled-back `Added` entities re-insert on the caller's next save (see MergeGate.AdmitAllAsync, HarvestConverter, DistillationRun).
 - EF migrations: `dotnet restore` first in a fresh worktree, then from `src/Mimir.Server`: `dotnet ef migrations add <Name> --output-dir Storage/Migrations`.
+- A test that never issues SQL (argument checks, pure validation) must not reach the code through a fixture's skip-gated context — build it over a never-connected `MimirDbContext` (plain `UseNpgsql("Host=...")`) so it runs, and fails, without Postgres.
+- A test that pins a structural property (filter-before-LIMIT, SQL/EF parity) proves nothing until mutation-checked: apply the regression temporarily, confirm the test goes red, revert.
+- After pushing a PR: `gh pr checks <n> --watch` — CI is the arbiter (fails on skips, runs on Linux); local green is not.

@@ -27,6 +27,15 @@ public sealed record WisdomSearchFilter
 
     /// <summary>Keep only Wisdom confirmed at or after this instant.</summary>
     public DateTimeOffset? Since { get; init; }
+
+    /// <summary>
+    /// §7: restrict both legs to the ambient Candidate Universe of this session Project — the
+    /// Project plus Global, non-Retired, minus the native-content exclusion. The EF form in
+    /// <c>AmbientCandidates</c> owns the rule; a parity test pins the SQL here to it. Combining
+    /// with <see cref="IncludeRetired"/> or <see cref="ScopeProjectId"/> contradicts the
+    /// universe's definition and is rejected at the search seam.
+    /// </summary>
+    public Guid? AmbientProjectId { get; init; }
 }
 
 /// <summary>
@@ -52,12 +61,37 @@ public sealed class WisdomSearchHit
 /// </summary>
 public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> options)
 {
+    /// <summary>
+    /// The ambient Candidate Universe (§7) in SQL, shared verbatim by both legs so the rule
+    /// cannot drift into two rules — self-contained, carrying all three of the universe's
+    /// predicates: scope is the session's Project or Global, non-Retired (making the base
+    /// predicate's <c>@include_retired</c> guard a redundancy here, not the rule's only keeper),
+    /// minus the native-content exclusion — Wisdom whose only Provenance is HarvestedItems of the
+    /// session's Project never ranks ambiently; orphaned provenance is not harvest-only, so it
+    /// stays in. <c>AmbientCandidates</c> owns the EF form; a parity test pins this clause to it.
+    /// </summary>
+    private const string AmbientClause = """
+        (@ambient_project_id IS NULL
+                  OR ((scope_project_id = @ambient_project_id OR scope_project_id = @global_id)
+                      AND retired_at IS NULL
+                      AND (NOT EXISTS (
+                              SELECT 1 FROM provenance p WHERE p.wisdom_id = wisdom.id)
+                          OR EXISTS (
+                              SELECT 1 FROM provenance p
+                              WHERE p.wisdom_id = wisdom.id
+                                AND (p.harvested_item_id IS NULL
+                                  OR NOT EXISTS (
+                                      SELECT 1 FROM harvested_items h
+                                      WHERE h.id = p.harvested_item_id
+                                        AND h.project_id = @ambient_project_id))))))
+        """;
+
     /// <remarks>
     /// Each leg ranks within itself (row_number over its own order) and contributes 1/(k+rank);
     /// a FULL JOIN keeps rows that only one leg surfaced. Ties break on id so the ordering is
     /// deterministic under equal scores. The vector leg's cosine rides along unfused.
     /// </remarks>
-    private const string Sql = """
+    private const string Sql = $"""
         WITH vector_leg AS (
             SELECT id,
                    1 - (embedding <=> CAST(@embedding AS vector)) AS cosine,
@@ -67,6 +101,7 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
               AND (@kind IS NULL OR kind = @kind)
               AND (@scope_project_id IS NULL OR scope_project_id = @scope_project_id)
               AND (@since IS NULL OR last_confirmed_at >= @since)
+              AND {AmbientClause}
             ORDER BY embedding <=> CAST(@embedding AS vector), id
             LIMIT @top_n
         ),
@@ -79,6 +114,7 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
               AND (@kind IS NULL OR kind = @kind)
               AND (@scope_project_id IS NULL OR scope_project_id = @scope_project_id)
               AND (@since IS NULL OR last_confirmed_at >= @since)
+              AND {AmbientClause}
               AND tsv @@ plainto_tsquery('english', @query)
             ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', @query)) DESC, id
             LIMIT @top_n
@@ -101,6 +137,26 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding, string query, WisdomSearchFilter filter, CancellationToken cancellationToken)
     {
+        if (filter.AmbientProjectId is not null)
+        {
+            if (filter.IncludeRetired)
+            {
+                throw new ArgumentException(
+                    "The ambient Candidate Universe never ranks Retired Wisdom; " +
+                    $"{nameof(filter.IncludeRetired)} contradicts {nameof(filter.AmbientProjectId)}.",
+                    nameof(filter));
+            }
+
+            if (filter.ScopeProjectId is not null)
+            {
+                throw new ArgumentException(
+                    "The ambient Candidate Universe fixes its own scope (the session's Project " +
+                    $"plus Global); {nameof(filter.ScopeProjectId)} contradicts " +
+                    $"{nameof(filter.AmbientProjectId)}.",
+                    nameof(filter));
+            }
+        }
+
         // The vector arrives as its text form and is cast in SQL, so the query needs no vector
         // type mapping on the raw-SQL path (Vector.ToString is the pgvector input syntax).
         var hits = await db.Database
@@ -122,6 +178,14 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                 new NpgsqlParameter("since", NpgsqlDbType.TimestampTz)
                 {
                     Value = (object?)filter.Since ?? DBNull.Value,
+                },
+                new NpgsqlParameter("ambient_project_id", NpgsqlDbType.Uuid)
+                {
+                    Value = (object?)filter.AmbientProjectId ?? DBNull.Value,
+                },
+                new NpgsqlParameter("global_id", NpgsqlDbType.Uuid)
+                {
+                    Value = Project.GlobalId,
                 })
             .ToListAsync(cancellationToken);
         return hits;

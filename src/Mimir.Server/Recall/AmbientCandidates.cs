@@ -6,7 +6,9 @@ namespace Mimir.Server.Recall;
 /// <summary>
 /// The ambient candidate universe (§7), shared by both ambient lanes: the session's Project plus
 /// Global, non-Retired — other Projects' Wisdom reaches here only via merge-gate promotion, never
-/// directly — minus the native-content exclusion.
+/// directly — minus the native-content exclusion. This expression owns the rule;
+/// <see cref="Storage.WisdomSearch"/> mirrors it in SQL for its ambient mode, and a parity test
+/// pins the two to agreement.
 /// </summary>
 internal static class AmbientCandidates
 {
