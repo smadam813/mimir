@@ -17,3 +17,6 @@ Single-context layout — `CONTEXT.md` and `docs/adr/` at the repo root. See `do
 - `dotnet test Mimir.slnx` — Postgres-backed tests skip themselves when no Postgres is reachable (`docker compose up -d postgres`, or set `MIMIR_TEST_POSTGRES`). CI fails on any skip, so check the skip count locally before trusting green.
 - Postgres test classes share one throwaway database per class, and xUnit's test order differs across machines: a test that queries beyond its own rows (counts, "oldest pending" claims) must first park or clean other tests' leftovers. This has broken CI twice (#20, #22) while passing locally.
 - EF migrations: `dotnet restore` first in a fresh worktree, then from `src/Mimir.Server`: `dotnet ef migrations add <Name> --output-dir Storage/Migrations`.
+- A test that never issues SQL (argument checks, pure validation) must not reach the code through a fixture's skip-gated context — build it over a never-connected `MimirDbContext` (plain `UseNpgsql("Host=...")`) so it runs, and fails, without Postgres.
+- A test that pins a structural property (filter-before-LIMIT, SQL/EF parity) proves nothing until mutation-checked: apply the regression temporarily, confirm the test goes red, revert.
+- After pushing a PR: `gh pr checks <n> --watch` — CI is the arbiter (fails on skips, runs on Linux); local green is not.
