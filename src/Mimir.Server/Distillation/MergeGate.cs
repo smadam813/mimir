@@ -37,9 +37,11 @@ internal sealed record WisdomCandidate(
 /// wait is accepted, since only background workers drive the gate and Postgres is local. Arbiter
 /// failures propagate: the caller's retry (the §5 marker, the §6 queue) redoes the admission
 /// rather than letting a contradiction silently pass as a mechanical merge.
-/// Admissions from separate scopes are not serialized against each other: near-duplicates admitted
-/// concurrently could both insert. Fine while the harvest loop is the only caller; the Distiller
-/// (#22) must keep §6's single-worker rule.
+/// The per-candidate overloads do not serialize admissions from separate callers against each
+/// other — those callers own their transactions and lean on §6's single-worker rule.
+/// <see cref="AdmitAllAsync"/> is the replacing contract: the gate owns the transaction and a
+/// gate-wide advisory lock serializes whole batches across callers and processes. The callers
+/// move onto it next; the overloads leave with them.
 /// </remarks>
 internal sealed class MergeGate(
     MimirDbContext db,
@@ -49,6 +51,59 @@ internal sealed class MergeGate(
     IOptions<DistillationOptions> options,
     TimeProvider clock)
 {
+    /// <summary>
+    /// The Merge Gate's advisory lock key — one gate-wide key ("mimir" in ASCII), taken with
+    /// <c>pg_advisory_xact_lock</c> as the first statement of every Admission batch's
+    /// transaction, never nested, released by Postgres on commit or rollback.
+    /// </summary>
+    private const long AdmissionLockKey = 0x6D696D6972;
+
+    /// <summary>
+    /// One Admission batch (see CONTEXT.md): the gate embeds every candidate text in a single
+    /// round-trip, then admits the whole batch in its own transaction, serialized against every
+    /// other batch — any caller, any process — by the advisory lock. All or nothing: a failure
+    /// anywhere rolls back every admission and the finalizer's staged changes, and propagates
+    /// unchanged so the caller's retry semantics (the §5 marker, the §6 queue) still apply.
+    /// </summary>
+    /// <param name="finalizer">Runs inside the transaction; its staged changes commit atomically
+    /// with the admissions. Callers stage their completion marker here.</param>
+    public async Task AdmitAllAsync(
+        IReadOnlyList<WisdomCandidate> candidates,
+        Func<CancellationToken, Task>? finalizer,
+        CancellationToken cancellationToken)
+    {
+        // Embeddings depend only on the text, so the batch embeds before the transaction opens
+        // and holds the lock no longer than adjudication requires. Matched candidates still
+        // reach the model inside it — arbiter rulings and rewrite re-embeddings depend on what
+        // the search finds against staged rows.
+        var vectors = candidates.Count == 0
+            ? []
+            : (await embeddings.GenerateAsync(
+                    candidates.Select(c => c.Text), cancellationToken: cancellationToken))
+                .Select(e => new Vector(e.Vector))
+                .ToList();
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
+
+        // The save after each admission stays inside this transaction: a later candidate's
+        // search sees what earlier ones staged (§6's merge-gate-as-reduce), while nothing
+        // becomes visible outside unless the whole batch commits.
+        foreach (var (candidate, embedding) in candidates.Zip(vectors))
+        {
+            await AdmitAsync(candidate, embedding, cancellationToken);
+        }
+
+        if (finalizer is not null)
+        {
+            await finalizer(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task AdmitAsync(WisdomCandidate candidate, CancellationToken cancellationToken)
     {
         var embedding = new Vector(
