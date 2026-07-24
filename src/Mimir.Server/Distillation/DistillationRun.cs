@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.AI;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Pgvector;
 
 namespace Mimir.Server.Distillation;
 
@@ -11,17 +9,16 @@ internal sealed record DistillationAttempt(Guid EpisodeId, bool Succeeded, int C
 
 /// <summary>
 /// One turn of the §6 queue: claim the oldest-Sealed pending Episode (<c>pending → running</c>),
-/// distill its Event stream, and push every candidate through the Merge Gate — candidates and the
-/// <c>done</c> marker in one transaction, so a failure or crash anywhere leaves nothing admitted
-/// and the sweep's re-queue redoes the Episode without inflating Reinforcement. Model calls all
-/// happen before the transaction opens (only the arbiter's matched-pair rulings run inside, as
-/// the gate documents). Failure marks <c>failed</c> for the sweep to re-queue.
+/// distill its Event stream, and hand the whole Episode to the Merge Gate as one Admission batch
+/// with the <c>done</c> marker as its finalizer — so a failure or crash anywhere leaves nothing
+/// admitted and the sweep's re-queue redoes the Episode without inflating Reinforcement. The
+/// distiller's model calls all happen before the batch; the gate owns the embeddings, the
+/// transaction, and the commit. Failure marks <c>failed</c> for the sweep to re-queue.
 /// </summary>
 internal sealed class DistillationRun(
     MimirDbContext db,
     EpisodeDistiller distiller,
     MergeGate gate,
-    IEmbeddingGenerator<string, Embedding<float>> embeddings,
     TimeProvider clock,
     ILogger<DistillationRun> logger)
 {
@@ -54,15 +51,16 @@ internal sealed class DistillationRun(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Shutdown mid-run: nothing admitted (the transaction never committed). The claim
-            // stays Running; the worker's boot recovery re-queues it on the next start.
+            // Shutdown mid-run: nothing admitted (the gate's transaction never committed). The
+            // claim stays Running; the worker's boot recovery re-queues it on the next start.
             throw;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Distilling Episode {EpisodeId} failed; the sweep will re-queue it", episode.Id);
-            // The failed run's staged rows must not leak into the failure marking (or a later
-            // run on this scoped context).
+            // The gate clears what its own rolled-back batch staged; this covers the rest of the
+            // turn — the finalizer's detached done marker, anything the distill step tracked — so
+            // nothing from a failed run rides a later save on this scoped context.
             db.ChangeTracker.Clear();
             await db.Episodes
                 .Where(e => e.Id == episode.Id && e.Distillation == DistillationState.Running)
@@ -107,30 +105,19 @@ internal sealed class DistillationRun(
         return await distiller.DistillAsync(episode, identity, events, cancellationToken);
     }
 
+    /// <summary>
+    /// The Episode's candidates as one Admission batch, its <c>done</c> marker staged by the
+    /// finalizer so the marker commits with the Wisdom the Episode produced or not at all.
+    /// </summary>
     private async Task AdmitAsync(
         Episode episode, IReadOnlyList<WisdomCandidate> candidates, CancellationToken cancellationToken)
-    {
-        // Embeddings depend only on the text, so the whole Episode embeds in one batched
-        // round-trip before the transaction opens (the §5 converter's pattern).
-        var vectors = candidates.Count == 0
-            ? []
-            : (await embeddings.GenerateAsync(
-                    candidates.Select(c => c.Text), cancellationToken: cancellationToken))
-                .Select(e => new Vector(e.Vector))
-                .ToList();
-
-        // The gate's save after each admission stays inside this transaction, so a later chunk's
-        // candidate searching the staged Wisdom of an earlier one is exactly §6's
-        // merge-gate-as-reduce — while nothing becomes visible unless the done marker commits.
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        foreach (var (candidate, vector) in candidates.Zip(vectors))
-        {
-            await gate.AdmitAsync(candidate, vector, cancellationToken);
-        }
-
-        episode.Distillation = DistillationState.Done;
-        episode.DistilledAt = clock.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
+        => await gate.AdmitAllAsync(
+            candidates,
+            _ =>
+            {
+                episode.Distillation = DistillationState.Done;
+                episode.DistilledAt = clock.GetUtcNow();
+                return Task.CompletedTask;
+            },
+            cancellationToken);
 }

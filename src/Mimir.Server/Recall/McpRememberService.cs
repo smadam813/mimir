@@ -64,7 +64,21 @@ internal sealed class McpRememberService(
                 + $" (session {target.SessionId}).";
         }
 
-        await gate.AdmitAsync(new WisdomCandidate(kind, project.Id, request.Content), cancellationToken);
+        // A one-element Admission batch with nothing to finalize: the deliberate save gets the
+        // same transaction and the same serialization as every pipeline admission (§7.1). This
+        // is the one interactive caller of the gate, so it can wait out an in-flight background
+        // batch — arbiter rulings included — before its own admits; accepted, since only this
+        // no-live-Episode path reaches the gate at all.
+        //
+        // Deliberately not the request's token. That wait can outlast the CLI's 30 s MCP
+        // timeout, and the endpoint's token is RequestAborted: passing it would let a client
+        // that gave up roll the admission back, and unlike the pipeline callers this one has no
+        // marker or queue to retry from — the save would simply be gone, which §7.1 forbids. So
+        // the admission runs to completion even with nobody listening; the caller may see the
+        // CLI's "unreachable", but the content is in, and re-issuing the save merges into the
+        // same Wisdom at the gate rather than duplicating it.
+        await gate.AdmitAllAsync(
+            [new WisdomCandidate(kind, project.Id, request.Content)], finalizer: null, CancellationToken.None);
         return $"No live episode for {project.DisplayName} — the content went straight to the"
             + $" Merge Gate as a {kind} candidate.";
     }

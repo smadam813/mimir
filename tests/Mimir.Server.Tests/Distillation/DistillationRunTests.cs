@@ -114,6 +114,46 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AFailureInsideTheBatch_LeavesTheEpisodeStillOwedDistillation()
+    {
+        // ResetWisdomAsync and ParkQueueAsync first: the whole-table count below has to start
+        // from provably empty tables, and the claim must land on this test's own Episode.
+        await Context.ResetWisdomAsync(Token);
+        await ParkQueueAsync();
+        var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
+        await AddEventAsync(episode, 1, EventType.PostToolUse, PayloadOfChars(4000));
+        await AddEventAsync(episode, 2, EventType.PostToolUse, PayloadOfChars(4000));
+        // Both chunks parse and the whole Episode reaches the gate as one batch, where the
+        // second candidate matches the first and the arbiter throws. The existing failure test
+        // fails at the distiller, before the gate; this one fails inside the batch, which is the
+        // path that used to run in the Run's own transaction and now runs in the gate's — the
+        // Episode must come back Failed and owed, never Done, with the first candidate's
+        // already-saved admission taken back with the failing one.
+        var born = $"The lock serializes the gate {Guid.NewGuid():N}";
+        var confirming = $"Gate admissions are serialized {Guid.NewGuid():N}";
+        _embeddings.Map(born, TestVectors.Basis);
+        _embeddings.Map(confirming, TestVectors.WithCosine(0.9));
+        _chat.Reply($$"""
+            {"candidates":[{"kind":"lesson","scope":"project","text":"{{born}}","events":[1]}]}
+            """);
+        _chat.Reply($$"""
+            {"candidates":[{"kind":"lesson","scope":"project","text":"{{confirming}}","events":[2]}]}
+            """);
+        _arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
+
+        var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
+            .ShouldNotBeNull();
+
+        attempt.Succeeded.ShouldBeFalse();
+        var failed = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == episode.Id, Token));
+        failed.Distillation.ShouldBe(
+            DistillationState.Failed, "the Episode is still owed distillation, so the sweep re-queues it");
+        failed.DistilledAt.ShouldBeNull();
+        (await FromDb(db => db.Wisdom.CountAsync(Token)))
+            .ShouldBe(0, "the first candidate's admission rolls back with the failing one");
+    }
+
+    [Fact]
     public async Task LaterChunksCandidates_MergeWithEarlierChunksWisdom()
     {
         await Context.ResetWisdomAsync(Token);
@@ -200,7 +240,7 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
         var gate = new MergeGate(Context, _embeddings, search, _arbiter, distillation, _clock);
         var distiller = new EpisodeDistiller(_chat, distillation);
         return new DistillationRun(
-            Context, distiller, gate, _embeddings, _clock, NullLogger<DistillationRun>.Instance);
+            Context, distiller, gate, _clock, NullLogger<DistillationRun>.Instance);
     }
 
     private static string PayloadOfChars(int chars) => $$"""{"note":"{{new string('x', chars)}}"}""";

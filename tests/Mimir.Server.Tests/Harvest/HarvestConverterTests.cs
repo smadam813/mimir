@@ -166,7 +166,6 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
         return new HarvestConverter(
             Context,
             gate,
-            _embeddings,
             Options.Create(options ?? new HarvestOptions()),
             _clock,
             NullLogger<HarvestConverter>.Instance);

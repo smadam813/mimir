@@ -87,6 +87,28 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task ACallerGivingUpMidAdmission_StillLandsTheSave()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2), sealedAt: Now.AddHours(-1));
+        var content = $"The gate outlasted the caller {Guid.NewGuid():N}";
+
+        // The gate's lock can be held across a background batch's arbiter calls, well past the
+        // CLI's 30 s MCP timeout, and the endpoint's token is RequestAborted — so the caller can
+        // vanish mid-admission. Standing in for that here: the token trips the moment the gate
+        // starts work. Bound to it, the admission would roll back with nothing left to retry
+        // from — no marker, no queue — and the save would be gone.
+        using var abandoned = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        _embeddings.OnGenerate = abandoned.Cancel;
+
+        await RememberAsync(project, content, "Fact", abandoned.Token);
+
+        (await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == content, Token)))
+            .ScopeProjectId.ShouldBe(project.Id, "a deliberate save is never dropped (§7.1)");
+    }
+
+    [Fact]
     public async Task LongContent_IsStoredVerbatim_NeverTruncated()
     {
         var project = await AddProjectAsync();
@@ -143,7 +165,8 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
             .ShouldBe(0);
     }
 
-    private async Task<string> RememberAsync(Project project, string content, string kind)
+    private async Task<string> RememberAsync(
+        Project project, string content, string kind, CancellationToken? cancellationToken = null)
         => await Service().RememberAsync(
             new McpRememberRequest
             {
@@ -152,7 +175,7 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
                 Content = content,
                 Kind = kind,
             },
-            Token);
+            cancellationToken ?? Token);
 
     private McpRememberService Service()
     {
