@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
@@ -12,9 +13,10 @@ namespace Mimir.Server.Tests.Recall;
 
 /// <summary>
 /// The §7 query ranking as a reusable service against a real Postgres: hybrid-search rank fused
-/// with the record factors, the affinity context as caller input, and no thresholds or scope
-/// filters of its own — the Prompt lane gates and filters, <c>mimir_search</c> and the golden
-/// runner deliberately see everything.
+/// with the record factors, the affinity context as caller input, and no threshold of its own —
+/// consumers own their gates. The Candidate Universe is not theirs to own: each method names the
+/// universe it searches, so the ambient ranking restricts inside the §3 search while the
+/// everything ranking reaches the whole tier under narrowings the caller states.
 /// </summary>
 public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
@@ -50,7 +52,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
-        var ranked = await RankAsync(project.Id);
+        var ranked = await RankEverythingAsync(project.Id);
 
         // Vector ranks 1 and 2 fuse to 1/61 vs 1/62 — a 1.6% edge the 1.5× affinity dwarfs.
         ranked.Select(r => r.WisdomId).ShouldBe([scoped.Id, global.Id]);
@@ -64,13 +66,50 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
-        var ranked = await RankAsync(other.Id);
+        var ranked = await RankEverythingAsync(other.Id);
 
-        // Same rows, different affinity context: neither matches, so the nearer row leads —
-        // and the foreign-Project row is flagged outside the context's ambient universe.
+        // Same rows, different affinity context: neither matches, so the nearer row leads.
         ranked.Select(r => r.WisdomId).ShouldBe([global.Id, scoped.Id]);
-        ranked.Single(r => r.WisdomId == scoped.Id).AmbientEligible.ShouldBeFalse();
-        ranked.Single(r => r.WisdomId == global.Id).AmbientEligible.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task TheAmbientUniverse_HoldsGlobalAndTheSessionsOwn_NotAnotherProjects()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
+        var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
+
+        // The same two rows the everything ranking returns above — membership, not an annotation:
+        // ranking the ambient universe of a Project that owns neither row returns only the Global.
+        (await RankAmbientAsync(other.Id)).Select(r => r.WisdomId).ShouldBe([global.Id]);
+        (await RankAmbientAsync(project.Id)).Select(r => r.WisdomId)
+            .ShouldBe([scoped.Id, global.Id], ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// The crowd-out bug's tombstone (#58): the §3 search bounds each leg to the per-leg top-N, so
+    /// a foreign Project's nearer corpus used to fill both legs and leave ambient recall empty
+    /// while an eligible match sat one row deeper. The universe now restricts inside the search,
+    /// before the truncation, so the eligible match competes only against its own universe.
+    /// </summary>
+    [Fact]
+    public async Task TheAmbientUniverse_SurvivesANearerForeignCorpus_FillingThePerLegTopN()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var nearest = await AddWisdomAsync(other.Id, "unrelated filler one", cosine: 0.99);
+        var nextNearest = await AddWisdomAsync(other.Id, "unrelated filler two", cosine: 0.98);
+        var eligible = await AddWisdomAsync(project.Id, "unrelated filler three", cosine: 0.90);
+        var options = new SearchOptions { PerLegTopN = 2 };
+
+        (await RankAmbientAsync(project.Id, options)).Select(r => r.WisdomId)
+            .ShouldBe([eligible.Id]);
+
+        // The crowd-out itself, still real one method over: the everything ranking's top-2 holds
+        // the two foreign rows and the eligible match never reaches a consumer that must filter.
+        (await RankEverythingAsync(project.Id, options)).Select(r => r.WisdomId)
+            .ShouldBe([nearest.Id, nextNearest.Id], ignoreOrder: true);
     }
 
     [Fact]
@@ -82,7 +121,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         var remembered = await AddWisdomAsync(Project.GlobalId, "unrelated filler two", cosine: 0.90);
         await AddSalientProvenanceAsync(remembered.Id, project.Id);
 
-        var ranked = await RankAsync(project.Id);
+        var ranked = await RankEverythingAsync(project.Id);
 
         ranked.Select(r => r.WisdomId).ShouldBe([remembered.Id, plain.Id]);
     }
@@ -98,7 +137,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
 
         // Per-leg top-N of 2: the vector leg holds the two nearest rows, so the FTS-matched row
         // rides in on its leg alone and carries no cosine.
-        var ranked = await RankAsync(project.Id, new SearchOptions { PerLegTopN = 2 });
+        var ranked = await RankEverythingAsync(project.Id, new SearchOptions { PerLegTopN = 2 });
 
         ranked.Select(r => r.WisdomId).ShouldBe([near.Id, far.Id, ftsOnly.Id], ignoreOrder: true);
         ranked.Single(r => r.WisdomId == near.Id).Cosine.ShouldNotBeNull().ShouldBe(0.9, tolerance: 1e-3);
@@ -113,27 +152,56 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
 
-        var row = (await RankAsync(project.Id)).ShouldHaveSingleItem();
+        var row = (await RankEverythingAsync(project.Id)).ShouldHaveSingleItem();
 
         row.Kind.ShouldBe(wisdom.Kind);
         row.ScopeProjectId.ShouldBe(project.Id);
         row.Text.ShouldBe(wisdom.Text);
         row.LastConfirmedAt.ShouldBe(wisdom.LastConfirmedAt);
         row.Score.ShouldBeGreaterThan(0);
-        row.AmbientEligible.ShouldBeTrue();
     }
 
-    private async Task<IReadOnlyList<RankedWisdom>> RankAsync(
-        Guid affinityProjectId, SearchOptions? searchOptions = null)
+    /// <summary>
+    /// The name is the universe in both directions: a caller cannot forget the ambient filter, and
+    /// cannot smuggle one into the method that says it ranks everything. Rejected before any
+    /// embedding or SQL, so this runs over a context that never connects.
+    /// </summary>
+    [Fact]
+    public async Task RankingEverything_RejectsAnAmbientUniverseSmuggledInThroughTheFilter()
     {
+        await using var db = new MimirDbContext(
+            new DbContextOptionsBuilder<MimirDbContext>()
+                .UseNpgsql("Host=guard-checks-never-connect")
+                .Options);
         var ranking = new QueryRanking(
+            db,
+            _embeddings,
+            new WisdomSearch(db, Options.Create(new SearchOptions())),
+            Options.Create(new RecallOptions()),
+            new FakeTimeProvider(Now));
+        var project = Guid.CreateVersion7();
+
+        await Should.ThrowAsync<ArgumentException>(
+            () => ranking.RankEverythingAsync(
+                Query, project, new WisdomSearchFilter { AmbientProjectId = project }, Token));
+    }
+
+    private async Task<IReadOnlyList<RankedWisdom>> RankAmbientAsync(
+        Guid sessionProjectId, SearchOptions? searchOptions = null)
+        => await Ranking(searchOptions).RankAmbientAsync(Query, sessionProjectId, Token);
+
+    private async Task<IReadOnlyList<RankedWisdom>> RankEverythingAsync(
+        Guid affinityProjectId, SearchOptions? searchOptions = null)
+        => await Ranking(searchOptions)
+            .RankEverythingAsync(Query, affinityProjectId, WisdomSearchFilter.None, Token);
+
+    private QueryRanking Ranking(SearchOptions? searchOptions)
+        => new(
             Context,
             _embeddings,
             new WisdomSearch(Context, Options.Create(searchOptions ?? new SearchOptions())),
             Options.Create(new RecallOptions()),
             new FakeTimeProvider(Now));
-        return await ranking.RankAsync(Query, affinityProjectId, Token);
-    }
 
     private async Task<Project> AddProjectAsync()
     {

@@ -10,9 +10,9 @@ namespace Mimir.Server.Recall;
 
 /// <summary>
 /// One query-ranked Wisdom: the §7 score that ordered it, the vector leg's cosine for the caller's
-/// threshold (null off that leg, per the §3 score-scale rule), what rendering needs, and whether
-/// the row sits in the affinity context's ambient candidate universe — an annotation, not a
-/// filter, so consumers that reach everything (<c>mimir_search</c>) can ignore it.
+/// threshold (null off that leg, per the §3 score-scale rule), and what rendering needs. No
+/// eligibility annotation rides along — the Candidate Universe is named by the ranking method the
+/// caller chose, so every row here is already inside it.
 /// </summary>
 internal sealed record RankedWisdom(
     Guid WisdomId,
@@ -22,20 +22,19 @@ internal sealed record RankedWisdom(
     Guid ScopeProjectId,
     string Text,
     DateTimeOffset LastConfirmedAt,
-    DateTimeOffset? RetiredAt,
-    bool AmbientEligible)
+    DateTimeOffset? RetiredAt)
 {
     public InjectionEntry ToInjectionEntry()
         => new(WisdomId, Score, Kind, ScopeProjectId == Project.GlobalId, LastConfirmedAt, Text);
 }
 
 /// <summary>
-/// The §7 query ranking as a shared service — the Prompt lane now, the Wisdom leg of
-/// <c>mimir_search</c> and the golden runner later. Embeds the query, runs the §3 hybrid search,
-/// and orders every hit by <see cref="RecallScoring.QueryScore"/> under the caller's affinity
-/// context. Deliberately unthresholded and scope-unfiltered: consumers own their gates and
-/// candidate universes — ambient eligibility rides along as a flag so the Prompt lane needs no
-/// second query to apply its own.
+/// The §7 query ranking as a shared service — the Prompt lane, the Wisdom leg of
+/// <c>mimir_search</c>, and the golden runner. Embeds the query, runs the §3 hybrid search, and
+/// orders every hit by <see cref="RecallScoring.QueryScore"/> under the caller's affinity context.
+/// Deliberately unthresholded: consumers own their gates. The Candidate Universe is not theirs to
+/// own — each method names the universe it ranks, and the search restricts to it, so no consumer
+/// can forget a filter that was never its to apply.
 /// </summary>
 internal sealed class QueryRanking(
     MimirDbContext db,
@@ -44,16 +43,52 @@ internal sealed class QueryRanking(
     IOptions<RecallOptions> options,
     TimeProvider clock)
 {
-    /// <param name="affinityProjectId">The Project whose Wisdom earns the affinity boost —
-    /// the session's Project for the ambient lane, the case's for the golden runner.</param>
-    public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
-        string query, Guid affinityProjectId, CancellationToken cancellationToken)
-        => await RankAsync(query, affinityProjectId, WisdomSearchFilter.None, cancellationToken);
+    /// <summary>
+    /// Ranks the ambient Candidate Universe (§7) — the session's Project plus Global, non-Retired,
+    /// minus the native-content exclusion — restricted inside both search legs, before their
+    /// per-leg top-N, so a nearer foreign corpus can never crowd an eligible match out of the pool.
+    /// </summary>
+    /// <param name="sessionProjectId">The session's Project: both the universe ranked and the
+    /// affinity context ranked under — always the same value in the ambient lane.</param>
+    public async Task<IReadOnlyList<RankedWisdom>> RankAmbientAsync(
+        string query, Guid sessionProjectId, CancellationToken cancellationToken)
+        => await RankAsync(
+            query,
+            sessionProjectId,
+            new WisdomSearchFilter { AmbientProjectId = sessionProjectId },
+            cancellationToken);
 
-    /// <param name="filter">The <c>mimir_search</c> narrowings, pushed into the §3 search's SQL so
-    /// they apply before the per-leg top-N — a filtered rank is over the whole corpus, never the
-    /// filtered residue of an unfiltered pool. Every other consumer takes the overload above.</param>
-    public async Task<IReadOnlyList<RankedWisdom>> RankAsync(
+    /// <summary>
+    /// Ranks every Project's Wisdom, narrowed only by <paramref name="filter"/> — the
+    /// <c>mimir_search</c> universe. There is no unfiltered overload: reaching past the ambient
+    /// universe is stated, never defaulted, so the golden runner passes
+    /// <see cref="WisdomSearchFilter.None"/> to say it means the whole tier.
+    /// </summary>
+    /// <param name="affinityProjectId">The Project whose Wisdom earns the affinity boost — the
+    /// requester's for <c>mimir_search</c>, the case's for the golden runner.</param>
+    /// <param name="filter">The narrowings, pushed into the §3 search's SQL so they apply before
+    /// the per-leg top-N — a filtered rank is over the whole corpus, never the filtered residue of
+    /// an unfiltered pool.</param>
+    public async Task<IReadOnlyList<RankedWisdom>> RankEverythingAsync(
+        string query,
+        Guid affinityProjectId,
+        WisdomSearchFilter filter,
+        CancellationToken cancellationToken)
+    {
+        // The method name is the universe in both directions: no caller may reach the ambient
+        // universe without saying so, and none may smuggle it past a name that says everything.
+        if (filter.AmbientProjectId is not null)
+        {
+            throw new ArgumentException(
+                $"{nameof(WisdomSearchFilter.AmbientProjectId)} names a universe this method does " +
+                $"not rank; call {nameof(RankAmbientAsync)} instead.",
+                nameof(filter));
+        }
+
+        return await RankAsync(query, affinityProjectId, filter, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<RankedWisdom>> RankAsync(
         string query, Guid affinityProjectId, WisdomSearchFilter filter, CancellationToken cancellationToken)
     {
         var embedding = new Vector(
@@ -77,8 +112,6 @@ internal sealed class QueryRanking(
                 w.LastConfirmedAt,
                 w.RetiredAt,
                 Salient = ExplicitSalience.Ids(db).Contains(w.Id),
-                AmbientEligible = AmbientCandidates.Of(db, affinityProjectId)
-                    .Any(c => c.Id == w.Id),
             })
             .ToDictionaryAsync(w => w.Id, cancellationToken);
 
@@ -109,8 +142,7 @@ internal sealed class QueryRanking(
                 w.ScopeProjectId,
                 w.Text,
                 w.LastConfirmedAt,
-                w.RetiredAt,
-                w.AmbientEligible));
+                w.RetiredAt));
         }
 
         return ranked

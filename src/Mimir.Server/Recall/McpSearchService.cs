@@ -59,7 +59,7 @@ internal sealed partial class McpSearchService(
 
         // Both legs filter in SQL, before their LIMIT — a narrow filter over a large corpus
         // finds deep matches instead of emptying an unfiltered top-N pool.
-        var ranked = await ranking.RankAsync(
+        var ranked = await ranking.RankEverythingAsync(
             request.Query,
             affinityProjectId,
             new WisdomSearchFilter
