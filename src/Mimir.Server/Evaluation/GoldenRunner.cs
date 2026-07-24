@@ -55,8 +55,14 @@ internal sealed class GoldenRunner(
             var key = (goldenCase.QueryContext, goldenCase.ProjectId);
             if (!rankings.TryGetValue(key, out var ranked))
             {
-                ranked = await ranking.RankAsync(
-                    goldenCase.QueryContext, goldenCase.ProjectId, cancellationToken);
+                // §9 fixes the affinity context, not the universe: the runner ranks the whole
+                // tier, and says so, because narrowing it to the ambient universe would move the
+                // pass rate for reasons that are not the ranking's.
+                ranked = await ranking.RankEverythingAsync(
+                    goldenCase.QueryContext,
+                    goldenCase.ProjectId,
+                    WisdomSearchFilter.None,
+                    cancellationToken);
                 rankings[key] = ranked;
             }
             int? rank = null;

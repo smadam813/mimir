@@ -4,11 +4,11 @@ using Mimir.Server.Storage.Entities;
 namespace Mimir.Server.Recall;
 
 /// <summary>
-/// The ambient candidate universe (§7), shared by both ambient lanes: the session's Project plus
-/// Global, non-Retired — other Projects' Wisdom reaches here only via merge-gate promotion, never
-/// directly — minus the native-content exclusion. This expression owns the rule;
-/// <see cref="Storage.WisdomSearch"/> mirrors it in SQL for its ambient mode, and a parity test
-/// pins the two to agreement.
+/// The ambient Candidate Universe (§7): the session's Project plus Global, non-Retired — other
+/// Projects' Wisdom reaches here only via merge-gate promotion, never directly — minus the
+/// native-content exclusion. This expression owns the rule and serves the query-free Brief lane
+/// directly; <see cref="Storage.WisdomSearch"/> mirrors it in SQL for the query lanes' ambient
+/// mode, and a parity test pins the two to agreement.
 /// </summary>
 internal static class AmbientCandidates
 {
