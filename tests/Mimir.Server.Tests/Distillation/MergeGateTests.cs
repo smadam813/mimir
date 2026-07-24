@@ -556,6 +556,36 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AnEmptyBatch_CommitsItsFinalizer_WithoutQueueingBehindTheGateLock()
+    {
+        var item = await AddHarvestedItemAsync();
+
+        // An empty or frontmatter-only file still reaches the gate, marker and all, with nothing
+        // to admit — and nothing to admit is nothing to serialize. Another batch holds the lock
+        // throughout: if the empty one queued for it, a Backfill's worth of sparse files would
+        // each cycle the gate-wide lock, contending with real batches for zero Wisdom rows.
+        await using var holder = fixture.CreateContext();
+        await using var held = await holder.Database.BeginTransactionAsync(Token);
+        await holder.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({0x6D696D6972L})", Token); // MergeGate.AdmissionLockKey
+
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        giveUp.CancelAfter(TimeSpan.FromSeconds(10));
+        await NewGate(Context).AdmitAllAsync(
+            [],
+            _ =>
+            {
+                item.ConvertedAt = Now;
+                return Task.CompletedTask;
+            },
+            giveUp.Token);
+
+        await held.RollbackAsync(Token);
+        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+            .ConvertedAt.ShouldBe(Now, "the marker commits though another batch holds the lock");
+    }
+
+    [Fact]
     public async Task ParallelNearDuplicateBatches_ConvergeOnOneWisdom_ReinforcedTwice()
     {
         // Whole-table assertions below; parking other tests' leftovers first.

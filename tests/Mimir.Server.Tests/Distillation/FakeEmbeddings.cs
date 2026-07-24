@@ -24,12 +24,19 @@ internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<flo
     /// <summary>Any batch containing this text throws — a deterministically unembeddable item.</summary>
     public void Poison(string text) => _poisoned.Add(text);
 
+    /// <summary>
+    /// Runs as a batch is served — the gate's first step, so a test can make the world change
+    /// exactly as an Admission begins (a caller giving up, say).
+    /// </summary>
+    public Action? OnGenerate { get; set; }
+
     public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
         IEnumerable<string> values,
         EmbeddingGenerationOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         Batches++;
+        OnGenerate?.Invoke();
         var texts = values.ToList();
         if (texts.Any(_poisoned.Contains))
         {

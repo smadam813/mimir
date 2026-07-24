@@ -31,12 +31,14 @@ internal sealed record WisdomCandidate(
 /// <remarks>
 /// <see cref="AdmitAllAsync"/> is the whole interface: the gate owns the embedding round-trip,
 /// the transaction, and the gate-wide advisory lock that serializes whole batches across every
-/// caller and process — so ADR-0004's single-writer convergence rule is mechanism, not a comment,
-/// and a caller cannot forget a transaction it never opens. The gate saves after every admission,
-/// so the search's raw SQL is guaranteed to see what earlier candidates staged (§6's
-/// merge-gate-as-reduce is enforced here, not left to callers), while nothing becomes visible
-/// outside unless the whole batch commits — the §5 conversion marker and the §6 done marker ride
-/// in as finalizers. A matched admission calls the arbiter — and re-embeds rewrites — inside that
+/// caller and process — so ADR-0004's rule that nothing else inserts Wisdom is mechanism on the
+/// admission path, not a comment, and a caller cannot forget a transaction it never opens. The
+/// lock covers admissions only: §10's curation writes edit and retire existing rows without
+/// taking it, and race a concurrent batch the way they did before it existed. The gate saves
+/// after every admission, so the search's raw SQL is guaranteed to see what earlier candidates
+/// staged (§6's merge-gate-as-reduce is enforced here, not left to callers), while nothing
+/// becomes visible outside unless the whole batch commits — the §5 conversion marker and the §6
+/// done marker ride in as finalizers. A matched admission calls the arbiter — and re-embeds rewrites — inside that
 /// transaction; the wait is accepted, since Postgres is local and the batch already holds the
 /// lock. Arbiter failures propagate: the caller's retry (the §5 marker, the §6 queue) redoes the
 /// Admission rather than letting a contradiction silently pass as a mechanical merge.
@@ -94,8 +96,16 @@ internal sealed class MergeGate(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await db.Database.ExecuteSqlAsync(
-                $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
+            // A batch that admits nothing has nothing to serialize — an Episode that yielded no
+            // candidates, a frontmatter-only file — and its finalizer only touches its own
+            // caller's row. Taking the gate-wide lock for that would make a Backfill's worth of
+            // sparse files contend with real batches, interactive saves included, for no
+            // convergence benefit.
+            if (candidates.Count > 0)
+            {
+                await db.Database.ExecuteSqlAsync(
+                    $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
+            }
 
             // The save after each admission stays inside this transaction: a later candidate's
             // search sees what earlier ones staged (§6's merge-gate-as-reduce), while nothing
