@@ -464,7 +464,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
-    public async Task AFailingAdmission_RollsBackTheWholeBatch_MarkerIncluded()
+    public async Task AFailingAdmission_RollsBackTheWholeBatch_LeavingTheMarkerUnset()
     {
         // ResetWisdomAsync parks other tests' leftovers: the rollback assertions below read
         // whole tables, so they must start from provably empty ones.
