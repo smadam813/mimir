@@ -92,7 +92,7 @@ _Avoid_: retrieval (for the whole surface), RAG
 
 **Injection**:
 The record of one thing a lane actually recalled into a session — its lane, its query context, its size, and the Wisdom it carried. Empty decisions leave no trace, so an Injection means memory reached the session; a lane's own wording (`mimir_search` reporting no matches, the Brief's growth-tripwire line alone) is not one. Its Project is the lane's own: the session's Project for the Brief and the Prompt lane, the requester's affinity Project (or Global, when the directory matches none) for `mimir_search`, which reaches every scope and so has no single Project the answer came from. Later marked **useful** or **noise**.
-_Avoid_: injection log entry (for the record itself), impression, delivery
+_Avoid_: impression, delivery
 
 **Candidate Universe**:
 The set of Wisdom a recall surface may draw from. **Ambient** (the Brief and the Prompt lane): the session's Project plus Global, non-Retired, minus the native-content exclusion. **Everything** (`mimir_search`, the golden runner): the whole tier, optionally narrowed. The universe restricts the search itself, never a ranked result after the fact — Storage owns each universe as its own entry point, and a Recall lane names the one it wants rather than assembling it.
