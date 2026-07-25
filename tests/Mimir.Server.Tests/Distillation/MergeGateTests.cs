@@ -692,9 +692,12 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
+        var embeddedBefore = _embeddings.Batches;
         await NewGate().EditAsync(wisdom.Id, $"  {text}  ", Token);
         await NewGate().EditAsync(Guid.NewGuid(), "into the void", Token);
 
+        _embeddings.Batches.ShouldBe(
+            embeddedBefore, "the unlocked pre-check settles a no-op before the model is asked");
         (await FromDb(db => db.WisdomVersions.CountAsync(v => v.WisdomId == wisdom.Id, Token)))
             .ShouldBe(1, "an unchanged or missing edit writes no version");
         var unchanged = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
@@ -743,13 +746,16 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             cancellationToken);
 
     /// <summary>
-    /// Polls until some other session on this database is blocked on <em>any</em> lock. Wider than
-    /// the advisory-only probe on purpose, and only where an edit is the racer: an edit that
-    /// skipped the gate's lock would block on the version chain's unique index instead, so the
-    /// mutation check goes red on that collision rather than timing out here waiting for a lock
-    /// the mutant never takes. <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the
-    /// <c>transactionid</c> lock it would wait on carries no database oid to filter this class's
-    /// throwaway database by — and an unfiltered pg_locks would see other classes' databases.
+    /// Polls until some other session on this database is blocked on one of the two locks an edit
+    /// can collide on. Wider than the advisory-only probe on purpose, and only where an edit is
+    /// the racer: an edit that skipped the gate's lock would block on the version chain's unique
+    /// index instead, so the mutation check goes red on that collision rather than timing out here
+    /// waiting for a lock the mutant never takes. Naming both rather than accepting any
+    /// <c>Lock</c> wait keeps an unrelated waiter — autovacuum, a stray backend — from releasing
+    /// the test early and leaving the serialization it is named for unexercised.
+    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
+    /// no database oid to filter this class's throwaway database by — and an unfiltered pg_locks
+    /// would see other classes' databases.
     /// </summary>
     private Task WaitForABlockedSessionAsync(CancellationToken cancellationToken)
         => PollUntilAnyAsync(
@@ -758,6 +764,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             FROM pg_stat_activity
             WHERE datname = current_database()
               AND wait_event_type = 'Lock'
+              AND wait_event IN ('advisory', 'transactionid')
               AND pid <> pg_backend_pid()
             """,
             "no session ever blocked behind the batch holding the gate's lock",

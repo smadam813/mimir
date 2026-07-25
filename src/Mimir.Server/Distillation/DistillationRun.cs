@@ -107,12 +107,12 @@ internal sealed class DistillationRun(
     /// <summary>
     /// The Episode's candidates as one Admission batch, its <c>done</c> marker written by the
     /// finalizer on the gate's batch context so the marker commits with the Wisdom the Episode
-    /// produced or not at all. The <paramref name="episode"/> this method's caller still tracks
-    /// reads <c>Running</c> afterwards — a stale copy of a committed row, never written back.
+    /// produced or not at all.
     /// </summary>
     private async Task AdmitAsync(
         Episode episode, IReadOnlyList<WisdomCandidate> candidates, CancellationToken cancellationToken)
-        => await gate.AdmitAllAsync(
+    {
+        await gate.AdmitAllAsync(
             candidates,
             async (batch, ct) =>
             {
@@ -127,4 +127,10 @@ internal sealed class DistillationRun(
                         ct);
             },
             cancellationToken);
+
+        // The marker committed on the gate's context, so the copy this run still tracks would
+        // read Running — the claim it was given, not the state it is in. Nothing writes that copy
+        // back today, but anything that reads it after this point should read the truth.
+        await db.Entry(episode).ReloadAsync(cancellationToken);
+    }
 }

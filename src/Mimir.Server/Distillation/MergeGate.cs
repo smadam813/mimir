@@ -106,8 +106,7 @@ internal sealed class MergeGate(
         // contend with real batches, interactive saves included, for no convergence benefit.
         if (candidates.Count > 0)
         {
-            await db.Database.ExecuteSqlAsync(
-                $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
+            await TakeAdmissionLockAsync(db, cancellationToken);
         }
 
         // The save after each admission stays inside this transaction: a later candidate's
@@ -143,19 +142,32 @@ internal sealed class MergeGate(
             return;
         }
 
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+
+        // The edit form saves whatever is in the box, unchanged text included, so the no-op is
+        // the ordinary case rather than the exception. One unlocked SELECT settles it — cheaper
+        // than the model round-trip and the turn holding the gate-wide lock that discovering it
+        // below would cost. Advisory only: the read under the lock is what decides.
+        var current = await db.Wisdom.AsNoTracking()
+            .Where(w => w.Id == wisdomId)
+            .Select(w => w.Text)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (current is null || current == trimmed)
+        {
+            return;
+        }
+
         // Before the lock, like a batch's candidates: an edit's text is known up front, so its
         // model round-trip need not be held against every background batch. (A batch's *rewrites*
         // must embed inside the lock — the arbiter invents that text mid-transaction.) The price
-        // is one wasted embedding when the edit turns out to be a no-op, paid locally.
+        // is one wasted embedding when the pre-check above was raced, paid locally.
         var embedding = await EmbedAsync(trimmed, cancellationToken);
 
-        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await db.Database.ExecuteSqlAsync(
-            $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
+        await TakeAdmissionLockAsync(db, cancellationToken);
 
-        // Read under the lock: an edit that raced a batch would otherwise reword text the batch
-        // is in the middle of replacing, and number its version off a chain about to grow.
+        // Read again under the lock: an edit that raced a batch would otherwise reword text the
+        // batch is in the middle of replacing, and number its version off a chain about to grow.
         var wisdom = await db.Wisdom.FirstOrDefaultAsync(w => w.Id == wisdomId, cancellationToken);
         if (wisdom is null || wisdom.Text == trimmed)
         {
@@ -166,6 +178,15 @@ internal sealed class MergeGate(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Takes the gate-wide lock as the first statement of an already-open transaction. Both entry
+    /// points come through here so the key, the function, and its placement cannot drift apart in
+    /// one of them — the edit-vs-batch race is exactly what such a drift would reopen.
+    /// </summary>
+    private static async Task TakeAdmissionLockAsync(MimirDbContext db, CancellationToken cancellationToken)
+        => await db.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
 
     /// <summary>
     /// One candidate's Admission, inside the batch's transaction and with the embedding the batch
