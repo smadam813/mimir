@@ -140,18 +140,10 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
 
     private async Task<IReadOnlyList<RankedWisdom>> RankAmbientAsync(
         Guid sessionProjectId, SearchOptions? searchOptions = null)
-        => await Ranking(searchOptions).RankAmbientAsync(Query, sessionProjectId, Token);
+        => await CreateQueryRanking(searchOptions).RankAmbientAsync(Query, sessionProjectId, Token);
 
     private async Task<IReadOnlyList<RankedWisdom>> RankEverythingAsync(
         Guid affinityProjectId, SearchOptions? searchOptions = null)
-        => await Ranking(searchOptions)
+        => await CreateQueryRanking(searchOptions)
             .RankEverythingAsync(Query, affinityProjectId, WisdomSearchFilter.None, Token);
-
-    private QueryRanking Ranking(SearchOptions? searchOptions)
-        => new(
-            Context,
-            Embeddings,
-            new WisdomSearch(Context, Options.Create(searchOptions ?? new SearchOptions())),
-            Options.Create(new RecallOptions()),
-            Clock);
 }

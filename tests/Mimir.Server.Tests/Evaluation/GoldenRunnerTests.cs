@@ -136,16 +136,8 @@ public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : Postgr
 
     private async Task<GoldenReport> RunAsync(SearchOptions? searchOptions = null)
     {
-        var search = Options.Create(searchOptions ?? new SearchOptions());
-        var runner = new GoldenRunner(
-            Context,
-            new QueryRanking(
-                Context,
-                Embeddings,
-                new WisdomSearch(Context, search),
-                Options.Create(new RecallOptions()),
-                Clock),
-            search);
+        var search = searchOptions ?? new SearchOptions();
+        var runner = new GoldenRunner(Context, CreateQueryRanking(search), Options.Create(search));
         return await runner.RunAsync(Token);
     }
 

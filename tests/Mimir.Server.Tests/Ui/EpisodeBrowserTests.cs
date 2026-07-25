@@ -45,7 +45,7 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         var missing = await Browser().GetProjectAsync(Guid.NewGuid(), Token);
 
         found.ShouldNotBeNull();
-        found.DisplayName.ShouldBe(project.DisplayName);
+        found.DisplayName.ShouldBe("lookup");
         found.IsGlobal.ShouldBeFalse();
         missing.ShouldBeNull();
     }

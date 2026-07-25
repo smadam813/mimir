@@ -138,18 +138,10 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     private async Task StartServiceAsync(IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
-        // Read on this thread, not inside Configure: the options callback runs lazily on the
-        // service's own thread, where the harness's no-Postgres skip would be an unobserved
-        // exception and the test would sit out its patience instead of skipping.
-        var connectionString = ConnectionString;
         var services = new ServiceCollection();
-        // Both registrations, and Singleton options, exactly as AddMimirStorage does it: the
-        // scoped context the converter reads through, and the factory the gate opens each
+        // The scoped context the converter reads through, and the factory the gate opens each
         // Admission batch on.
-        void Configure(DbContextOptionsBuilder options) =>
-            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
-        services.AddDbContextFactory<MimirDbContext>(Configure);
-        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+        AddThrowawayStorage(services);
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
         // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's

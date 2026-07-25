@@ -30,7 +30,7 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
     [Fact]
     public async Task FusedResults_ReachOtherProjectsWisdom_AndEpisodeEvents_AndLogTheInjection()
     {
-        var (requester, other) = (await AddProjectAsync("mcp"), await AddProjectAsync("mcp"));
+        var (requester, other) = (await AddProjectAsync("requester"), await AddProjectAsync("neighbour"));
         var foreign = await AddWisdomAsync(other.Id, "unrelated filler one", cosine: 0.9);
         var episode = await AddEpisodeAsync(requester.Id);
         await AddPromptEventAsync(episode.Id, "let us deploy the pipeline today");
@@ -106,7 +106,7 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
     [Fact]
     public async Task ProjectFilter_NarrowsBothLegs_AndAMissNamesTheKnownProjects()
     {
-        var (mine, other) = (await AddProjectAsync("mcp"), await AddProjectAsync("mcp"));
+        var (mine, other) = (await AddProjectAsync("mine"), await AddProjectAsync("theirs"));
         var foreign = await AddWisdomAsync(other.Id, "unrelated filler one", cosine: 0.9);
         var mineWisdom = await AddWisdomAsync(mine.Id, "unrelated filler two", cosine: 0.8);
         var otherEpisode = await AddEpisodeAsync(other.Id);
@@ -187,12 +187,7 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var service = new McpSearchService(
             Context,
-            new QueryRanking(
-                Context,
-                Embeddings,
-                new WisdomSearch(Context, Options.Create(searchOptions ?? new SearchOptions())),
-                Options.Create(new RecallOptions()),
-                Clock),
+            CreateQueryRanking(searchOptions),
             new EventSearch(Context),
             new McpProjects(Context),
             Clock);

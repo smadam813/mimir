@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
+using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 using Mimir.Server.Tests.Distillation;
@@ -88,22 +90,51 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
-    /// The real Merge Gate over the fixture's database and this class's fakes — the one keeper of
-    /// its six-dependency graph, so a constructor change is a one-file edit.
+    /// The real Merge Gate over the fixture's database and this class's fakes. Every harness-backed
+    /// caller composes it here, so its six-dependency graph is a one-file edit; the one gate built
+    /// by hand is <c>MergeGateGuardTests</c>, which needs a factory that never connects.
     /// </summary>
-    private protected MergeGate CreateMergeGate(
-        SearchOptions? search = null, DistillationOptions? distillation = null)
+    private protected MergeGate CreateMergeGate(DistillationOptions? distillation = null)
         => new(
             Contexts,
             Embeddings,
-            Options.Create(search ?? new SearchOptions()),
+            Options.Create(new SearchOptions()),
             Arbiter,
             Options.Create(distillation ?? new DistillationOptions()),
             Clock);
 
     /// <summary>
-    /// A Project with an identity, display name and root unique to this call, so a test seeding
-    /// two of them gets two rows rather than a unique-index violation.
+    /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
+    /// the four consumers that replay a query through it all want the same graph.
+    /// </summary>
+    private protected QueryRanking CreateQueryRanking(SearchOptions? search = null)
+        => new(
+            Context,
+            Embeddings,
+            new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
+            Options.Create(new RecallOptions()),
+            Clock);
+
+    /// <summary>
+    /// Registers the throwaway database the way <c>AddMimirStorage</c> does — both the factory and
+    /// the scoped context, with Singleton options (#23) — for tests that boot a hosted service over
+    /// their own DI graph. The connection string is read here, on the test's thread: inside the
+    /// options callback it would be read on the service's thread, where the no-Postgres skip is an
+    /// unobserved exception and the test sits out its patience instead of skipping.
+    /// </summary>
+    private protected void AddThrowawayStorage(IServiceCollection services)
+    {
+        var connectionString = ConnectionString;
+        void Configure(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
+        services.AddDbContextFactory<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+    }
+
+    /// <summary>
+    /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
+    /// call so a test seeding two of them gets two rows rather than a unique-index violation.
+    /// Name them apart when a test filters by display name — nothing makes that column unique.
     /// </summary>
     private protected async Task<Project> AddProjectAsync(string name = "project")
     {
@@ -113,7 +144,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Id = Guid.CreateVersion7(),
             Identity = $"github.com/test/{name}-{suffix}",
             RootPaths = [$@"C:\git\{name}-{suffix}"],
-            DisplayName = $"{name}-{suffix}",
+            DisplayName = name,
         };
         Context.Projects.Add(project);
         await Context.SaveChangesAsync(Token);
@@ -254,11 +285,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// </summary>
     public virtual async ValueTask InitializeAsync()
     {
-        if (fixture.UnavailableReason is not null)
-        {
-            return;
-        }
-
+        SkipIfUnavailable();
         await using var context = fixture.CreateContext();
         await ResetAsync(context);
     }
@@ -272,7 +299,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     }
 
     /// <summary>
-    /// Truncates every mapped table — CASCADE, so it reaches tables a test created itself — and
+    /// Truncates every mapped table — CASCADE, so it reaches unmapped tables referencing one — and
     /// puts the §3 Global pseudo-project back, carried over rather than fabricated: the migration's
     /// <c>HasData</c> is what first put that row there, so a harness re-inserting a hand-built copy
     /// would keep passing after the seed was dropped from the model. The table list comes from the

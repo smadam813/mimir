@@ -16,7 +16,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task TheListing_GroupsPerSessionNewestFirst_AndCarriesTheEntrysShape()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var early = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now.AddMinutes(-10),
             items: [(wisdom.Id, 0.02)]);
@@ -41,7 +41,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task TheListing_IsScopedToTheProject()
     {
         var (project, other) = (await AddProjectAsync("injection"), await AddProjectAsync("injection"));
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         await SeedInjectionAsync(
             other.Id, "sess-other", InjectionLane.Prompt, "elsewhere", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -55,8 +55,8 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Items_ArriveInStoredOrder_AsTheSameCardEntriesTheBrowserRenders()
     {
         var project = await AddProjectAsync("injection");
-        var first = await AddInjectableWisdomAsync(project.Id, "the stronger match");
-        var second = await AddInjectableWisdomAsync(project.Id, "the weaker match");
+        var first = await AddWisdomAsync(project.Id, "the stronger match");
+        var second = await AddWisdomAsync(project.Id, "the weaker match");
         await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(first.Id, 0.03), (second.Id, 0.02)]);
@@ -75,7 +75,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task AHardDeletedWisdom_LeavesItsItemVisible_WithoutACard()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -93,7 +93,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Marking_SticksWithVerdictAt_AndRemarkingSwitches()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -118,7 +118,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Precision_IsUsefulOverMarked_UnmarkedEntriesStayOut()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var items = new[] { (wisdom.Id, 0.03) };
         var useful1 = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "p1", Now, items);
@@ -154,8 +154,8 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Promoting_FillsTheCaseFromTheEntry_ExpectingItsTopRankedWisdom()
     {
         var project = await AddProjectAsync("injection");
-        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
-        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
+        var top = await AddWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "how do I deploy?", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
@@ -179,8 +179,8 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Promoting_FallsToTheNextSurvivingItem_WhenTheTopWisdomWasDeleted()
     {
         var project = await AddProjectAsync("injection");
-        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
-        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
+        var top = await AddWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
@@ -197,8 +197,8 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Promoting_SkipsARetiredWisdom_RecallWouldNeverSurfaceIt()
     {
         var project = await AddProjectAsync("injection");
-        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
-        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
+        var top = await AddWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
@@ -215,8 +215,8 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task AnEntryWithNoLiveWisdomLeft_CannotPromote()
     {
         var project = await AddProjectAsync("injection");
-        var retired = await AddInjectableWisdomAsync(project.Id, "soon retired");
-        var deleted = await AddInjectableWisdomAsync(project.Id, "soon deleted");
+        var retired = await AddWisdomAsync(project.Id, "soon retired");
+        var deleted = await AddWisdomAsync(project.Id, "soon deleted");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(retired.Id, 0.03), (deleted.Id, 0.02)]);
@@ -237,7 +237,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task TheListing_BoundsToTheMostRecentEntries_PrecisionCountsThemAll()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var oldest = await SeedInjectionAsync(
             project.Id, "sess-old", InjectionLane.Prompt, "the cut entry", Now.AddMinutes(-1),
             items: [(wisdom.Id, 0.03)]);
@@ -274,7 +274,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task ABriefEntry_CannotPromote_ThereIsNoQueryToReplay()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now,
             items: [(wisdom.Id, 0.03)]);
@@ -289,7 +289,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task Promoting_IsIdempotent_ARepeatClickReturnsTheExistingCase()
     {
         var project = await AddProjectAsync("injection");
-        var wisdom = await AddInjectableWisdomAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -302,9 +302,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     private InjectionBrowser Browser() => new(Contexts, Clock);
-
-    private async Task<Wisdom> AddInjectableWisdomAsync(Guid projectId, string text = "a wisdom")
-        => await AddWisdomAsync(projectId, text, cosine: 0.5);
 
     private async Task<Injection> SeedInjectionAsync(
         Guid projectId,

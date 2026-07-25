@@ -30,7 +30,7 @@ public sealed class McpTimelineServiceTests(ThrowawayDatabaseFixture fixture) : 
     [Fact]
     public async Task ProjectAndSinceFilters_NarrowTheTimeline()
     {
-        var (mine, other) = (await AddProjectAsync("mcp-timeline"), await AddProjectAsync("mcp-timeline"));
+        var (mine, other) = (await AddProjectAsync("mine"), await AddProjectAsync("theirs"));
         var recent = await AddEpisodeAsync(mine.Id, startedAt: Now.AddHours(-1));
         var old = await AddEpisodeAsync(mine.Id, startedAt: Now.AddDays(-10));
         var foreign = await AddEpisodeAsync(other.Id, startedAt: Now);

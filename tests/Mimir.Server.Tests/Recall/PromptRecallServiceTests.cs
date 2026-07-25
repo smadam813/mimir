@@ -142,16 +142,7 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
         Guid projectId, string? sessionId = null, RecallOptions? options = null)
     {
         var recallOptions = Options.Create(options ?? new RecallOptions());
-        var service = new PromptRecallService(
-            Context,
-            new QueryRanking(
-                Context,
-                Embeddings,
-                new WisdomSearch(Context, Options.Create(new SearchOptions())),
-                recallOptions,
-                Clock),
-            recallOptions,
-            Clock);
+        var service = new PromptRecallService(Context, CreateQueryRanking(), recallOptions, Clock);
         return await service.ComposeInjectionAsync(
             sessionId ?? NewSessionId(), projectId, Prompt, Token);
     }

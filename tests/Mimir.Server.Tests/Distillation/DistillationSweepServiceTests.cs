@@ -47,12 +47,8 @@ public sealed class DistillationSweepServiceTests(ThrowawayDatabaseFixture fixtu
         var failed = await AddEpisodeAsync(
             project.Id, sealedAt: Now.AddHours(-1), distillation: DistillationState.Failed);
 
-        // Read on this thread, not inside the options callback: that runs lazily on the service's
-        // own thread, where the harness's no-Postgres skip would go unobserved.
-        var connectionString = ConnectionString;
         var services = new ServiceCollection();
-        services.AddDbContext<MimirDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()));
+        AddThrowawayStorage(services);
         services.AddScoped<DistillationSweep>();
         services.AddScoped<ContestedSweep>();
         services.AddSingleton(Options.Create(new DistillationOptions()));

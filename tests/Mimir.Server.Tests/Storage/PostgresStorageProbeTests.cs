@@ -93,8 +93,20 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
         // A tuple cannot exist without a page, so this is an invariant across the two queries: if
         // it ever fails, size and occupancy are disagreeing and one of them is lying. Deliberately
         // an assertion and not a production shortcut — EXISTS stays the only source of occupancy.
+        // Both sides seeded here rather than left to whatever else the database holds: a mapped
+        // table the harness truncated still owns its index pages, so it never reads as zero-byte
+        // and the sweep below would run over nothing at all. The zero-byte side takes no text
+        // column either — that would bring a TOAST index, whose metapage alone is 8 KB.
+        var empty = Name("void");
+        await ExecuteAsync($"CREATE TABLE \"{empty}\" (id int);");
+        var written = await ScratchTable();
+        await ExecuteAsync($"INSERT INTO \"{written}\" SELECT g, repeat('x', 100) FROM generate_series(1, 20000) g;");
+
         var tile = await Probe();
 
+        tile.Tables.Single(t => t.Table == empty).TotalBytes.ShouldBe(
+            0, "an unindexed, unwritten table holds no pages — the case the invariant sweeps");
+        tile.Tables.Single(t => t.Table == written).Occupancy.ShouldBe(TableOccupancy.Populated);
         foreach (var table in tile.Tables.Where(t => t.TotalBytes == 0))
         {
             table.Occupancy.ShouldNotBe(TableOccupancy.Populated);
