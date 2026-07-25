@@ -1,15 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Contracts.Mcp;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
-using Mimir.Server.Distillation;
 using Mimir.Server.Recall;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
-using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Recall;
 
@@ -19,34 +14,15 @@ namespace Mimir.Server.Tests.Recall;
 /// unsealed Episode the content goes straight through the Merge Gate as a candidate. A deliberate
 /// save is never dropped.
 /// </summary>
-public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
-    private readonly FakeEmbeddings _embeddings = new();
-
-    private readonly FakeArbiter _arbiter = new();
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task LandsSalient_OnTheMostRecentlyActiveUnsealedEpisode()
     {
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-remember");
         // Started earlier but active later — activity, not start order, picks the target (§7.1).
         var activeLater = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-3));
-        await AddEventAsync(activeLater, seq: 1, at: Now.AddMinutes(-5));
+        await AddEventAsync(activeLater.Id, seq: 1, at: Now.AddMinutes(-5));
         var startedLater = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
         await AddEpisodeAsync(project.Id, startedAt: Now.AddMinutes(-1), sealedAt: Now);
 
@@ -67,32 +43,30 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task WithNoUnsealedEpisode_TheContentGoesThroughTheMergeGate()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-remember");
         await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2), sealedAt: Now.AddHours(-1));
         const string content = "Prefer trunk-based development on this repo.";
 
         var text = await RememberAsync(project, content, "preference");
 
         text.ShouldContain("Merge Gate");
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == content, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(content);
         wisdom.Kind.ShouldBe(WisdomKind.Preference);
         wisdom.ScopeProjectId.ShouldBe(project.Id);
         wisdom.Reinforcement.ShouldBe(1);
-        (await FromDb(db => db.Provenance.CountAsync(p => p.WisdomId == wisdom.Id, Token)))
+        (await FromDb(db => db.Provenance.CountAsync(Token)))
             .ShouldBe(0, "an Episode-less save has no provenance to point at — never an all-null row");
-        (await FromDb(db => db.Events.CountAsync(
-                e => db.Episodes.Any(ep => ep.Id == e.EpisodeId && ep.ProjectId == project.Id), Token)))
+        (await FromDb(db => db.Events.CountAsync(Token)))
             .ShouldBe(0, "no Remember Event lands when no Episode is live");
     }
 
     [Fact]
     public async Task ACallerGivingUpMidAdmission_StillLandsTheSave()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-remember");
         await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2), sealedAt: Now.AddHours(-1));
-        var content = $"The gate outlasted the caller {Guid.NewGuid():N}";
+        const string content = "The gate outlasted the caller";
 
         // The gate's lock can be held across a background batch's arbiter calls, well past the
         // CLI's 30 s MCP timeout, and the endpoint's token is RequestAborted — so the caller can
@@ -100,18 +74,19 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
         // starts work. Bound to it, the admission would roll back with nothing left to retry
         // from — no marker, no queue — and the save would be gone.
         using var abandoned = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        _embeddings.OnGenerate = abandoned.Cancel;
+        Embeddings.OnGenerate = abandoned.Cancel;
 
         await RememberAsync(project, content, "Fact", abandoned.Token);
 
-        (await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == content, Token)))
-            .ScopeProjectId.ShouldBe(project.Id, "a deliberate save is never dropped (§7.1)");
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(content);
+        wisdom.ScopeProjectId.ShouldBe(project.Id, "a deliberate save is never dropped (§7.1)");
     }
 
     [Fact]
     public async Task LongContent_IsStoredVerbatim_NeverTruncated()
     {
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-remember");
         var episode = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
         // Well past the §4 per-field cap (4 KB) — hook payloads would be clipped at this size.
         var content = new string('c', 10_000);
@@ -128,7 +103,6 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnUnknownDirectory_StillLands_ByCreatingItsProject()
     {
-        await Context.ResetWisdomAsync(Token);
         var suffix = Guid.NewGuid().ToString("N");
         var identity = $"github.com/test/unseen-{suffix}";
         const string content = "Ship small, ship often.";
@@ -145,24 +119,22 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
 
         text.ShouldContain("Merge Gate");
         var project = await FromDb(db => db.Projects.SingleAsync(p => p.Identity == identity, Token));
-        (await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == content, Token)))
-            .ScopeProjectId.ShouldBe(project.Id, "a deliberate save is never dropped (§7.1)");
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(content);
+        wisdom.ScopeProjectId.ShouldBe(project.Id, "a deliberate save is never dropped (§7.1)");
     }
 
     [Fact]
     public async Task AnUnknownKind_NamesTheVocabulary_AndWritesNothing()
     {
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-remember");
         await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
 
         var text = await RememberAsync(project, "anything", "hunch");
 
         text.ShouldContain("Unknown kind 'hunch'");
-        (await FromDb(db => db.Events.CountAsync(
-                e => e.Type == EventType.Remember
-                    && db.Episodes.Any(ep => ep.Id == e.EpisodeId && ep.ProjectId == project.Id),
-                Token)))
-            .ShouldBe(0);
+        (await FromDb(db => db.Events.CountAsync(Token))).ShouldBe(0);
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
     }
 
     private async Task<string> RememberAsync(
@@ -171,92 +143,21 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
             new McpRememberRequest
             {
                 ProjectIdentity = project.Identity,
-                ProjectRoot = project.RootPaths.FirstOrDefault() ?? $@"C:\roots\{project.DisplayName}",
+                ProjectRoot = project.RootPaths[0],
                 Content = content,
                 Kind = kind,
             },
             cancellationToken ?? Token);
 
     private McpRememberService Service()
-    {
-        var clock = new FakeTimeProvider(Now);
-        return new McpRememberService(
+        => new(
             Context,
             new ProjectResolver(Context),
             new CaptureService(
                 Context,
                 new ProjectResolver(Context),
                 Options.Create(new CaptureOptions()),
-                clock,
+                Clock,
                 new EpisodeFeed()),
-            new MergeGate(
-                new FixtureContextFactory(fixture),
-                _embeddings,
-                Options.Create(new SearchOptions()),
-                _arbiter,
-                Options.Create(new DistillationOptions()),
-                clock));
-    }
-
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("mcp-remember");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Episode> AddEpisodeAsync(
-        Guid projectId, DateTimeOffset startedAt, DateTimeOffset? sealedAt = null)
-    {
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{Guid.NewGuid():N}",
-            ProjectId = projectId,
-            StartedAt = startedAt,
-            SealedAt = sealedAt,
-            SealReason = sealedAt is null ? null : "clear",
-            Cwd = @"C:\work",
-        };
-        Context.Episodes.Add(episode);
-        await Context.SaveChangesAsync(Token);
-        return episode;
-    }
-
-    private async Task AddEventAsync(Episode episode, int seq, DateTimeOffset at)
-    {
-        Context.Events.Add(new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = seq,
-            Type = EventType.UserPromptSubmit,
-            At = at,
-            Payload = """{"prompt":"earlier work"}""",
-            PayloadFullSize = 10,
-        });
-        await Context.SaveChangesAsync(Token);
-    }
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
+            CreateMergeGate());
 }

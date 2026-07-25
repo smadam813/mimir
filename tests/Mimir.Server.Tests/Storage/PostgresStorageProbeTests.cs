@@ -7,32 +7,12 @@ namespace Mimir.Server.Tests.Storage;
 
 /// <summary>
 /// The traps in ADR-0006 are all about what Postgres <em>actually</em> reports, so they can only be
-/// pinned against a real one. Skips when no database is reachable, which keeps <c>dotnet test</c>
-/// useful on a machine with nothing running; <c>docker compose up postgres</c> turns them on.
+/// pinned against a real one. The scratch tables each test creates need no cleanup: the harness's
+/// database is thrown away with the class, which is also why these CREATEs no longer land in the
+/// development database.
 /// </summary>
-public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
-    : IClassFixture<PostgresFixture>, IAsyncLifetime
+public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private readonly List<string> _scratchTables = [];
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is null)
-        {
-            return;
-        }
-
-        foreach (var table in _scratchTables)
-        {
-            await ExecuteAsync($"DROP TABLE IF EXISTS \"{table}\" CASCADE;");
-        }
-
-        await _context.DisposeAsync();
-    }
-
     [Fact]
     public async Task AnalyzedWhileEmptyThenPopulated_ReportsPopulated()
     {
@@ -92,8 +72,6 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
         // (measured: 50,000 real rows reported as 100,000).
         var parent = Name("part");
         var child = $"{parent}_p1";
-        _scratchTables.Add(parent);
-        _scratchTables.Add(child);
 
         await ExecuteAsync($"CREATE TABLE \"{parent}\" (id int) PARTITION BY RANGE (id);");
         await ExecuteAsync($"CREATE TABLE \"{child}\" PARTITION OF \"{parent}\" FOR VALUES FROM (1) TO (100000);");
@@ -132,7 +110,7 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
     private async Task<StorageTile> Probe()
     {
         var probe = new PostgresStorageProbe(Context, NullLogger<PostgresStorageProbe>.Instance);
-        var tile = await probe.ProbeAsync(TestContext.Current.CancellationToken);
+        var tile = await probe.ProbeAsync(Token);
 
         tile.State.ShouldBe(HealthTileState.Ready, tile.Summary);
         return tile;
@@ -145,63 +123,15 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
         return tile.Tables.Single(t => t.Table == table);
     }
 
-    /// <summary>Creates an empty scratch table and registers it for cleanup.</summary>
+    /// <summary>Creates an empty scratch table under a name no other test uses.</summary>
     private async Task<string> ScratchTable()
     {
         var table = Name("tbl");
-        _scratchTables.Add(table);
         await ExecuteAsync($"CREATE TABLE \"{table}\" (id int, payload text);");
         return table;
     }
 
     private static string Name(string kind) => $"wf_{kind}_{Guid.NewGuid():N}"[..24];
 
-    private Task ExecuteAsync(string sql)
-        => Context.Database.ExecuteSqlRawAsync(sql, TestContext.Current.CancellationToken);
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= new MimirDbContext(new DbContextOptionsBuilder<MimirDbContext>()
-                .UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector())
-                .Options);
-        }
-    }
-}
-
-/// <summary>
-/// Probes for a usable Postgres once per class rather than once per test, so the skip path stays
-/// cheap on a machine with nothing running.
-/// </summary>
-public sealed class PostgresFixture : IAsyncLifetime
-{
-    public string ConnectionString { get; } = TestPostgres.AdminConnectionString;
-
-    /// <summary>Why the database is unusable, or null when it is usable.</summary>
-    public string? UnavailableReason { get; private set; }
-
-    public async ValueTask InitializeAsync()
-    {
-        await using var context = new MimirDbContext(new DbContextOptionsBuilder<MimirDbContext>()
-            .UseNpgsql(ConnectionString, npgsql => npgsql.UseVector())
-            .Options);
-
-        try
-        {
-            await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-            await context.Database.CloseConnectionAsync();
-        }
-        catch (Exception ex)
-        {
-            UnavailableReason = ex.Message;
-        }
-    }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    private Task ExecuteAsync(string sql) => Context.Database.ExecuteSqlRawAsync(sql, Token);
 }

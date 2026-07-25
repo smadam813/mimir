@@ -1,13 +1,9 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 using Mimir.Server.Tests.Distillation;
-using Pgvector;
 
 namespace Mimir.Server.Tests.Recall;
 
@@ -18,37 +14,21 @@ namespace Mimir.Server.Tests.Recall;
 /// universe it searches, so the ambient ranking restricts inside the §3 search while the
 /// everything ranking reaches the whole tier under narrowings the caller states.
 /// </summary>
-public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
     /// <summary>A query with no word overlap with any test Wisdom, so only the vector leg ranks.</summary>
     private const string Query = "how do I deploy the pipeline?";
 
-    private readonly FakeEmbeddings _embeddings = new();
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
-        _embeddings.Map(Query, TestVectors.Basis);
-        return ValueTask.CompletedTask;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
+        await base.InitializeAsync();
+        Embeddings.Map(Query, TestVectors.Basis);
     }
 
     [Fact]
     public async Task AffinityContext_LiftsOwnProjectWisdomAboveANearerGlobalRow()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("rank");
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
@@ -61,8 +41,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AffinityIsCallerInput_AnotherProjectsContextLeavesTheRowUnboosted()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, other) = (await AddProjectAsync("rank"), await AddProjectAsync("rank"));
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
@@ -75,8 +54,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task TheAmbientUniverse_HoldsGlobalAndTheSessionsOwn_NotAnotherProjects()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, other) = (await AddProjectAsync("rank"), await AddProjectAsync("rank"));
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
@@ -96,8 +74,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task TheAmbientUniverse_SurvivesANearerForeignCorpus_FillingThePerLegTopN()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, other) = (await AddProjectAsync("rank"), await AddProjectAsync("rank"));
         var nearest = await AddWisdomAsync(other.Id, "unrelated filler one", cosine: 0.99);
         var nextNearest = await AddWisdomAsync(other.Id, "unrelated filler two", cosine: 0.98);
         var eligible = await AddWisdomAsync(project.Id, "unrelated filler three", cosine: 0.90);
@@ -115,11 +92,13 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task SalientProvenance_OutranksANearerPlainRow()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("rank");
         var plain = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var remembered = await AddWisdomAsync(Project.GlobalId, "unrelated filler two", cosine: 0.90);
-        await AddSalientProvenanceAsync(remembered.Id, project.Id);
+        var episode = await AddEpisodeAsync(project.Id);
+        var evt = await AddEventAsync(
+            episode.Id, seq: 1, EventType.Remember, payload: """{"content":"remember this"}""");
+        await AddProvenanceAsync(remembered.Id, episode.Id, evt.Id);
 
         var ranked = await RankEverythingAsync(project.Id);
 
@@ -129,8 +108,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Unthresholded_EveryHitRanks_WithTheVectorLegsCosineRidingAlong()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("rank");
         var near = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
         var far = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.2);
         var ftsOnly = await AddWisdomAsync(project.Id, "deploy the pipeline notes", cosine: 0.0);
@@ -148,8 +126,7 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task RankedRows_CarryWhatConsumersRender()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("rank");
         var wisdom = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
 
         var row = (await RankEverythingAsync(project.Id)).ShouldHaveSingleItem();
@@ -173,81 +150,8 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
     private QueryRanking Ranking(SearchOptions? searchOptions)
         => new(
             Context,
-            _embeddings,
+            Embeddings,
             new WisdomSearch(Context, Options.Create(searchOptions ?? new SearchOptions())),
             Options.Create(new RecallOptions()),
-            new FakeTimeProvider(Now));
-
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("rank");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Wisdom> AddWisdomAsync(Guid scopeProjectId, string text, double cosine)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = scopeProjectId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
-    private async Task AddSalientProvenanceAsync(Guid wisdomId, Guid projectId)
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{suffix}",
-            ProjectId = projectId,
-            StartedAt = Now,
-            Cwd = $@"C:\git\rank-{suffix}",
-        };
-        var evt = new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = 1,
-            Type = EventType.Remember,
-            At = Now,
-            Payload = """{"content":"remember this"}""",
-            PayloadFullSize = 30,
-            Salient = true,
-        };
-        Context.AddRange(episode, evt);
-        Context.Provenance.Add(new Provenance
-        {
-            Id = Guid.CreateVersion7(),
-            WisdomId = wisdomId,
-            EpisodeId = episode.Id,
-            EventId = evt.Id,
-        });
-        await Context.SaveChangesAsync(Token);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
+            Clock);
 }

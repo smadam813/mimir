@@ -1,11 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Capture;
@@ -15,29 +13,16 @@ namespace Mimir.Server.Tests.Capture;
 /// truncated payloads, and a Seal carrying the SessionEnd reason (ADR-0003 — the session is the
 /// Episode; session end is not an Event).
 /// </summary>
-public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
-
     private readonly EpisodeFeed _feed = new();
 
     private readonly List<EpisodeChange> _announced = [];
 
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
+        await base.InitializeAsync();
         _feed.Subscribe(_announced.Add);
-        return ValueTask.CompletedTask;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
     }
 
     [Fact]
@@ -67,7 +52,7 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
         var second = await Service().ResumeEpisodeAsync(request, Token);
 
         second.Id.ShouldBe(first.Id);
-        (await FromDb(db => db.Episodes.CountAsync(e => e.SessionId == request.SessionId, Token))).ShouldBe(1);
+        (await FromDb(db => db.Episodes.CountAsync(Token))).ShouldBe(1);
     }
 
     [Fact]
@@ -170,7 +155,7 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
         var service = Service();
         await service.ResumeEpisodeAsync(request, Token);
 
-        await using (var other = fixture.CreateContext())
+        await using (var other = CreateContext())
         {
             var raced = await other.Episodes.SingleAsync(e => e.SessionId == request.SessionId, Token);
             raced.SealedAt = Now.AddMinutes(-1);
@@ -280,13 +265,13 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
             Context,
             new ProjectResolver(Context),
             Options.Create(new CaptureOptions()),
-            new FakeTimeProvider(Now),
+            Clock,
             _feed);
 
     /// <summary>
-    /// A request for a fresh session unless one is named. Identity and root are unique per call:
-    /// the database is shared by the whole class, and §3.1 root-matching would otherwise weld
-    /// every test's session onto the first test's Project.
+    /// A request for a fresh session unless one is named. Identity and root are unique per call so
+    /// a test seeding two sessions gets two Projects — §3.1 root-matching would otherwise weld the
+    /// second onto the first.
     /// </summary>
     private static HookEventRequest Request(
         string? sessionId = null,
@@ -305,30 +290,5 @@ public sealed class CaptureServiceTests(CaptureDatabaseFixture fixture)
             HookEvent = HookEvents.PostToolUse,
             Payload = document.RootElement.Clone(),
         };
-    }
-
-    /// <summary>
-    /// Reads back through a separate context, so assertions see what Postgres persisted rather
-    /// than the entities the service still tracks.
-    /// </summary>
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
     }
 }

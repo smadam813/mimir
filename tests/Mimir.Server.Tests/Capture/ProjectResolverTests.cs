@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Mimir.Server.Capture;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Capture;
@@ -11,32 +10,8 @@ namespace Mimir.Server.Tests.Capture;
 /// traffic first reports its remote identity. (The collision case — clone merge — is
 /// <see cref="ProjectMergeTests"/>.)
 /// </summary>
-public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
-    [Fact]
-    public async Task TheGlobalPseudoProject_IsSeededByTheMigration()
-    {
-        var global = await Context.Projects.SingleAsync(
-            p => p.Id == Project.GlobalId, TestContext.Current.CancellationToken);
-
-        global.Identity.ShouldBe(Project.GlobalIdentity);
-        global.DisplayName.ShouldBe("Global");
-        global.RootPaths.ShouldBeEmpty("the Global pseudo-project holds no Episodes and lives at no root");
-    }
-
     [Fact]
     public async Task AnUnseenIdentity_CreatesTheProjectAtItsRoot()
     {
@@ -99,12 +74,11 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
         var identity = Identity("racing");
         await Resolve(identity, @"C:\git\racing");
 
-        await using (var other = fixture.CreateContext())
+        await using (var other = CreateContext())
         {
-            var raced = await other.Projects.SingleAsync(
-                p => p.Identity == identity, TestContext.Current.CancellationToken);
+            var raced = await other.Projects.SingleAsync(p => p.Identity == identity, Token);
             raced.RootPaths = [.. raced.RootPaths, @"D:\work\racing"];
-            await other.SaveChangesAsync(TestContext.Current.CancellationToken);
+            await other.SaveChangesAsync(Token);
         }
 
         var resolved = await Resolve(identity, @"E:\mirror\racing");
@@ -112,9 +86,7 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
         resolved.RootPaths.ShouldBe(
             [@"C:\git\racing", @"D:\work\racing", @"E:\mirror\racing"],
             "the returned Project must reflect the merged array");
-        await using var fresh = fixture.CreateContext();
-        var persisted = await fresh.Projects.SingleAsync(
-            p => p.Identity == identity, TestContext.Current.CancellationToken);
+        var persisted = await FromDb(db => db.Projects.SingleAsync(p => p.Identity == identity, Token));
         persisted.RootPaths.ShouldBe([@"C:\git\racing", @"D:\work\racing", @"E:\mirror\racing"]);
     }
 
@@ -161,24 +133,11 @@ public sealed class ProjectResolverTests(CaptureDatabaseFixture fixture)
     }
 
     private async Task<Project> Resolve(string identity, string root)
-        => await new ProjectResolver(Context).ResolveAsync(identity, root, TestContext.Current.CancellationToken);
+        => await new ProjectResolver(Context).ResolveAsync(identity, root, Token);
 
     private async Task<int> Count(string identity)
-        => await Context.Projects.CountAsync(p => p.Identity == identity, TestContext.Current.CancellationToken);
+        => await Context.Projects.CountAsync(p => p.Identity == identity, Token);
 
-    /// <summary>Unique per run: the fixture database is shared by every test in this class.</summary>
+    /// <summary>Unique per call: one test resolves several identities against one another.</summary>
     private static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
 }

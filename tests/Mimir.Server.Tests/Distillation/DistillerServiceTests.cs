@@ -4,14 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Contracts.Health;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Health;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 
 namespace Mimir.Server.Tests.Distillation;
 
@@ -21,22 +19,17 @@ namespace Mimir.Server.Tests.Distillation;
 /// parks the Episode as failed and degrades the tile; a Running claim left by a dead process is
 /// re-queued and worked on the next boot.
 /// </summary>
-public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 7, 21, 12, 0, 0, TimeSpan.Zero));
-    private readonly FakeChatClient _chat = new();
     private readonly HealthState _health = new();
     private readonly DistillationTrigger _trigger = new();
 
     private DistillerService? _service;
     private ServiceProvider? _provider;
 
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (_service is not null)
         {
@@ -48,14 +41,16 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
         {
             await _provider.DisposeAsync();
         }
+
+        await base.DisposeAsync();
     }
 
     [Fact]
     public async Task ASealedEpisode_DistillsOnBoot_AndTheTileDrains()
     {
         var episode = await AddSealedEpisodeAsync();
-        var text = $"Boot distillation works {Guid.NewGuid():N}";
-        _chat.Reply($$"""
+        const string text = "Boot distillation works";
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{text}}","events":[1]}]}
             """);
 
@@ -64,10 +59,10 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
 
         tile.QueueDepth.ShouldBe(0);
         tile.Summary.ShouldBe("queue empty");
-        tile.LastRunAt.ShouldBe(_clock.GetUtcNow());
+        tile.LastRunAt.ShouldBe(Now);
 
         (await EpisodeAsync(episode.Id)).Distillation.ShouldBe(DistillationState.Done);
-        (await FromDb(db => db.Wisdom.CountAsync(w => w.Text == text, Token))).ShouldBe(1);
+        (await FromDb(db => db.Wisdom.SingleAsync(Token))).Text.ShouldBe(text);
     }
 
     [Fact]
@@ -77,7 +72,7 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
         await TileAsync(t => t.State == HealthTileState.Ready);
 
         var episode = await AddSealedEpisodeAsync();
-        _chat.Reply("""{"candidates":[]}""");
+        Chat.Reply("""{"candidates":[]}""");
         // The fake clock never ticks, so only the trigger can be what wakes the worker.
         _trigger.Request();
 
@@ -89,7 +84,7 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
     public async Task AFailingEpisode_IsParkedFailed_AndDegradesTheTile()
     {
         var episode = await AddSealedEpisodeAsync();
-        _chat.Reply("no json at all");
+        Chat.Reply("no json at all");
 
         await StartServiceAsync();
         var tile = await TileAsync(t => t.State == HealthTileState.Degraded);
@@ -102,8 +97,8 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ARunningClaimFromADeadProcess_IsRequeuedAndWorkedOnBoot()
     {
-        var abandoned = await AddSealedEpisodeAsync(state: DistillationState.Running);
-        _chat.Reply("""{"candidates":[]}""");
+        var abandoned = await AddSealedEpisodeAsync(DistillationState.Running);
+        Chat.Reply("""{"candidates":[]}""");
 
         await StartServiceAsync();
         await TileAsync(t => t.LastRunAt is not null);
@@ -113,55 +108,29 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
 
     private async Task<Episode> AddSealedEpisodeAsync(DistillationState state = DistillationState.Pending)
     {
-        if (fixture.UnavailableReason is { } reason)
-        {
-            Assert.Skip(TestPostgres.SkipMessage(reason));
-        }
-
-        var project = TestData.NewProject("distiller-service");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"session-{Guid.NewGuid():N}",
-            ProjectId = project.Id,
-            StartedAt = _clock.GetUtcNow().AddHours(-1),
-            SealedAt = _clock.GetUtcNow().AddMinutes(-1),
-            SealReason = "clear",
-            Cwd = @"C:\git\distiller-service",
-            Distillation = state,
-            DistillationStartedAt = state == DistillationState.Running
-                ? _clock.GetUtcNow().AddMinutes(-30)
-                : null,
-        };
-        var evt = new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = 1,
-            Type = EventType.UserPromptSubmit,
-            At = episode.StartedAt.AddMinutes(1),
-            Payload = """{"prompt":"do the thing"}""",
-        };
-
-        await using var context = fixture.CreateContext();
-        context.AddRange(project, episode, evt);
-        await context.SaveChangesAsync(Token);
+        var project = await AddProjectAsync("distiller-service");
+        var episode = await AddEpisodeAsync(
+            project.Id,
+            sealedAt: Now.AddMinutes(-1),
+            distillation: state,
+            distillationStartedAt: state == DistillationState.Running ? Now.AddMinutes(-30) : null);
+        await AddEventAsync(episode.Id, seq: 1, at: episode.StartedAt.AddMinutes(1),
+            payload: """{"prompt":"do the thing"}""");
         return episode;
     }
 
     private async Task StartServiceAsync()
     {
-        if (fixture.UnavailableReason is { } reason)
-        {
-            Assert.Skip(TestPostgres.SkipMessage(reason));
-        }
-
+        // Read on this thread, not inside Configure: the options callback runs lazily on the
+        // service's own thread, where the harness's no-Postgres skip would be an unobserved
+        // exception and the test would sit out its patience instead of skipping.
+        var connectionString = ConnectionString;
         var services = new ServiceCollection();
         // Both registrations, and Singleton options, exactly as AddMimirStorage does it: the
         // scoped context the run claims its Episode through, and the factory the gate opens each
         // Admission batch on.
         void Configure(DbContextOptionsBuilder options) =>
-            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector());
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
         services.AddDbContextFactory<MimirDbContext>(Configure);
         services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
         // The worker's whole graph — with the scripted chat model and deterministic fake
@@ -169,12 +138,12 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
         services.AddScoped<DistillationRun>();
         services.AddScoped<EpisodeDistiller>();
         services.AddSingleton<MergeGate>();
-        services.AddSingleton<IMergeArbiter>(_ => new FakeArbiter());
-        services.AddSingleton<IChatClient>(_chat);
-        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(new FakeEmbeddings());
+        services.AddSingleton<IMergeArbiter>(Arbiter);
+        services.AddSingleton<IChatClient>(Chat);
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(Embeddings);
         services.AddSingleton(Options.Create(new SearchOptions()));
         services.AddSingleton(Options.Create(new DistillationOptions()));
-        services.AddSingleton<TimeProvider>(_clock);
+        services.AddSingleton<TimeProvider>(Clock);
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _provider = services.BuildServiceProvider();
 
@@ -182,9 +151,9 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
             _provider.GetRequiredService<IServiceScopeFactory>(),
             _trigger,
             _health,
-            _clock,
+            Clock,
             NullLogger<DistillerService>.Instance);
-        await _service.StartAsync(TestContext.Current.CancellationToken);
+        await _service.StartAsync(Token);
     }
 
     /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
@@ -204,17 +173,9 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
             return _health.Current.Distillation;
         }
 
-        return await seen.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        return await seen.Task.WaitAsync(Patience, Token);
     }
 
     private async Task<Episode> EpisodeAsync(Guid id)
         => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
 }

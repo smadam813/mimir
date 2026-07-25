@@ -2,8 +2,9 @@ namespace Mimir.Server.Tests;
 
 /// <summary>
 /// The one place the test-Postgres convention lives: MIMIR_TEST_POSTGRES overrides the compose
-/// default, and short timeouts keep the no-database skip path fast. Both fixtures build on this —
-/// drifting copies would turn a config change into silent skips, not failures.
+/// default, and short timeouts keep the no-database skip path fast. The fixture and the skip
+/// message both build on this — drifting copies would turn a config change into silent skips,
+/// not failures.
 /// </summary>
 internal static class TestPostgres
 {

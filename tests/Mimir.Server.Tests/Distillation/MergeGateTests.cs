@@ -1,11 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
-using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 
 namespace Mimir.Server.Tests.Distillation;
 
@@ -15,52 +11,34 @@ namespace Mimir.Server.Tests.Distillation;
 /// whose ruling merges the rewrite, supersedes, or scope-splits. Thresholds read the vector
 /// leg's cosine, never the fused score (§3).
 /// </summary>
-public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
-
-    private readonly FakeEmbeddings _embeddings = new();
-
-    private readonly FakeArbiter _arbiter = new();
-
-    private readonly FakeTimeProvider _clock = new(Now);
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task NoMatch_InsertsNewWisdom_AtReinforcementOneVersionOne()
     {
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var text = $"Prefers tabs over spaces {Guid.NewGuid():N}";
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string text = "Prefers tabs over spaces";
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Preference, item.ProjectId, text, HarvestedItemId: item.Id));
+            WisdomKind.Preference, project.Id, text, HarvestedItemId: item.Id));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == item.ProjectId, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.ScopeProjectId.ShouldBe(project.Id);
         wisdom.Kind.ShouldBe(WisdomKind.Preference);
         wisdom.Text.ShouldBe(text);
         wisdom.Reinforcement.ShouldBe(1);
         wisdom.LastConfirmedAt.ShouldBe(Now);
         wisdom.RetiredAt.ShouldBeNull();
 
-        var version = await FromDb(db => db.WisdomVersions.SingleAsync(v => v.WisdomId == wisdom.Id, Token));
+        var version = await FromDb(db => db.WisdomVersions.SingleAsync(Token));
+        version.WisdomId.ShouldBe(wisdom.Id);
         version.Version.ShouldBe(1);
         version.Text.ShouldBe(text);
         version.Cause.ShouldBe(WisdomVersionCause.Distilled);
 
-        var provenance = await FromDb(db => db.Provenance.SingleAsync(p => p.WisdomId == wisdom.Id, Token));
+        var provenance = await FromDb(db => db.Provenance.SingleAsync(Token));
+        provenance.WisdomId.ShouldBe(wisdom.Id);
         provenance.HarvestedItemId.ShouldBe(item.Id);
         provenance.EpisodeId.ShouldBeNull();
         provenance.EventId.ShouldBeNull();
@@ -69,29 +47,28 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ANearDuplicate_Reinforces_KeepingTheExistingText()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var originalText = $"Original wording {Guid.NewGuid():N}";
-        var nearDuplicate = $"Equivalent wording {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.85));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "Original wording";
+        const string nearDuplicate = "Equivalent wording";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.85));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id));
-        _clock.Advance(TimeSpan.FromHours(1));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id));
+        Clock.Advance(TimeSpan.FromHours(1));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, second.ProjectId, nearDuplicate, HarvestedItemId: second.Id));
+            WisdomKind.Fact, project.Id, nearDuplicate, HarvestedItemId: second.Id));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == first.ProjectId, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
         wisdom.Text.ShouldBe(originalText, "an agreement whose rewrite keeps the wording changes nothing");
         wisdom.Reinforcement.ShouldBe(2);
         wisdom.LastConfirmedAt.ShouldBe(Now.AddHours(1));
 
-        (await FromDb(db => db.WisdomVersions.CountAsync(v => v.WisdomId == wisdom.Id, Token)))
+        (await FromDb(db => db.WisdomVersions.CountAsync(Token)))
             .ShouldBe(1, "unchanged text means no new version");
         var provenance = await FromDb(db => db.Provenance
-            .Where(p => p.WisdomId == wisdom.Id)
             .Select(p => p.HarvestedItemId)
             .ToListAsync(Token));
         provenance.ShouldBe([first.Id, second.Id], ignoreOrder: true);
@@ -100,126 +77,119 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task JustBelowTheThreshold_InsertsASecondWisdom()
     {
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var originalText = $"First fact {Guid.NewGuid():N}";
-        var similarText = $"Nearly related fact {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(similarText, TestVectors.WithCosine(0.79));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "First fact";
+        const string similarText = "Nearly related fact";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(similarText, TestVectors.WithCosine(0.79));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, originalText, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: item.Id));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, similarText, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, similarText, HarvestedItemId: item.Id));
 
-        var texts = await FromDb(db => db.Wisdom
-            .Where(w => w.ScopeProjectId == item.ProjectId)
-            .Select(w => w.Text)
-            .ToListAsync(Token));
+        var texts = await FromDb(db => db.Wisdom.Select(w => w.Text).ToListAsync(Token));
         texts.ShouldBe([originalText, similarText], ignoreOrder: true);
-        _arbiter.Calls.ShouldBeEmpty("below the threshold there is no match to rule on");
+        Arbiter.Calls.ShouldBeEmpty("below the threshold there is no match to rule on");
     }
 
     [Fact]
     public async Task AWordForWordFtsMatch_WithADistantEmbedding_DoesNotReinforce()
     {
-        await Context.ResetWisdomAsync(Token);
         // The §3 score-scale rule at the gate: identical wording makes the FTS leg rank the pair
         // as hard as it can, but the threshold reads cosine — a distant embedding means no match.
-        var item = await AddHarvestedItemAsync();
-        var suffix = Guid.NewGuid().ToString("N");
-        var originalText = $"the deploy pipeline needs manual approval {suffix}";
-        var sameWords = $"needs the manual deploy approval pipeline {suffix}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(sameWords, TestVectors.WithCosine(0.0));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "the deploy pipeline needs manual approval";
+        const string sameWords = "needs the manual deploy approval pipeline";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(sameWords, TestVectors.WithCosine(0.0));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, originalText, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: item.Id));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, sameWords, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, sameWords, HarvestedItemId: item.Id));
 
-        (await FromDb(db => db.Wisdom.CountAsync(w => w.ScopeProjectId == item.ProjectId, Token)))
-            .ShouldBe(2);
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(2);
     }
 
     [Fact]
     public async Task ReinforcingFromTheSameHarvestedItem_DoesNotDuplicateProvenance()
     {
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var originalText = $"One fact {Guid.NewGuid():N}";
-        var nearDuplicate = $"Same fact again {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.9));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "One fact";
+        const string nearDuplicate = "Same fact again";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.9));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, originalText, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: item.Id));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, item.ProjectId, nearDuplicate, HarvestedItemId: item.Id));
+            WisdomKind.Fact, project.Id, nearDuplicate, HarvestedItemId: item.Id));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == item.ProjectId, Token));
-        wisdom.Reinforcement.ShouldBe(2);
-        (await FromDb(db => db.Provenance.CountAsync(p => p.WisdomId == wisdom.Id, Token)))
+        (await FromDb(db => db.Wisdom.SingleAsync(Token))).Reinforcement.ShouldBe(2);
+        (await FromDb(db => db.Provenance.CountAsync(Token)))
             .ShouldBe(1, "Provenance is unioned (§6): the same link is recorded once");
     }
 
     [Fact]
     public async Task ADistillerShapedCandidate_RecordsOneProvenanceRowPerEvent_Unioned()
     {
-        await Context.ResetWisdomAsync(Token);
         // The §6 Distiller output shape: a candidate carries its Episode and plural provenance
         // event ids. Each Event gets its own row; a reinforcing admission unions, not appends.
-        var (projectId, episodeId, eventIds) = await AddEpisodeWithEventsAsync(3);
-        var originalText = $"Sessions produce wisdom {Guid.NewGuid():N}";
-        var nearDuplicate = $"Wisdom comes from sessions {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.9));
+        var project = await AddProjectAsync();
+        var episode = await AddEpisodeAsync(project.Id);
+        var first = await AddEventAsync(episode.Id, seq: 1);
+        var second = await AddEventAsync(episode.Id, seq: 2);
+        var third = await AddEventAsync(episode.Id, seq: 3);
+        const string originalText = "Sessions produce wisdom";
+        const string nearDuplicate = "Wisdom comes from sessions";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(nearDuplicate, TestVectors.WithCosine(0.9));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, projectId, originalText,
-            EpisodeId: episodeId, EventIds: [eventIds[0], eventIds[1]]));
+            WisdomKind.Lesson, project.Id, originalText,
+            EpisodeId: episode.Id, EventIds: [first.Id, second.Id]));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, projectId, nearDuplicate,
-            EpisodeId: episodeId, EventIds: [eventIds[1], eventIds[2]]));
+            WisdomKind.Lesson, project.Id, nearDuplicate,
+            EpisodeId: episode.Id, EventIds: [second.Id, third.Id]));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == projectId, Token));
-        wisdom.Reinforcement.ShouldBe(2);
-        var provenance = await FromDb(db => db.Provenance
-            .Where(p => p.WisdomId == wisdom.Id)
-            .ToListAsync(Token));
+        (await FromDb(db => db.Wisdom.SingleAsync(Token))).Reinforcement.ShouldBe(2);
+        var provenance = await FromDb(db => db.Provenance.ToListAsync(Token));
         provenance.Select(p => p.EventId).ShouldBe(
-            [eventIds[0], eventIds[1], eventIds[2]], ignoreOrder: true);
-        provenance.ShouldAllBe(p => p.EpisodeId == episodeId);
+            [first.Id, second.Id, third.Id], ignoreOrder: true);
+        provenance.ShouldAllBe(p => p.EpisodeId == episode.Id);
     }
 
     [Fact]
     public async Task AnAgreementRewrite_BecomesTheCurrentText_WithTheChainIntact()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var originalText = $"Deploys need approval {Guid.NewGuid():N}";
-        var confirmingText = $"Approval gates deploys {Guid.NewGuid():N}";
-        var mergedText = $"Every deploy needs a manual approval gate {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
-        _embeddings.Map(mergedText, TestVectors.WithCosine(0.97));
-        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "Deploys need approval";
+        const string confirmingText = "Approval gates deploys";
+        const string mergedText = "Every deploy needs a manual approval gate";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        Embeddings.Map(mergedText, TestVectors.WithCosine(0.97));
+        Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id));
-        _clock.Advance(TimeSpan.FromHours(1));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id));
+        Clock.Advance(TimeSpan.FromHours(1));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, second.ProjectId, confirmingText, HarvestedItemId: second.Id));
+            WisdomKind.Fact, project.Id, confirmingText, HarvestedItemId: second.Id));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == first.ProjectId, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
         wisdom.Text.ShouldBe(mergedText);
         wisdom.Reinforcement.ShouldBe(2);
         wisdom.LastConfirmedAt.ShouldBe(Now.AddHours(1));
         wisdom.Embedding.ToArray()[0].ShouldBe(0.97f, 0.0001f, "the rewrite re-embeds");
 
         var versions = await FromDb(db => db.WisdomVersions
-            .Where(v => v.WisdomId == wisdom.Id)
             .OrderBy(v => v.Version)
             .ToListAsync(Token));
         versions.Count.ShouldBe(2);
@@ -232,20 +202,21 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnAgreementFromAnotherProject_PromotesTheWisdomToGlobal()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var elsewhere = await AddHarvestedItemAsync();
-        var originalText = $"Pin the SDK version {Guid.NewGuid():N}";
-        var confirmingText = $"SDK versions get pinned {Guid.NewGuid():N}";
-        var mergedText = $"Always pin the SDK version {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+        var project = await AddProjectAsync();
+        var elsewhere = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(elsewhere.Id);
+        const string originalText = "Pin the SDK version";
+        const string confirmingText = "SDK versions get pinned";
+        const string mergedText = "Always pin the SDK version";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, first.ProjectId, originalText, HarvestedItemId: first.Id));
+            WisdomKind.Lesson, project.Id, originalText, HarvestedItemId: first.Id));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, elsewhere.ProjectId, confirmingText, HarvestedItemId: elsewhere.Id));
+            WisdomKind.Lesson, elsewhere.Id, confirmingText, HarvestedItemId: second.Id));
 
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == mergedText, Token));
         wisdom.ScopeProjectId.ShouldBe(
@@ -256,43 +227,44 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnAgreementProposedAsGlobal_IsNotCrossProjectConfirmation_AndDoesNotPromote()
     {
-        await Context.ResetWisdomAsync(Token);
         // §6.3 promotes on confirmation from a *different Project*. A Global-scoped candidate
         // carries no origin Project, so it cannot vouch for recurrence elsewhere.
-        var item = await AddHarvestedItemAsync();
-        var originalText = $"Tests need the daemon up {Guid.NewGuid():N}";
-        var confirmingText = $"The daemon must run for tests {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.Agreement(originalText));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "Tests need the daemon up";
+        const string confirmingText = "The daemon must run for tests";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.Agreement(originalText));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Procedure, item.ProjectId, originalText, HarvestedItemId: item.Id));
+            WisdomKind.Procedure, project.Id, originalText, HarvestedItemId: item.Id));
         await AdmitAsync(new WisdomCandidate(
             WisdomKind.Procedure, Project.GlobalId, confirmingText, HarvestedItemId: item.Id));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == originalText, Token));
-        wisdom.ScopeProjectId.ShouldBe(item.ProjectId);
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(originalText);
+        wisdom.ScopeProjectId.ShouldBe(project.Id);
         wisdom.Reinforcement.ShouldBe(2);
     }
 
     [Fact]
     public async Task ASupersedeRuling_RetiresTheOldWisdom_AndInsertsTheCandidate()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var oldText = $"The service listens on 6464 {Guid.NewGuid():N}";
-        var newText = $"The service moved to 7575 {Guid.NewGuid():N}";
-        _embeddings.Map(oldText, TestVectors.Basis);
-        _embeddings.Map(newText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.Supersede());
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string oldText = "The service listens on 6464";
+        const string newText = "The service moved to 7575";
+        Embeddings.Map(oldText, TestVectors.Basis);
+        Embeddings.Map(newText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.Supersede());
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, first.ProjectId, oldText, HarvestedItemId: first.Id));
-        _clock.Advance(TimeSpan.FromHours(1));
+            WisdomKind.Fact, project.Id, oldText, HarvestedItemId: first.Id));
+        Clock.Advance(TimeSpan.FromHours(1));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, second.ProjectId, newText, HarvestedItemId: second.Id));
+            WisdomKind.Fact, project.Id, newText, HarvestedItemId: second.Id));
 
         var old = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == oldText, Token));
         var successor = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == newText, Token));
@@ -313,24 +285,24 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AScopeSplit_OnProjectScopedWisdom_AddsAGlobalSibling()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var originalText = $"Builds run on Windows {Guid.NewGuid():N}";
-        var disputingText = $"Builds run on Linux {Guid.NewGuid():N}";
-        var globalText = $"Builds run on Linux by default {Guid.NewGuid():N}";
-        var projectText = $"This repo builds on Windows {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(disputingText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.ScopeSplit(globalText, projectText));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "Builds run on Windows";
+        const string disputingText = "Builds run on Linux";
+        const string globalText = "Builds run on Linux by default";
+        const string projectText = "This repo builds on Windows";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(disputingText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.ScopeSplit(globalText, projectText));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id));
-        _clock.Advance(TimeSpan.FromHours(1));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id));
+        Clock.Advance(TimeSpan.FromHours(1));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, second.ProjectId, disputingText, HarvestedItemId: second.Id));
+            WisdomKind.Fact, project.Id, disputingText, HarvestedItemId: second.Id));
 
-        var kept = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == first.ProjectId, Token));
+        var kept = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == project.Id, Token));
         kept.Text.ShouldBe(projectText, "the project-scoped row keeps its Project side of the split");
         kept.ContestedAt.ShouldBe(Now.AddHours(1));
         kept.RetiredAt.ShouldBeNull();
@@ -361,41 +333,42 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AScopeSplit_OnGlobalWisdom_AddsAProjectScopedSibling()
     {
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync();
-        var originalText = $"Use conventional commits {Guid.NewGuid():N}";
-        var disputingText = $"Commits here are freeform {Guid.NewGuid():N}";
-        var globalText = $"Use conventional commits by default {Guid.NewGuid():N}";
-        var projectText = $"This repo takes freeform commits {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(disputingText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.ScopeSplit(globalText, projectText));
+        var project = await AddProjectAsync();
+        var elsewhere = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(elsewhere.Id);
+        const string originalText = "Use conventional commits";
+        const string disputingText = "Commits here are freeform";
+        const string globalText = "Use conventional commits by default";
+        const string projectText = "This repo takes freeform commits";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(disputingText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.ScopeSplit(globalText, projectText));
 
         await AdmitAsync(new WisdomCandidate(
             WisdomKind.Preference, Project.GlobalId, originalText, HarvestedItemId: first.Id));
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Preference, second.ProjectId, disputingText, HarvestedItemId: second.Id));
+            WisdomKind.Preference, elsewhere.Id, disputingText, HarvestedItemId: second.Id));
 
         var kept = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == Project.GlobalId, Token));
         kept.Text.ShouldBe(globalText, "the Global row keeps the Global side of the split");
         var sibling = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == projectText, Token));
-        sibling.ScopeProjectId.ShouldBe(second.ProjectId, "the sibling lands in the disputing candidate's Project");
+        sibling.ScopeProjectId.ShouldBe(elsewhere.Id, "the sibling lands in the disputing candidate's Project");
     }
 
     [Fact]
     public async Task AScopeSplit_WithNoProjectInPlay_DegradesToSupersede()
     {
-        await Context.ResetWisdomAsync(Token);
         // Two Global positions cannot split into "one Global and one Project-scoped" (§6.4) —
         // there is no Project to scope to — so the adjudication falls back to Supersede.
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync();
-        var oldText = $"Global stance {Guid.NewGuid():N}";
-        var newText = $"Contrary global stance {Guid.NewGuid():N}";
-        _embeddings.Map(oldText, TestVectors.Basis);
-        _embeddings.Map(newText, TestVectors.WithCosine(0.9));
-        _arbiter.Enqueue(new MergeRuling.ScopeSplit("a global side", "a project side"));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string oldText = "Global stance";
+        const string newText = "Contrary global stance";
+        Embeddings.Map(oldText, TestVectors.Basis);
+        Embeddings.Map(newText, TestVectors.WithCosine(0.9));
+        Arbiter.Enqueue(new MergeRuling.ScopeSplit("a global side", "a project side"));
 
         await AdmitAsync(new WisdomCandidate(
             WisdomKind.Preference, Project.GlobalId, oldText, HarvestedItemId: first.Id));
@@ -412,23 +385,23 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnArbiterFailure_Propagates_LeavingTheMatchUntouched()
     {
-        await Context.ResetWisdomAsync(Token);
         // No silent mechanical fallback: a failed ruling must fail the admission, so the §5
         // conversion marker stays pending and the item retries once the model is back.
-        var item = await AddHarvestedItemAsync();
-        var originalText = $"A settled lesson {Guid.NewGuid():N}";
-        var matchingText = $"A disputed take {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "A settled lesson";
+        const string matchingText = "A disputed take";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, item.ProjectId, originalText, HarvestedItemId: item.Id));
-        _arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
+            WisdomKind.Lesson, project.Id, originalText, HarvestedItemId: item.Id));
+        Arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
 
         await Should.ThrowAsync<MergeArbiterException>(async () => await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Lesson, item.ProjectId, matchingText, HarvestedItemId: item.Id)));
+            WisdomKind.Lesson, project.Id, matchingText, HarvestedItemId: item.Id)));
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.ScopeProjectId == item.ProjectId, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
         wisdom.Text.ShouldBe(originalText);
         wisdom.Reinforcement.ShouldBe(1);
     }
@@ -436,48 +409,43 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnAdmissionBatch_CommitsTheMarkerAndTheWisdomTogether_EmbeddingOnce()
     {
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var firstText = $"Batches are atomic {Guid.NewGuid():N}";
-        var secondText = $"The gate owns the transaction {Guid.NewGuid():N}";
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string firstText = "Batches are atomic";
+        const string secondText = "The gate owns the transaction";
 
-        await NewGate().AdmitAllAsync(
+        await CreateMergeGate().AdmitAllAsync(
             [
-                new WisdomCandidate(WisdomKind.Fact, item.ProjectId, firstText, HarvestedItemId: item.Id),
-                new WisdomCandidate(WisdomKind.Fact, item.ProjectId, secondText, HarvestedItemId: item.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, firstText, HarvestedItemId: item.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, secondText, HarvestedItemId: item.Id),
             ],
             MarkConverted(item.Id),
             Token);
 
-        _embeddings.Batches.ShouldBe(1, "the gate batches the whole Admission's embeddings in one round-trip");
-        var texts = await FromDb(db => db.Wisdom
-            .Where(w => w.ScopeProjectId == item.ProjectId)
-            .Select(w => w.Text)
-            .ToListAsync(Token));
+        Embeddings.Batches.ShouldBe(1, "the gate batches the whole Admission's embeddings in one round-trip");
+        var texts = await FromDb(db => db.Wisdom.Select(w => w.Text).ToListAsync(Token));
         texts.ShouldBe([firstText, secondText], ignoreOrder: true);
-        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+        (await FromDb(db => db.HarvestedItems.SingleAsync(Token)))
             .ConvertedAt.ShouldBe(Now, "the finalizer's staged marker commits with the admissions");
     }
 
     [Fact]
     public async Task AFailingAdmission_RollsBackTheWholeBatch_LeavingTheMarkerUnset()
     {
-        // ResetWisdomAsync parks other tests' leftovers: the rollback assertions below read
-        // whole tables, so they must start from provably empty ones.
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var firstText = $"A settled fact {Guid.NewGuid():N}";
-        var matchingText = $"The same fact restated {Guid.NewGuid():N}";
-        _embeddings.Map(firstText, TestVectors.Basis);
-        _embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
-        _arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string firstText = "A settled fact";
+        const string matchingText = "The same fact restated";
+        Embeddings.Map(firstText, TestVectors.Basis);
+        Embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
+        Arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
 
         // The first candidate admits cleanly; the second matches it and the arbiter throws —
         // so the rollback must take back an already-saved admission, not just the failed one.
-        await Should.ThrowAsync<MergeArbiterException>(async () => await NewGate().AdmitAllAsync(
+        await Should.ThrowAsync<MergeArbiterException>(async () => await CreateMergeGate().AdmitAllAsync(
             [
-                new WisdomCandidate(WisdomKind.Fact, item.ProjectId, firstText, HarvestedItemId: item.Id),
-                new WisdomCandidate(WisdomKind.Fact, item.ProjectId, matchingText, HarvestedItemId: item.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, firstText, HarvestedItemId: item.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, matchingText, HarvestedItemId: item.Id),
             ],
             MarkConverted(item.Id),
             Token));
@@ -485,23 +453,22 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.WisdomVersions.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.Provenance.CountAsync(Token))).ShouldBe(0);
-        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+        (await FromDb(db => db.HarvestedItems.SingleAsync(Token)))
             .ConvertedAt.ShouldBeNull("a failed batch leaves the marker unset for the caller's retry");
     }
 
     [Fact]
     public async Task AFinalizerFailure_RollsBackTheWrittenMarker_WithTheAdmissions()
     {
-        // Whole-table assertion below; parking other tests' leftovers first.
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var text = $"A fact the marker must not outlive {Guid.NewGuid():N}";
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string text = "A fact the marker must not outlive";
 
         // The finalizer writes the marker to the database inside the transaction and then
         // fails — so the rollback has a genuinely written marker to take back, not one that
         // was never staged.
-        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate().AdmitAllAsync(
-            [new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id)],
+        await Should.ThrowAsync<InvalidOperationException>(async () => await CreateMergeGate().AdmitAllAsync(
+            [new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id)],
             async (batch, ct) =>
             {
                 await MarkConverted(item.Id)(batch, ct);
@@ -510,35 +477,43 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             Token));
 
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
-        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+        (await FromDb(db => db.HarvestedItems.SingleAsync(Token)))
             .ConvertedAt.ShouldBeNull("the written marker rolls back with the admissions");
     }
 
     [Fact]
     public async Task APoisonedRewriteEmbedding_FailsTheBatch_LeavingTheCallersOwnWorkIntact()
     {
-        // Whole-table assertions below; parking other tests' leftovers first.
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var originalText = $"A settled position {Guid.NewGuid():N}";
-        var matchingText = $"The position restated {Guid.NewGuid():N}";
-        var mergedText = $"The unembeddable rewrite {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
-        _embeddings.Poison(mergedText);
-        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "A settled position";
+        const string matchingText = "The position restated";
+        const string mergedText = "The unembeddable rewrite";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
+        Embeddings.Poison(mergedText);
+        Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
         // Work of the caller's own, staged and not yet saved when the batch fails. On a gate
         // that borrowed this context, the failure's ChangeTracker.Clear() detached this row as
         // collateral and the save below silently lost it.
-        var staged = NewHarvestedItem(first.ProjectId);
+        var staged = new HarvestedItem
+        {
+            Id = Guid.CreateVersion7(),
+            ProjectId = project.Id,
+            Path = "C--git-staged/memory/MEMORY.md",
+            ContentHash = "staged",
+            Content = "unused by the gate",
+            FirstSeen = Now,
+            LastChanged = Now,
+        };
         Context.HarvestedItems.Add(staged);
 
-        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate().AdmitAllAsync(
+        await Should.ThrowAsync<InvalidOperationException>(async () => await CreateMergeGate().AdmitAllAsync(
             [
-                new WisdomCandidate(WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id),
-                new WisdomCandidate(WisdomKind.Fact, second.ProjectId, matchingText, HarvestedItemId: second.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id),
+                new WisdomCandidate(WisdomKind.Fact, project.Id, matchingText, HarvestedItemId: second.Id),
             ],
             finalizer: null,
             Token));
@@ -559,20 +534,21 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnEmptyBatch_CommitsItsFinalizer_WithoutQueueingBehindTheGateLock()
     {
-        var item = await AddHarvestedItemAsync();
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
 
         // An empty or frontmatter-only file still reaches the gate, marker and all, with nothing
         // to admit — and nothing to admit is nothing to serialize. Another batch holds the lock
         // throughout: if the empty one queued for it, a Backfill's worth of sparse files would
         // each cycle the gate-wide lock, contending with real batches for zero Wisdom rows.
-        await using var holder = fixture.CreateContext();
+        await using var holder = CreateContext();
         await using var held = await holder.Database.BeginTransactionAsync(Token);
         await holder.Database.ExecuteSqlAsync(
             $"SELECT pg_advisory_xact_lock({MergeGate.AdmissionLockKey})", Token);
 
         using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(Token);
         giveUp.CancelAfter(TimeSpan.FromSeconds(10));
-        await NewGate().AdmitAllAsync([], MarkConverted(item.Id), giveUp.Token);
+        await CreateMergeGate().AdmitAllAsync([], MarkConverted(item.Id), giveUp.Token);
 
         await held.RollbackAsync(Token);
         (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
@@ -582,21 +558,20 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ParallelNearDuplicateBatches_ConvergeOnOneWisdom_ReinforcedTwice()
     {
-        // Whole-table assertions below; parking other tests' leftovers first.
-        await Context.ResetWisdomAsync(Token);
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync();
-        var firstText = $"Serialize admissions at the gate {Guid.NewGuid():N}";
-        var secondText = $"The gate serializes admissions {Guid.NewGuid():N}";
-        _embeddings.Map(firstText, TestVectors.Basis);
-        _embeddings.Map(secondText, TestVectors.Basis);
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string firstText = "Serialize admissions at the gate";
+        const string secondText = "The gate serializes admissions";
+        Embeddings.Map(firstText, TestVectors.Basis);
+        Embeddings.Map(secondText, TestVectors.Basis);
 
         // Stage the exact race the advisory lock exists to close: batch A holds its transaction
         // open until batch B is observed *waiting* on the lock. Unserialized, B's search would
         // run before A commits, see nothing on its own connection, and insert a duplicate.
         var admittedA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var batchA = NewGate().AdmitAllAsync(
-            [new WisdomCandidate(WisdomKind.Lesson, first.ProjectId, firstText, HarvestedItemId: first.Id)],
+        var batchA = CreateMergeGate().AdmitAllAsync(
+            [new WisdomCandidate(WisdomKind.Lesson, project.Id, firstText, HarvestedItemId: first.Id)],
             async (_, ct) =>
             {
                 admittedA.SetResult();
@@ -609,7 +584,6 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
         wisdom.Reinforcement.ShouldBe(2, "near-simultaneous duplicates converge (§6) in either completion order");
         var provenance = await FromDb(db => db.Provenance
-            .Where(p => p.WisdomId == wisdom.Id)
             .Select(p => p.HarvestedItemId)
             .ToListAsync(Token));
         provenance.ShouldBe([first.Id, second.Id], ignoreOrder: true);
@@ -617,8 +591,8 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         async Task RunBatchBAsync()
         {
             await admittedA.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
-            await NewGate().AdmitAllAsync(
-                [new WisdomCandidate(WisdomKind.Lesson, second.ProjectId, secondText, HarvestedItemId: second.Id)],
+            await CreateMergeGate().AdmitAllAsync(
+                [new WisdomCandidate(WisdomKind.Lesson, project.Id, secondText, HarvestedItemId: second.Id)],
                 finalizer: null,
                 Token);
         }
@@ -627,30 +601,30 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnEditRacingABatchRewrite_SerializesBehindIt_AndTheChainKeepsGrowing()
     {
-        await Context.ResetWisdomAsync(Token);
         // §8.1's edit and §6's rewrite both append to the same (wisdom_id, version) chain. Run
         // unserialized they read the same max version and insert the same number: a unique
         // violation on whichever loses. The gate's lock is what makes them queue instead.
-        var first = await AddHarvestedItemAsync();
-        var second = await AddHarvestedItemAsync(first.ProjectId);
-        var originalText = $"The chain has one writer {Guid.NewGuid():N}";
-        var confirmingText = $"One writer per chain {Guid.NewGuid():N}";
-        var mergedText = $"A version chain has exactly one writer {Guid.NewGuid():N}";
-        var editedText = $"A version chain has one writer, by hand {Guid.NewGuid():N}";
-        _embeddings.Map(originalText, TestVectors.Basis);
-        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
-        _embeddings.Map(mergedText, TestVectors.WithCosine(0.95));
-        _embeddings.Map(editedText, TestVectors.WithCosine(0.5));
-        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+        var project = await AddProjectAsync();
+        var first = await AddHarvestedItemAsync(project.Id);
+        var second = await AddHarvestedItemAsync(project.Id);
+        const string originalText = "The chain has one writer";
+        const string confirmingText = "One writer per chain";
+        const string mergedText = "A version chain has exactly one writer";
+        const string editedText = "A version chain has one writer, by hand";
+        Embeddings.Map(originalText, TestVectors.Basis);
+        Embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        Embeddings.Map(mergedText, TestVectors.WithCosine(0.95));
+        Embeddings.Map(editedText, TestVectors.WithCosine(0.5));
+        Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
         await AdmitAsync(new WisdomCandidate(
-            WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id));
+            WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
         // The rewriting batch holds the lock until the edit is observed waiting on it.
         var rewriting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var batch = NewGate().AdmitAllAsync(
-            [new WisdomCandidate(WisdomKind.Fact, second.ProjectId, confirmingText, HarvestedItemId: second.Id)],
+        var batch = CreateMergeGate().AdmitAllAsync(
+            [new WisdomCandidate(WisdomKind.Fact, project.Id, confirmingText, HarvestedItemId: second.Id)],
             async (_, ct) =>
             {
                 rewriting.SetResult();
@@ -679,28 +653,28 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         async Task EditWhileTheBatchHoldsTheLockAsync()
         {
             await rewriting.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
-            await NewGate().EditAsync(wisdom.Id, editedText, Token);
+            await CreateMergeGate().EditAsync(wisdom.Id, editedText, Token);
         }
     }
 
     [Fact]
     public async Task AnEdit_LeavesConfirmationAloneAndSkipsAnUnchangedOrMissingWisdom()
     {
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var text = $"An edit is not a confirmation {Guid.NewGuid():N}";
-        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string text = "An edit is not a confirmation";
+        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
-        var embeddedBefore = _embeddings.Batches;
-        await NewGate().EditAsync(wisdom.Id, $"  {text}  ", Token);
-        await NewGate().EditAsync(Guid.NewGuid(), "into the void", Token);
+        var embeddedBefore = Embeddings.Batches;
+        await CreateMergeGate().EditAsync(wisdom.Id, $"  {text}  ", Token);
+        await CreateMergeGate().EditAsync(Guid.NewGuid(), "into the void", Token);
 
-        _embeddings.Batches.ShouldBe(
+        Embeddings.Batches.ShouldBe(
             embeddedBefore, "the unlocked pre-check settles a no-op before the model is asked");
-        (await FromDb(db => db.WisdomVersions.CountAsync(v => v.WisdomId == wisdom.Id, Token)))
+        (await FromDb(db => db.WisdomVersions.CountAsync(Token)))
             .ShouldBe(1, "an unchanged or missing edit writes no version");
-        var unchanged = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
+        var unchanged = await FromDb(db => db.Wisdom.SingleAsync(Token));
         unchanged.Reinforcement.ShouldBe(1);
         unchanged.LastConfirmedAt.ShouldBe(Now);
     }
@@ -712,11 +686,11 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         // its words, and the gate never consults the one to decide the other. So a curator can
         // repair something shelved without unretire → edit → retire, which would expose the bad
         // text to live recall on the way past.
-        await Context.ResetWisdomAsync(Token);
-        var item = await AddHarvestedItemAsync();
-        var text = $"Retired but badly worded {Guid.NewGuid():N}";
-        var editedText = $"Retired and now worded well {Guid.NewGuid():N}";
-        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id));
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string text = "Retired but badly worded";
+        const string editedText = "Retired and now worded well";
+        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
         // Retired the way §10 retires (WisdomBrowser.RetireAsync), at a moment of its own and
@@ -725,50 +699,19 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         var retiredAt = Now.AddMinutes(30);
         await Context.Wisdom.Where(w => w.Id == wisdom.Id)
             .ExecuteUpdateAsync(w => w.SetProperty(x => x.RetiredAt, retiredAt), Token);
-        _clock.Advance(TimeSpan.FromHours(1));
+        Clock.Advance(TimeSpan.FromHours(1));
 
-        await NewGate().EditAsync(wisdom.Id, editedText, Token);
+        await CreateMergeGate().EditAsync(wisdom.Id, editedText, Token);
 
-        var edited = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
+        var edited = await FromDb(db => db.Wisdom.SingleAsync(Token));
         edited.Text.ShouldBe(editedText, "an edit rewords regardless of standing");
         edited.RetiredAt.ShouldBe(retiredAt, "an edit neither unretires nor re-stamps the retirement");
 
-        var versions = await FromDb(db => db.WisdomVersions
-            .Where(v => v.WisdomId == wisdom.Id)
-            .OrderBy(v => v.Version)
-            .ToListAsync(Token));
+        var versions = await FromDb(db => db.WisdomVersions.OrderBy(v => v.Version).ToListAsync(Token));
         versions.Select(v => (v.Version, v.Cause)).ShouldBe(
             [(1, WisdomVersionCause.Distilled), (2, WisdomVersionCause.Edited)],
             "a Retired row grows the same cause=edited chain a live one does");
         versions[1].Text.ShouldBe(editedText);
-    }
-
-    [Fact]
-    public async Task ABlankEdit_ReturnsBeforeTheGateOpensAnything()
-    {
-        // The blank-text guard returns before the gate embeds, opens a context, or takes the
-        // lock — so this runs without Postgres, over a factory whose contexts never connect.
-        // Delete the guard and it goes red everywhere, never into a local skip.
-        var gate = new MergeGate(
-            new DisconnectedContextFactory(),
-            _embeddings,
-            Options.Create(new SearchOptions()),
-            _arbiter,
-            Options.Create(new DistillationOptions()),
-            _clock);
-
-        await gate.EditAsync(Guid.NewGuid(), "   \t\n ", Token);
-
-        _embeddings.Batches.ShouldBe(0, "a blank edit is not even worth an embedding");
-    }
-
-    /// <summary>Hands out contexts pointed at a host that does not resolve.</summary>
-    private sealed class DisconnectedContextFactory : IDbContextFactory<MimirDbContext>
-    {
-        public MimirDbContext CreateDbContext()
-            => new(new DbContextOptionsBuilder<MimirDbContext>()
-                .UseNpgsql("Host=guard-checks-never-connect")
-                .Options);
     }
 
     /// <summary>Polls pg_locks until some session waits on an advisory lock in this database.</summary>
@@ -812,7 +755,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     private async Task PollUntilAnyAsync(
         string countingSql, string timeoutMessage, CancellationToken cancellationToken)
     {
-        await using var context = fixture.CreateContext();
+        await using var context = CreateContext();
         for (var attempt = 0; attempt < 400; attempt++)
         {
             var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
@@ -832,19 +775,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     /// and the commit, so the helper only builds a gate and calls it.
     /// </summary>
     private async Task AdmitAsync(WisdomCandidate candidate)
-        => await NewGate().AdmitAllAsync([candidate], finalizer: null, Token);
-
-    /// <summary>
-    /// A gate over the fixture's database — it opens a context per batch itself — and the shared
-    /// fakes. Every call may return a fresh instance: the gate carries no state between batches.
-    /// </summary>
-    private MergeGate NewGate() => new(
-        new FixtureContextFactory(fixture),
-        _embeddings,
-        Options.Create(new SearchOptions()),
-        _arbiter,
-        Options.Create(new DistillationOptions()),
-        _clock);
+        => await CreateMergeGate().AdmitAllAsync([candidate], finalizer: null, Token);
 
     /// <summary>
     /// A §5-shaped finalizer: the conversion marker written on the gate's own batch context, the
@@ -854,86 +785,4 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         => async (batch, ct) => await batch.HarvestedItems
             .Where(i => i.Id == itemId)
             .ExecuteUpdateAsync(update => update.SetProperty(i => i.ConvertedAt, Now), ct);
-
-    /// <summary>A fresh Project with one Episode carrying <paramref name="eventCount"/> Events.</summary>
-    private async Task<(Guid ProjectId, Guid EpisodeId, IReadOnlyList<Guid> EventIds)> AddEpisodeWithEventsAsync(
-        int eventCount)
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var project = TestData.NewProject("gate");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{suffix}",
-            ProjectId = project.Id,
-            StartedAt = Now,
-            Cwd = $@"C:\git\gate-{suffix}",
-        };
-        var events = Enumerable.Range(1, eventCount).Select(seq => new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = seq,
-            Type = EventType.UserPromptSubmit,
-            At = Now,
-            Payload = """{"prompt":"remember this"}""",
-            PayloadFullSize = 28,
-        }).ToList();
-        Context.AddRange(project, episode);
-        Context.AddRange(events);
-        await Context.SaveChangesAsync(Token);
-        return (project.Id, episode.Id, events.Select(e => e.Id).ToList());
-    }
-
-    /// <summary>An item on its own fresh Project, so per-scope assertions see only this test.</summary>
-    private async Task<HarvestedItem> AddHarvestedItemAsync(Guid? projectId = null)
-    {
-        if (projectId is null)
-        {
-            var project = TestData.NewProject("gate");
-            Context.Projects.Add(project);
-            projectId = project.Id;
-        }
-
-        var item = NewHarvestedItem(projectId.Value);
-        Context.HarvestedItems.Add(item);
-        await Context.SaveChangesAsync(Token);
-        return item;
-    }
-
-    private static HarvestedItem NewHarvestedItem(Guid projectId)
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        return new HarvestedItem
-        {
-            Id = Guid.CreateVersion7(),
-            ProjectId = projectId,
-            Path = $"slug-{suffix}/memory/MEMORY.md",
-            ContentHash = suffix,
-            Content = "unused by the gate",
-            FirstSeen = Now,
-            LastChanged = Now,
-        };
-    }
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
 }

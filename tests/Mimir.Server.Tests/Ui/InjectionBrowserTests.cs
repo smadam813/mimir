@@ -1,11 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Time.Testing;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
-using Mimir.Server.Tests.Distillation;
 using Mimir.Server.Ui;
-using Pgvector;
 
 namespace Mimir.Server.Tests.Ui;
 
@@ -15,20 +10,13 @@ namespace Mimir.Server.Tests.Ui;
 /// inputs, and promote-to-golden — filled from the entry's <c>query_context</c> and
 /// <c>project_id</c>, refused for Brief entries, idempotent on repeat clicks.
 /// </summary>
-public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>
+public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
-    private readonly FakeTimeProvider _clock = new(Now);
-
-    private FixtureContextFactory Contexts => new(fixture);
-
     [Fact]
     public async Task TheListing_GroupsPerSessionNewestFirst_AndCarriesTheEntrysShape()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var early = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now.AddMinutes(-10),
             items: [(wisdom.Id, 0.02)]);
@@ -52,8 +40,8 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task TheListing_IsScopedToTheProject()
     {
-        var (project, other) = (await SeedProjectAsync(), await SeedProjectAsync());
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var (project, other) = (await AddProjectAsync("injection"), await AddProjectAsync("injection"));
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         await SeedInjectionAsync(
             other.Id, "sess-other", InjectionLane.Prompt, "elsewhere", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -66,9 +54,9 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Items_ArriveInStoredOrder_AsTheSameCardEntriesTheBrowserRenders()
     {
-        var project = await SeedProjectAsync();
-        var first = await SeedWisdomAsync(project.Id, "the stronger match");
-        var second = await SeedWisdomAsync(project.Id, "the weaker match");
+        var project = await AddProjectAsync("injection");
+        var first = await AddInjectableWisdomAsync(project.Id, "the stronger match");
+        var second = await AddInjectableWisdomAsync(project.Id, "the weaker match");
         await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(first.Id, 0.03), (second.Id, 0.02)]);
@@ -86,12 +74,12 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AHardDeletedWisdom_LeavesItsItemVisible_WithoutACard()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
-        await IntoDb(db => db.Wisdom.Where(w => w.Id == wisdom.Id).ExecuteDeleteAsync(Token));
+        await Context.Wisdom.Where(w => w.Id == wisdom.Id).ExecuteDeleteAsync(Token);
 
         var entry = (await Browser().ListAsync(project.Id, Token))
             .Sessions.ShouldHaveSingleItem().Entries.ShouldHaveSingleItem();
@@ -104,8 +92,8 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Marking_SticksWithVerdictAt_AndRemarkingSwitches()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -117,7 +105,7 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
         marked.Verdict.ShouldBe(InjectionVerdict.Useful);
         marked.VerdictAt.ShouldBe(Now);
 
-        _clock.Advance(TimeSpan.FromMinutes(5));
+        Clock.Advance(TimeSpan.FromMinutes(5));
         await Browser().MarkAsync(injection.Id, InjectionVerdict.Noise, Token);
 
         var remarked = (await Browser().ListAsync(project.Id, Token))
@@ -129,8 +117,8 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Precision_IsUsefulOverMarked_UnmarkedEntriesStayOut()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var items = new[] { (wisdom.Id, 0.03) };
         var useful1 = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "p1", Now, items);
@@ -154,7 +142,7 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task PrecisionIsNull_UntilAnythingIsMarked()
     {
-        var project = await SeedProjectAsync();
+        var project = await AddProjectAsync("injection");
 
         var view = await Browser().ListAsync(project.Id, Token);
 
@@ -165,17 +153,16 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Promoting_FillsTheCaseFromTheEntry_ExpectingItsTopRankedWisdom()
     {
-        var project = await SeedProjectAsync();
-        var top = await SeedWisdomAsync(project.Id, "the top match");
-        var runnerUp = await SeedWisdomAsync(project.Id, "the runner-up");
+        var project = await AddProjectAsync("injection");
+        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "how do I deploy?", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
 
         var caseId = await Browser().PromoteAsync(injection.Id, Token);
 
-        var goldenCase = await FromDb(db =>
-            db.GoldenCases.SingleAsync(g => g.CreatedFromInjectionId == injection.Id, Token));
+        var goldenCase = await FromDb(db => db.GoldenCases.SingleAsync(Token));
         goldenCase.Id.ShouldBe(caseId.ShouldNotBeNull());
         goldenCase.QueryContext.ShouldBe("how do I deploy?");
         goldenCase.ProjectId.ShouldBe(project.Id);
@@ -191,18 +178,17 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Promoting_FallsToTheNextSurvivingItem_WhenTheTopWisdomWasDeleted()
     {
-        var project = await SeedProjectAsync();
-        var top = await SeedWisdomAsync(project.Id);
-        var runnerUp = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
-        await IntoDb(db => db.Wisdom.Where(w => w.Id == top.Id).ExecuteDeleteAsync(Token));
+        await Context.Wisdom.Where(w => w.Id == top.Id).ExecuteDeleteAsync(Token);
 
         var caseId = await Browser().PromoteAsync(injection.Id, Token);
 
-        var goldenCase = await FromDb(db =>
-            db.GoldenCases.SingleAsync(g => g.CreatedFromInjectionId == injection.Id, Token));
+        var goldenCase = await FromDb(db => db.GoldenCases.SingleAsync(Token));
         goldenCase.Id.ShouldBe(caseId.ShouldNotBeNull());
         goldenCase.ExpectedWisdomId.ShouldBe(runnerUp.Id);
     }
@@ -210,9 +196,9 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Promoting_SkipsARetiredWisdom_RecallWouldNeverSurfaceIt()
     {
-        var project = await SeedProjectAsync();
-        var top = await SeedWisdomAsync(project.Id);
-        var runnerUp = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var top = await AddInjectableWisdomAsync(project.Id, "the top match");
+        var runnerUp = await AddInjectableWisdomAsync(project.Id, "the runner-up");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
@@ -220,8 +206,7 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
 
         var caseId = await Browser().PromoteAsync(injection.Id, Token);
 
-        var goldenCase = await FromDb(db =>
-            db.GoldenCases.SingleAsync(g => g.CreatedFromInjectionId == injection.Id, Token));
+        var goldenCase = await FromDb(db => db.GoldenCases.SingleAsync(Token));
         goldenCase.Id.ShouldBe(caseId.ShouldNotBeNull());
         goldenCase.ExpectedWisdomId.ShouldBe(runnerUp.Id);
     }
@@ -229,14 +214,14 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnEntryWithNoLiveWisdomLeft_CannotPromote()
     {
-        var project = await SeedProjectAsync();
-        var retired = await SeedWisdomAsync(project.Id);
-        var deleted = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var retired = await AddInjectableWisdomAsync(project.Id, "soon retired");
+        var deleted = await AddInjectableWisdomAsync(project.Id, "soon deleted");
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(retired.Id, 0.03), (deleted.Id, 0.02)]);
         await RetireAsync(retired.Id);
-        await IntoDb(db => db.Wisdom.Where(w => w.Id == deleted.Id).ExecuteDeleteAsync(Token));
+        await Context.Wisdom.Where(w => w.Id == deleted.Id).ExecuteDeleteAsync(Token);
 
         var entry = (await Browser().ListAsync(project.Id, Token))
             .Sessions.ShouldHaveSingleItem().Entries.ShouldHaveSingleItem();
@@ -245,39 +230,34 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
         var caseId = await Browser().PromoteAsync(injection.Id, Token);
 
         caseId.ShouldBeNull();
-        (await FromDb(db =>
-                db.GoldenCases.AnyAsync(g => g.CreatedFromInjectionId == injection.Id, Token)))
-            .ShouldBeFalse();
+        (await FromDb(db => db.GoldenCases.CountAsync(Token))).ShouldBe(0);
     }
 
     [Fact]
     public async Task TheListing_BoundsToTheMostRecentEntries_PrecisionCountsThemAll()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var oldest = await SeedInjectionAsync(
             project.Id, "sess-old", InjectionLane.Prompt, "the cut entry", Now.AddMinutes(-1),
             items: [(wisdom.Id, 0.03)]);
         await Browser().MarkAsync(oldest.Id, InjectionVerdict.Useful, Token);
-        await IntoDb(db =>
+        for (var i = 0; i < InjectionBrowser.RecentEntryLimit; i++)
         {
-            for (var i = 0; i < InjectionBrowser.RecentEntryLimit; i++)
+            Context.Injections.Add(new Injection
             {
-                db.Injections.Add(new Injection
-                {
-                    Id = Guid.CreateVersion7(),
-                    SessionId = "sess-a",
-                    ProjectId = project.Id,
-                    At = Now,
-                    Lane = InjectionLane.Prompt,
-                    QueryContext = $"prompt {i}",
-                    Chars = 240,
-                    Items = [new InjectionItem { WisdomId = wisdom.Id, Score = 0.03 }],
-                });
-            }
+                Id = Guid.CreateVersion7(),
+                SessionId = "sess-a",
+                ProjectId = project.Id,
+                At = Now,
+                Lane = InjectionLane.Prompt,
+                QueryContext = $"prompt {i}",
+                Chars = 240,
+                Items = [new InjectionItem { WisdomId = wisdom.Id, Score = 0.03 }],
+            });
+        }
 
-            return db.SaveChangesAsync(Token);
-        });
+        await Context.SaveChangesAsync(Token);
 
         var view = await Browser().ListAsync(project.Id, Token);
 
@@ -293,8 +273,8 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ABriefEntry_CannotPromote_ThereIsNoQueryToReplay()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now,
             items: [(wisdom.Id, 0.03)]);
@@ -302,16 +282,14 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
         var caseId = await Browser().PromoteAsync(injection.Id, Token);
 
         caseId.ShouldBeNull();
-        (await FromDb(db =>
-                db.GoldenCases.AnyAsync(g => g.CreatedFromInjectionId == injection.Id, Token)))
-            .ShouldBeFalse();
+        (await FromDb(db => db.GoldenCases.CountAsync(Token))).ShouldBe(0);
     }
 
     [Fact]
     public async Task Promoting_IsIdempotent_ARepeatClickReturnsTheExistingCase()
     {
-        var project = await SeedProjectAsync();
-        var wisdom = await SeedWisdomAsync(project.Id);
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddInjectableWisdomAsync(project.Id);
         var injection = await SeedInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
@@ -320,43 +298,13 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
         var second = await Browser().PromoteAsync(injection.Id, Token);
 
         second.ShouldBe(first.ShouldNotBeNull());
-        (await FromDb(db =>
-                db.GoldenCases.CountAsync(g => g.CreatedFromInjectionId == injection.Id, Token)))
-            .ShouldBe(1);
+        (await FromDb(db => db.GoldenCases.CountAsync(Token))).ShouldBe(1);
     }
 
-    private InjectionBrowser Browser() => new(Contexts, _clock);
+    private InjectionBrowser Browser() => new(Contexts, Clock);
 
-    private async Task<Project> SeedProjectAsync()
-    {
-        var project = TestData.NewProject("injection");
-        await IntoDb(db =>
-        {
-            db.Projects.Add(project);
-            return db.SaveChangesAsync(Token);
-        });
-        return project;
-    }
-
-    private async Task<Wisdom> SeedWisdomAsync(Guid scopeProjectId, string text = "a wisdom")
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = scopeProjectId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(0.5)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-        };
-        await IntoDb(db =>
-        {
-            db.Wisdom.Add(wisdom);
-            return db.SaveChangesAsync(Token);
-        });
-        return wisdom;
-    }
+    private async Task<Wisdom> AddInjectableWisdomAsync(Guid projectId, string text = "a wisdom")
+        => await AddWisdomAsync(projectId, text, cosine: 0.5);
 
     private async Task<Injection> SeedInjectionAsync(
         Guid projectId,
@@ -377,30 +325,12 @@ public sealed class InjectionBrowserTests(CaptureDatabaseFixture fixture)
             Chars = 240,
             Items = items.Select(i => new InjectionItem { WisdomId = i.WisdomId, Score = i.Score }).ToList(),
         };
-        await IntoDb(db =>
-        {
-            db.Injections.Add(injection);
-            return db.SaveChangesAsync(Token);
-        });
+        Context.Injections.Add(injection);
+        await Context.SaveChangesAsync(Token);
         return injection;
     }
 
-    private Task RetireAsync(Guid wisdomId)
-        => IntoDb(db => db.Wisdom.Where(w => w.Id == wisdomId)
-            .ExecuteUpdateAsync(
-                s => s.SetProperty(w => w.RetiredAt, (DateTimeOffset?)Now), Token));
-
-    private async Task IntoDb(Func<MimirDbContext, Task> mutate)
-    {
-        await using var db = Contexts.CreateDbContext();
-        await mutate(db);
-    }
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var db = Contexts.CreateDbContext();
-        return await query(db);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
+    private async Task RetireAsync(Guid wisdomId)
+        => await Context.Wisdom.Where(w => w.Id == wisdomId)
+            .ExecuteUpdateAsync(s => s.SetProperty(w => w.RetiredAt, (DateTimeOffset?)Now), Token);
 }

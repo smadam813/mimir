@@ -3,7 +3,6 @@ using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 using Mimir.Server.Tests.Distillation;
 using Pgvector;
 
@@ -16,28 +15,12 @@ namespace Mimir.Server.Tests.Storage;
 /// out-of-set rows, asserted against <em>both</em> methods that reach the universe, so a future
 /// fork of the shared clause cannot leave the two disagreeing.
 /// </summary>
-public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 24, 12, 0, 0, TimeSpan.Zero);
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task AmbientUniverse_SearchAndList_AgreeOnTheFullEligibilityMatrix()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, foreign) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, foreign) = (await AddProjectAsync("ambient"), await AddProjectAsync("ambient"));
 
         var projectScoped = await AddWisdomAsync(project.Id, "yak of the session project");
         var global = await AddWisdomAsync(Project.GlobalId, "yak of the global scope");
@@ -69,12 +52,11 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AmbientUniverse_RestrictsBeforeThePerLegLimit_NotAfterFusion()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, foreign) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, foreign) = (await AddProjectAsync("ambient"), await AddProjectAsync("ambient"));
         // Three foreign rows outrank the ambient two on both legs: nearer vectors, denser matches.
         foreach (var cosine in (double[])[0.99, 0.97, 0.95])
         {
-            await AddWisdomAsync(foreign.Id, "ibex ibex ibex ibex", cosine: cosine);
+            await AddWisdomAsync(foreign.Id, "ibex ibex ibex ibex", cosine);
         }
 
         var projectScoped = await AddWisdomAsync(project.Id, "ibex sighting", cosine: 0.5);
@@ -93,87 +75,18 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
     private WisdomSearch Search(int perLegTopN = 50)
         => new(Context, Options.Create(new SearchOptions { PerLegTopN = perLegTopN }));
 
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("ambient");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Wisdom> AddWisdomAsync(
-        Guid scopeProjectId, string text, DateTimeOffset? retiredAt = null, double cosine = 1.0)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = scopeProjectId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-            RetiredAt = retiredAt,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
     private async Task AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var item = new HarvestedItem
-        {
-            Id = Guid.CreateVersion7(),
-            ProjectId = projectId,
-            Path = $"ambient-{suffix}/memory/MEMORY.md",
-            ContentHash = suffix,
-            Content = "harvested content",
-            FirstSeen = Now,
-            LastChanged = Now,
-        };
-        Context.HarvestedItems.Add(item);
-        Context.Provenance.Add(new Provenance
-        {
-            Id = Guid.CreateVersion7(),
-            WisdomId = wisdomId,
-            HarvestedItemId = item.Id,
-        });
-        await Context.SaveChangesAsync(Token);
+        var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
+        await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
     }
 
     private async Task<Guid> AddEventProvenanceAsync(Guid wisdomId, Guid projectId)
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{suffix}",
-            ProjectId = projectId,
-            StartedAt = Now,
-            Cwd = $@"C:\git\ambient-{suffix}",
-        };
-        var evt = new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = 1,
-            Type = EventType.UserPromptSubmit,
-            At = Now,
-            Payload = """{"content":"distilled from a session"}""",
-            PayloadFullSize = 40,
-            Salient = false,
-        };
-        Context.AddRange(episode, evt);
-        Context.Provenance.Add(new Provenance
-        {
-            Id = Guid.CreateVersion7(),
-            WisdomId = wisdomId,
-            EpisodeId = episode.Id,
-            EventId = evt.Id,
-        });
-        await Context.SaveChangesAsync(Token);
+        var episode = await AddEpisodeAsync(projectId);
+        var evt = await AddEventAsync(
+            episode.Id, seq: 1, payload: """{"content":"distilled from a session"}""");
+        await AddProvenanceAsync(wisdomId, episode.Id, evt.Id);
         return episode.Id;
     }
 
@@ -185,20 +98,5 @@ public sealed class WisdomSearchAmbientTests(CaptureDatabaseFixture fixture)
     {
         var episodeId = await AddEventProvenanceAsync(wisdomId, projectId);
         await Context.Episodes.Where(e => e.Id == episodeId).ExecuteDeleteAsync(Token);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
     }
 }

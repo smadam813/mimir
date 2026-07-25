@@ -2,15 +2,16 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Mimir.Server.Storage;
 
-namespace Mimir.Server.Tests.Capture;
+namespace Mimir.Server.Tests;
 
 /// <summary>
 /// A migrated, throwaway database per test class: created on first use, dropped on dispose, so
-/// capture tests never leave rows in the development database. Skips (via
-/// <see cref="UnavailableReason"/>) when no Postgres is reachable, same as the storage tests;
-/// <c>docker compose up -d postgres</c> turns them on.
+/// tests never leave rows in the development database. Skips (via <see cref="UnavailableReason"/>)
+/// when no Postgres is reachable; <c>docker compose up -d postgres</c> turns them on. Named for
+/// what it is rather than its first consumer — every Postgres-backed class in the suite reaches it
+/// through <see cref="PostgresTestBase"/>.
 /// </summary>
-public sealed class CaptureDatabaseFixture : IAsyncLifetime
+public sealed class ThrowawayDatabaseFixture : IAsyncLifetime
 {
     private readonly string _adminConnectionString = TestPostgres.AdminConnectionString;
 

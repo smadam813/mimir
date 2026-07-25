@@ -1,12 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 
 namespace Mimir.Server.Tests.Distillation;
 
@@ -15,37 +12,16 @@ namespace Mimir.Server.Tests.Distillation;
 /// gate carrying Event Provenance; failure → failed with nothing admitted; later chunks' candidates
 /// merging with the Wisdom earlier chunks just created (the Merge Gate as the reduce).
 /// </summary>
-public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 21, 12, 0, 0, TimeSpan.Zero);
-
-    private readonly FakeChatClient _chat = new();
-    private readonly FakeEmbeddings _embeddings = new();
-    private readonly FakeArbiter _arbiter = new();
-    private readonly FakeTimeProvider _clock = new(Now);
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task ASealedPendingEpisode_DistillsToDone_WithEventProvenance()
     {
-        await Context.ResetWisdomAsync(Token);
-        await ParkQueueAsync();
-        var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
-        var evt = await AddEventAsync(episode, 1, EventType.UserPromptSubmit);
-        var text = $"Always pin the SDK feature band {Guid.NewGuid():N}";
-        _chat.Reply($$"""
+        var project = await AddProjectAsync("distiller");
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
+        var evt = await AddEventAsync(episode.Id, seq: 1);
+        const string text = "Always pin the SDK feature band";
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{text}}","events":[1]}]}
             """);
 
@@ -59,10 +35,12 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
         done.Distillation.ShouldBe(DistillationState.Done);
         done.DistilledAt.ShouldBe(Now);
 
-        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(w => w.Text == text, Token));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(text);
         wisdom.Kind.ShouldBe(WisdomKind.Lesson);
-        wisdom.ScopeProjectId.ShouldBe(episode.ProjectId);
-        var provenance = await FromDb(db => db.Provenance.SingleAsync(p => p.WisdomId == wisdom.Id, Token));
+        wisdom.ScopeProjectId.ShouldBe(project.Id);
+        var provenance = await FromDb(db => db.Provenance.SingleAsync(Token));
+        provenance.WisdomId.ShouldBe(wisdom.Id);
         provenance.EpisodeId.ShouldBe(episode.Id);
         provenance.EventId.ShouldBe(evt.Id);
         provenance.HarvestedItemId.ShouldBeNull();
@@ -71,16 +49,15 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task TheQueue_TakesTheOldestSeal_AndIgnoresUnsealedAndDone()
     {
-        await Context.ResetWisdomAsync(Token);
-        await ParkQueueAsync();
-        var newer = await AddEpisodeAsync(sealedAt: Now.AddMinutes(-5));
-        var older = await AddEpisodeAsync(sealedAt: Now.AddHours(-2));
-        await AddEpisodeAsync(sealedAt: null);
-        await AddEpisodeAsync(sealedAt: Now.AddDays(-1), state: DistillationState.Done);
-        await AddEventAsync(newer, 1, EventType.Stop);
-        await AddEventAsync(older, 1, EventType.Stop);
-        _chat.Reply("""{"candidates":[]}""");
-        _chat.Reply("""{"candidates":[]}""");
+        var project = await AddProjectAsync("distiller");
+        var newer = await AddEpisodeAsync(project.Id, sealedAt: Now.AddMinutes(-5));
+        var older = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-2));
+        await AddEpisodeAsync(project.Id);
+        await AddEpisodeAsync(project.Id, sealedAt: Now.AddDays(-1), distillation: DistillationState.Done);
+        await AddEventAsync(newer.Id, seq: 1, EventType.Stop);
+        await AddEventAsync(older.Id, seq: 1, EventType.Stop);
+        Chat.Reply("""{"candidates":[]}""");
+        Chat.Reply("""{"candidates":[]}""");
 
         var run = NewRun();
         (await run.RunNextAsync(Token)).ShouldNotBeNull().EpisodeId.ShouldBe(older.Id);
@@ -91,16 +68,15 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AFailure_MarksFailed_AndAdmitsNothing_EvenFromTheChunksThatParsed()
     {
-        await Context.ResetWisdomAsync(Token);
-        await ParkQueueAsync();
-        var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
+        var project = await AddProjectAsync("distiller");
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
         // Two chunks at this budget: the first answers cleanly, the second is garbage — the
         // Episode must fail whole, with the first chunk's candidate never admitted, so the
         // sweep's re-queue redoes it without inflating Reinforcement.
-        await AddEventAsync(episode, 1, EventType.PostToolUse, PayloadOfChars(4000));
-        await AddEventAsync(episode, 2, EventType.PostToolUse, PayloadOfChars(4000));
-        _chat.Reply("""{"candidates":[{"kind":"fact","scope":"project","text":"From the good chunk.","events":[1]}]}""");
-        _chat.Reply("no json at all");
+        await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        Chat.Reply("""{"candidates":[{"kind":"fact","scope":"project","text":"From the good chunk.","events":[1]}]}""");
+        Chat.Reply("no json at all");
 
         var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
             .ShouldNotBeNull();
@@ -116,30 +92,27 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AFailureInsideTheBatch_LeavesTheEpisodeStillOwedDistillation()
     {
-        // ResetWisdomAsync and ParkQueueAsync first: the whole-table count below has to start
-        // from provably empty tables, and the claim must land on this test's own Episode.
-        await Context.ResetWisdomAsync(Token);
-        await ParkQueueAsync();
-        var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
-        await AddEventAsync(episode, 1, EventType.PostToolUse, PayloadOfChars(4000));
-        await AddEventAsync(episode, 2, EventType.PostToolUse, PayloadOfChars(4000));
+        var project = await AddProjectAsync("distiller");
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
+        await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
         // Both chunks parse and the whole Episode reaches the gate as one batch, where the
         // second candidate matches the first and the arbiter throws. The existing failure test
         // fails at the distiller, before the gate; this one fails inside the batch, which is the
         // path that used to run in the Run's own transaction and now runs in the gate's — the
         // Episode must come back Failed and owed, never Done, with the first candidate's
         // already-saved admission taken back with the failing one.
-        var born = $"The lock serializes the gate {Guid.NewGuid():N}";
-        var confirming = $"Gate admissions are serialized {Guid.NewGuid():N}";
-        _embeddings.Map(born, TestVectors.Basis);
-        _embeddings.Map(confirming, TestVectors.WithCosine(0.9));
-        _chat.Reply($$"""
+        const string born = "The lock serializes the gate";
+        const string confirming = "Gate admissions are serialized";
+        Embeddings.Map(born, TestVectors.Basis);
+        Embeddings.Map(confirming, TestVectors.WithCosine(0.9));
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{born}}","events":[1]}]}
             """);
-        _chat.Reply($$"""
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{confirming}}","events":[2]}]}
             """);
-        _arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
+        Arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
 
         var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
             .ShouldNotBeNull();
@@ -156,19 +129,18 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task LaterChunksCandidates_MergeWithEarlierChunksWisdom()
     {
-        await Context.ResetWisdomAsync(Token);
-        await ParkQueueAsync();
-        var episode = await AddEpisodeAsync(sealedAt: Now.AddHours(-1));
-        var first = await AddEventAsync(episode, 1, EventType.PostToolUse, PayloadOfChars(4000));
-        var second = await AddEventAsync(episode, 2, EventType.PostToolUse, PayloadOfChars(4000));
-        var born = $"The build needs the full SDK version {Guid.NewGuid():N}";
-        var confirming = $"Full SDK version required by the build {Guid.NewGuid():N}";
-        _embeddings.Map(born, TestVectors.Basis);
-        _embeddings.Map(confirming, TestVectors.WithCosine(0.85));
-        _chat.Reply($$"""
+        var project = await AddProjectAsync("distiller");
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
+        var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        const string born = "The build needs the full SDK version";
+        const string confirming = "Full SDK version required by the build";
+        Embeddings.Map(born, TestVectors.Basis);
+        Embeddings.Map(confirming, TestVectors.WithCosine(0.85));
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{born}}","events":[1]}]}
             """);
-        _chat.Reply($$"""
+        Chat.Reply($$"""
             {"candidates":[{"kind":"lesson","scope":"project","text":"{{confirming}}","events":[2]}]}
             """);
 
@@ -180,132 +152,49 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
         wisdom.Text.ShouldBe(born, "the second chunk's candidate reinforced instead of duplicating");
         wisdom.Reinforcement.ShouldBe(2);
-        var events = await FromDb(db => db.Provenance
-            .Where(p => p.WisdomId == wisdom.Id)
-            .Select(p => p.EventId)
-            .ToListAsync(Token));
+        var events = await FromDb(db => db.Provenance.Select(p => p.EventId).ToListAsync(Token));
         events.ShouldBe([first.Id, second.Id], ignoreOrder: true);
     }
 
     [Fact]
     public async Task QueueDepth_CountsSealedPendingAndRunningOnly()
     {
-        await AddEpisodeAsync(sealedAt: Now);
-        await AddEpisodeAsync(sealedAt: Now, state: DistillationState.Running);
-        await AddEpisodeAsync(sealedAt: Now, state: DistillationState.Done);
-        await AddEpisodeAsync(sealedAt: null);
+        var project = await AddProjectAsync("distiller");
+        await AddEpisodeAsync(project.Id, sealedAt: Now);
+        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
+        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
+        await AddEpisodeAsync(project.Id);
 
-        // Other tests of this class seed their own Episodes into the shared class database, so
-        // assert against a floor from an independent query rather than an exact figure.
-        var expected = await FromDb(db => db.Episodes.CountAsync(
-            e => e.SealedAt != null
-                && (e.Distillation == DistillationState.Pending || e.Distillation == DistillationState.Running),
-            Token));
-
-        (await NewRun().QueueDepthAsync(Token)).ShouldBe(expected);
-        expected.ShouldBeGreaterThanOrEqualTo(2);
+        (await NewRun().QueueDepthAsync(Token)).ShouldBe(2);
     }
 
     [Fact]
     public async Task BootRecovery_RequeuesAnAbandonedRunningClaim()
     {
-        var abandoned = await AddEpisodeAsync(sealedAt: Now.AddHours(-3), state: DistillationState.Running);
-        await FromDb(db => db.Episodes
-            .Where(e => e.Id == abandoned.Id)
-            .ExecuteUpdateAsync(u => u.SetProperty(e => e.DistillationStartedAt, Now.AddHours(-2)), Token));
+        var project = await AddProjectAsync("distiller");
+        var abandoned = await AddEpisodeAsync(
+            project.Id,
+            sealedAt: Now.AddHours(-3),
+            distillation: DistillationState.Running,
+            distillationStartedAt: Now.AddHours(-2));
 
-        (await NewRun().RequeueAbandonedAsync(Token)).ShouldBeGreaterThanOrEqualTo(1);
+        (await NewRun().RequeueAbandonedAsync(Token)).ShouldBe(1);
 
         var requeued = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == abandoned.Id, Token));
         requeued.Distillation.ShouldBe(DistillationState.Pending);
         requeued.DistillationStartedAt.ShouldBeNull();
     }
 
-    /// <summary>
-    /// Parks every Episode already queued in the class-shared database as done, so a claiming
-    /// test's <c>RunNextAsync</c> sees only its own rows. xUnit's test order differs across
-    /// machines, and another test's leftovers — BootRecovery's re-queued Episode, QueueDepth's
-    /// seeds — are otherwise claimable ahead of the test's own (the #20 CI ordering lesson).
-    /// </summary>
-    private async Task ParkQueueAsync()
-        => await Context.Episodes
-            .Where(e => e.Distillation != DistillationState.Done)
-            .ExecuteUpdateAsync(
-                update => update.SetProperty(e => e.Distillation, DistillationState.Done), Token);
-
     private DistillationRun NewRun(DistillationOptions? options = null)
     {
-        var distillation = Options.Create(options ?? new DistillationOptions());
-        var gate = new MergeGate(
-            new FixtureContextFactory(fixture),
-            _embeddings,
-            Options.Create(new SearchOptions()),
-            _arbiter,
-            distillation,
-            _clock);
-        var distiller = new EpisodeDistiller(_chat, distillation);
+        var settings = options ?? new DistillationOptions();
         return new DistillationRun(
-            Context, distiller, gate, _clock, NullLogger<DistillationRun>.Instance);
+            Context,
+            new EpisodeDistiller(Chat, Options.Create(settings)),
+            CreateMergeGate(distillation: settings),
+            Clock,
+            NullLogger<DistillationRun>.Instance);
     }
 
     private static string PayloadOfChars(int chars) => $$"""{"note":"{{new string('x', chars)}}"}""";
-
-    private async Task<Episode> AddEpisodeAsync(
-        DateTimeOffset? sealedAt, DistillationState state = DistillationState.Pending)
-    {
-        var project = TestData.NewProject("distiller");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"session-{Guid.NewGuid():N}",
-            ProjectId = project.Id,
-            StartedAt = (sealedAt ?? Now).AddHours(-1),
-            SealedAt = sealedAt,
-            SealReason = sealedAt is null ? null : "clear",
-            Cwd = @"C:\git\distiller",
-            Distillation = state,
-        };
-        Context.AddRange(project, episode);
-        await Context.SaveChangesAsync(Token);
-        return episode;
-    }
-
-    private async Task<Event> AddEventAsync(
-        Episode episode, int seq, EventType type, string payload = """{"note":"payload"}""")
-    {
-        var evt = new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = seq,
-            Type = type,
-            At = episode.StartedAt.AddMinutes(seq),
-            Payload = payload,
-            Salient = type == EventType.Remember,
-        };
-        Context.Add(evt);
-        await Context.SaveChangesAsync(Token);
-        return evt;
-    }
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
 }
