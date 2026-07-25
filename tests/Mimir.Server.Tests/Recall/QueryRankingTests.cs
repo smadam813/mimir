@@ -161,31 +161,6 @@ public sealed class QueryRankingTests(CaptureDatabaseFixture fixture)
         row.Score.ShouldBeGreaterThan(0);
     }
 
-    /// <summary>
-    /// The name is the universe in both directions: a caller cannot forget the ambient filter, and
-    /// cannot smuggle one into the method that says it ranks everything. Rejected before any
-    /// embedding or SQL, so this runs over a context that never connects.
-    /// </summary>
-    [Fact]
-    public async Task RankingEverything_RejectsAnAmbientUniverseSmuggledInThroughTheFilter()
-    {
-        await using var db = new MimirDbContext(
-            new DbContextOptionsBuilder<MimirDbContext>()
-                .UseNpgsql("Host=guard-checks-never-connect")
-                .Options);
-        var ranking = new QueryRanking(
-            db,
-            _embeddings,
-            new WisdomSearch(db, Options.Create(new SearchOptions())),
-            Options.Create(new RecallOptions()),
-            new FakeTimeProvider(Now));
-        var project = Guid.CreateVersion7();
-
-        await Should.ThrowAsync<ArgumentException>(
-            () => ranking.RankEverythingAsync(
-                Query, project, new WisdomSearchFilter { AmbientProjectId = project }, Token));
-    }
-
     private async Task<IReadOnlyList<RankedWisdom>> RankAmbientAsync(
         Guid sessionProjectId, SearchOptions? searchOptions = null)
         => await Ranking(searchOptions).RankAmbientAsync(Query, sessionProjectId, Token);

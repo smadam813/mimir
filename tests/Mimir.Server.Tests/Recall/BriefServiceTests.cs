@@ -160,6 +160,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     {
         var service = new BriefService(
             Context,
+            new WisdomSearch(Context, Options.Create(new SearchOptions())),
             Options.Create(options ?? new RecallOptions()),
             new FakeTimeProvider(Now));
         return await service.ComposeBriefAsync(sessionId ?? NewSessionId(), projectId, Token);
