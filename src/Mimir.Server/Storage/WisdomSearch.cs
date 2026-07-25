@@ -173,6 +173,14 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                 new NpgsqlParameter("global_id", NpgsqlDbType.Uuid) { Value = Project.GlobalId })
             .ToListAsync(cancellationToken);
 
+    /// <summary>
+    /// Both universes over the one SQL text. The two parameters are alternatives, not a
+    /// combination — every public entry point above passes a constant for one of them, and the
+    /// SQL simply ANDs whatever it is given: an ambient search told to include Retired would
+    /// silently exclude it anyway, one given a scope would silently intersect. That is why the
+    /// choice stays here, between two visible call sites, instead of on a filter a caller fills
+    /// in — no runtime check can be forgotten if no caller can state the contradiction.
+    /// </summary>
     private async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding,
         string query,

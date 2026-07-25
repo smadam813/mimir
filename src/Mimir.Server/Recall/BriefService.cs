@@ -27,12 +27,14 @@ internal sealed class BriefService(
         var ids = await search.ListAmbientAsync(projectId, cancellationToken);
         // Hydration is where every rendered field comes from, so a Wisdom hard-deleted (§8)
         // between the listing and this query simply yields no row and never renders — the same
-        // drop QueryRanking makes explicit against its own hits. Eligibility is not re-tested
-        // here: a Wisdom Retired inside that same window still renders, because re-checking
-        // would put a second keeper of a universe predicate back in Recall. The Prompt lane
-        // holds the identical window off the same reasoning.
+        // drop QueryRanking makes explicit against its own hits. Retirement in that same window
+        // needs saying, because it leaves the row in place: the guard here is not a second
+        // keeper of the universe (scope and the native-content exclusion stay Storage's alone),
+        // it is the §7 rule that no lane may ever render a Retired row, re-asserted at the last
+        // read before rendering — the same one-predicate re-check InjectionBrowser makes when it
+        // hydrates ids of its own.
         var candidates = await db.Wisdom
-            .Where(w => ids.Contains(w.Id))
+            .Where(w => ids.Contains(w.Id) && w.RetiredAt == null)
             .Select(w => new
             {
                 w.Id,
