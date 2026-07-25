@@ -157,15 +157,19 @@ public sealed class DistillerServiceTests(CaptureDatabaseFixture fixture)
         }
 
         var services = new ServiceCollection();
-        services.AddDbContext<MimirDbContext>(options =>
-            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector()));
-        // The worker's whole scoped graph — with the scripted chat model and deterministic fake
+        // Both registrations, and Singleton options, exactly as AddMimirStorage does it: the
+        // scoped context the run claims its Episode through, and the factory the gate opens each
+        // Admission batch on.
+        void Configure(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector());
+        services.AddDbContextFactory<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+        // The worker's whole graph — with the scripted chat model and deterministic fake
         // embeddings in place of Ollama.
         services.AddScoped<DistillationRun>();
         services.AddScoped<EpisodeDistiller>();
-        services.AddScoped<MergeGate>();
-        services.AddScoped<IMergeArbiter>(_ => new FakeArbiter());
-        services.AddScoped<WisdomSearch>();
+        services.AddSingleton<MergeGate>();
+        services.AddSingleton<IMergeArbiter>(_ => new FakeArbiter());
         services.AddSingleton<IChatClient>(_chat);
         services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(new FakeEmbeddings());
         services.AddSingleton(Options.Create(new SearchOptions()));

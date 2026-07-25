@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mimir.Server.Configuration;
+using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 using Mimir.Server.Tests.Capture;
@@ -265,7 +268,20 @@ public sealed class WisdomBrowserTests(CaptureDatabaseFixture fixture)
         (await FromDb(db => db.Episodes.CountAsync(e => e.Id == episode.Id, Token))).ShouldBe(1);
     }
 
-    private WisdomBrowser Browser() => new(Contexts, _embeddings, _clock);
+    /// <summary>
+    /// The browser over the fixture's database, its edit wired to a real Merge Gate — the gate is
+    /// where the edit's re-embed, version append and lock live now (§6, ADR-0004).
+    /// </summary>
+    private WisdomBrowser Browser() => new(
+        Contexts,
+        new MergeGate(
+            Contexts,
+            _embeddings,
+            Options.Create(new SearchOptions()),
+            new FakeArbiter(),
+            Options.Create(new DistillationOptions()),
+            _clock),
+        _clock);
 
     private async Task<Wisdom> SeedWisdomAsync(
         WisdomKind kind = WisdomKind.Fact,

@@ -1,8 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.AI;
+using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Pgvector;
 
 namespace Mimir.Server.Ui;
 
@@ -78,14 +77,17 @@ public sealed record WisdomDetail(
     IReadOnlyList<ProvenanceEntry> Provenance);
 
 /// <summary>
-/// The read-and-curate surface behind the Wisdom browser (§8.1). Every method opens its own
-/// short-lived context, like <see cref="EpisodeBrowser"/>. Curation edits Wisdom in place — the
-/// Merge Gate stays the only entry point for *new* Wisdom (§6) — and edit is the one UI action
-/// that talks to a model: the new text must re-embed or search would keep finding the old words.
+/// The read-and-curate surface behind the Wisdom browser (§8.1). Every read opens its own
+/// short-lived context, like <see cref="EpisodeBrowser"/>. Retire and delete are this class's own
+/// writes — they change a row's standing, never its words. Edit does change the words, so it goes
+/// through the Merge Gate (ADR-0004): the gate owns re-embedding, the version chain, and the lock
+/// that keeps an interactive edit from colliding with a background rewrite. Internal, unlike its
+/// sibling browsers, only because taking the internal <see cref="MergeGate"/> makes it so — the
+/// Blazor components that inject it live in this assembly.
 /// </summary>
-public sealed class WisdomBrowser(
+internal sealed class WisdomBrowser(
     IDbContextFactory<MimirDbContext> contexts,
-    IEmbeddingGenerator<string, Embedding<float>> embeddings,
+    MergeGate gate,
     TimeProvider clock)
 {
     public async Task<IReadOnlyList<WisdomListEntry>> ListAsync(
@@ -206,42 +208,14 @@ public sealed class WisdomBrowser(
             !db.Provenance.Any(p => p.WisdomId == w.Id)));
 
     /// <summary>
-    /// The §8.1 edit: the new text becomes current — re-embedded, appended to the chain as a
-    /// <c>cause=edited</c> WisdomVersion. Reinforcement and recency are untouched: an edit
-    /// rewords, only the Merge Gate confirms (§6). An unchanged text is a no-op.
+    /// The §8.1 edit, handed to the Merge Gate: the new text becomes current — re-embedded,
+    /// appended to the chain as a <c>cause=edited</c> WisdomVersion — while Reinforcement and
+    /// recency stay put, since an edit rewords and only the gate's Admissions confirm (§6). An
+    /// unchanged text is a no-op. The edit can wait behind an in-flight Admission batch, the
+    /// same acceptance <c>mimir_remember</c> makes.
     /// </summary>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
-    {
-        var trimmed = text.Trim();
-        if (trimmed.Length == 0)
-        {
-            return;
-        }
-
-        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var wisdom = await db.Wisdom.FirstOrDefaultAsync(w => w.Id == wisdomId, cancellationToken);
-        if (wisdom is null || wisdom.Text == trimmed)
-        {
-            return;
-        }
-
-        wisdom.Text = trimmed;
-        wisdom.Embedding = new Vector(
-            await embeddings.GenerateVectorAsync(trimmed, cancellationToken: cancellationToken));
-
-        var latest = await db.WisdomVersions
-            .Where(v => v.WisdomId == wisdomId)
-            .MaxAsync(v => (int?)v.Version, cancellationToken) ?? 0;
-        db.WisdomVersions.Add(new WisdomVersion
-        {
-            WisdomId = wisdomId,
-            Version = latest + 1,
-            Text = trimmed,
-            CreatedAt = clock.GetUtcNow(),
-            Cause = WisdomVersionCause.Edited,
-        });
-        await db.SaveChangesAsync(cancellationToken);
-    }
+        => await gate.EditAsync(wisdomId, text, cancellationToken);
 
     /// <summary>§10 Retire: reversibly out of all recall and default search from this moment.</summary>
     public async Task RetireAsync(Guid wisdomId, CancellationToken cancellationToken)

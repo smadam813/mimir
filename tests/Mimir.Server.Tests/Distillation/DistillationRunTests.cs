@@ -236,8 +236,13 @@ public sealed class DistillationRunTests(CaptureDatabaseFixture fixture)
     private DistillationRun NewRun(DistillationOptions? options = null)
     {
         var distillation = Options.Create(options ?? new DistillationOptions());
-        var search = new WisdomSearch(Context, Options.Create(new SearchOptions()));
-        var gate = new MergeGate(Context, _embeddings, search, _arbiter, distillation, _clock);
+        var gate = new MergeGate(
+            new FixtureContextFactory(fixture),
+            _embeddings,
+            Options.Create(new SearchOptions()),
+            _arbiter,
+            distillation,
+            _clock);
         var distiller = new EpisodeDistiller(_chat, distillation);
         return new DistillationRun(
             Context, distiller, gate, _clock, NullLogger<DistillationRun>.Instance);

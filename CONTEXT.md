@@ -61,7 +61,7 @@ Turning a Sealed Episode into Wisdom candidates, performed by the Distiller off 
 _Avoid_: summarization, reflection, compression
 
 **Merge Gate**:
-The single write-time entry point to the Wisdom tier. A candidate either becomes new Wisdom, Reinforces a matching Wisdom (merged rewrite, prior text versioned), or triggers Adjudication when it disputes one.
+The single write-time entry point to the Wisdom tier. A candidate either becomes new Wisdom, Reinforces a matching Wisdom (merged rewrite, prior text versioned), or triggers Adjudication when it disputes one. Every rewrite of a Wisdom's words goes through the gate, a curator's edit included — retiring and deleting do not, since they change a row's standing rather than its words.
 _Avoid_: dedup step, upsert
 
 **Reinforcement**:
@@ -73,7 +73,7 @@ The Merge Gate's ruling on a contradiction: **Supersede** (old Wisdom retired to
 _Avoid_: conflict resolution, overwrite
 
 **Admission**:
-The Merge Gate's processing of one candidate — new Wisdom, Reinforcement, or Adjudication. Admissions happen in gate-owned atomic batches: all of a batch's admissions, and the caller's completion marker, commit together or not at all, and batches never interleave.
+The Merge Gate's processing of one candidate — new Wisdom, Reinforcement, or Adjudication. Admissions happen in gate-owned atomic batches: all of a batch's admissions, and the caller's completion marker, commit together or not at all, and batches never interleave. A batch's state belongs to the gate, so a failed batch leaves no residue in the caller that asked for it — the caller's retry is the whole of its recovery.
 _Avoid_: write, insert, upsert
 
 ### Recall

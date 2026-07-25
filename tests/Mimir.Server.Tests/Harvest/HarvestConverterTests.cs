@@ -157,9 +157,9 @@ public sealed class HarvestConverterTests(CaptureDatabaseFixture fixture)
     private HarvestConverter Converter(HarvestOptions? options = null)
     {
         var gate = new MergeGate(
-            Context,
+            new FixtureContextFactory(fixture),
             _embeddings,
-            new WisdomSearch(Context, Options.Create(new SearchOptions())),
+            Options.Create(new SearchOptions()),
             new FakeArbiter(),
             Options.Create(new DistillationOptions()),
             _clock);
