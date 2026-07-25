@@ -131,6 +131,25 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <remarks>
     /// No LIMIT and no ordering: the ambient lanes that have no query rank the whole universe
     /// themselves, so truncating or ordering here would be a second, silent ranking.
+    /// <para>
+    /// Unbounded is measured, not overlooked (issue
+    /// <see href="https://github.com/smadam813/mimir/issues/72">#72</see>). A LIMIT here could only
+    /// truncate arbitrarily — <c>brief_score</c> is not computable in this query, since it combines
+    /// reinforcement, explicit salience and a recency term against the clock, all in C# after
+    /// hydration — which is the crowd-out pathology the search legs spent #54/#57/#58 removing,
+    /// reintroduced on the queryless side. Capping honestly would instead mean relocating §7
+    /// scoring into SQL, and the numbers do not ask for that: benchmarked at a 50,000-row design
+    /// ceiling (~2–10× any plausible single-user reality, given Merge Gate convergence), the whole
+    /// compose path — this listing, the hydration, the scoring and the render — is flat at ~0.3 s,
+    /// indistinguishable from the same path over an <em>empty</em> universe, and far inside the §11
+    /// 3 s hook cap. Quadrupling the text hydrated per row did not move it either.
+    /// </para>
+    /// <para>
+    /// What keeps that true is <see cref="Recall.BriefTripwire"/>, which re-measures every real
+    /// composition and says so, in the Brief itself, if one ever crosses a second or the set ever
+    /// passes 25,000 rows. Growth here is monotonic by design (§10 has no age-based retirement), so
+    /// the guard is the measurement, not the absence of one.
+    /// </para>
     /// </remarks>
     private const string AmbientIdsSql = $"""
         SELECT id AS "Value"
@@ -162,7 +181,8 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <summary>
     /// The same universe with no query: every Wisdom id inside it, for the lanes that rank without
     /// a search (§7's Brief). Unordered and unlimited — the caller ranks, and hydrates the ids it
-    /// keeps.
+    /// keeps. Both halves of that promise are load-bearing and measured; see
+    /// <see cref="AmbientIdsSql"/>.
     /// </summary>
     public async Task<IReadOnlyList<Guid>> ListAmbientAsync(
         Guid projectId, CancellationToken cancellationToken)

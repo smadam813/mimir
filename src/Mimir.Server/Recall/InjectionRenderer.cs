@@ -29,23 +29,28 @@ internal static class InjectionRenderer
 
     /// <param name="entries">Candidates in injection order (highest score first).</param>
     /// <param name="budgetChars">The lane's budget for the whole rendered wrapper (§11).</param>
+    /// <param name="notice">A trailing non-Wisdom line, or null for none. Reserved out of the
+    /// budget before any entry is measured, so a lane that appends one buys the room from its own
+    /// Wisdom rather than overrunning §11. An injection with no entries stays empty and carries no
+    /// notice — the wrapper exists to label Wisdom, and there is none.</param>
     /// <returns>The rendered injection ("" for none) and the entries that made it in.</returns>
     public static (string Text, IReadOnlyList<InjectionEntry> Included) Render(
-        IEnumerable<InjectionEntry> entries, int budgetChars)
+        IEnumerable<InjectionEntry> entries, int budgetChars, string? notice = null)
     {
+        var tail = notice + Footer;
         var text = new StringBuilder(Header);
         var included = new List<InjectionEntry>();
         foreach (var entry in entries)
         {
             var line = Label(entry);
-            if (text.Length + line.Length + Footer.Length <= budgetChars)
+            if (text.Length + line.Length + tail.Length <= budgetChars)
             {
                 text.Append(line);
                 included.Add(entry);
             }
         }
 
-        return included.Count == 0 ? ("", []) : (text.Append(Footer).ToString(), included);
+        return included.Count == 0 ? ("", []) : (text.Append(tail).ToString(), included);
     }
 
     private static string Label(InjectionEntry entry)

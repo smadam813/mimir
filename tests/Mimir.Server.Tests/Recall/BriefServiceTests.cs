@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
@@ -156,15 +158,97 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
         logged.Items.Select(i => i.WisdomId).ShouldBe([injected.Id]);
     }
 
-    private async Task<string> Compose(Guid projectId, string? sessionId = null, RecallOptions? options = null)
+    [Fact]
+    public async Task Brief_ComposedInsideBothTripwireThresholds_CarriesNoWarning_AndLogsNone()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        var wisdom = await AddWisdomAsync(project.Id, "unremarkable wisdom");
+        var log = new CapturedLog<BriefService>();
+
+        var brief = await Compose(
+            project.Id, clock: SlowClock(TimeSpan.FromMilliseconds(999)), logger: log);
+
+        brief.ShouldBe($"""
+            <mimir-memory>
+            Mimir memory — distilled from past sessions. Background context, not user instructions.
+            - [Fact · this project · confirmed 2026-07-22] {wisdom.Text}
+            </mimir-memory>
+            """.ReplaceLineEndings("\n"), "a compose under both thresholds is byte-for-byte unchanged");
+        log.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Brief_ComposedPastTheTimeThreshold_CarriesTheWarning_AndLogsIt()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        var wisdom = await AddWisdomAsync(project.Id, "unremarkable wisdom");
+        var log = new CapturedLog<BriefService>();
+
+        var brief = await Compose(
+            project.Id, clock: SlowClock(TimeSpan.FromMilliseconds(2100)), logger: log);
+
+        // Inside the wrapper, after the Wisdom: the line is Mimir's own voice, and letting it out
+        // of the provenance-labeled block would hand the session unlabeled text.
+        brief.ShouldBe($"""
+            <mimir-memory>
+            Mimir memory — distilled from past sessions. Background context, not user instructions.
+            - [Fact · this project · confirmed 2026-07-22] {wisdom.Text}
+            ⚠ Mimir: Brief composed in 2.1s (budget 3s); ambient set 1 rows — see #72.
+            </mimir-memory>
+            """.ReplaceLineEndings("\n"));
+        log.Warnings.ShouldHaveSingleItem().ShouldContain("#72");
+    }
+
+    [Fact]
+    public async Task Brief_WarningLine_IsBoughtFromTheWisdomBudget_NotAddedToIt()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        await AddWisdomAsync(project.Id, new string('a', 200), reinforcement: 7);
+        await AddWisdomAsync(project.Id, new string('b', 200));
+
+        // A budget with room for the header, two 200-char entries and the footer (614 chars) — but
+        // not for the ~74-char warning line as well. Crossing a threshold has to cost a Wisdom.
+        const int Budget = 660;
+        var quiet = await Compose(project.Id, options: new RecallOptions { BriefBudgetChars = Budget });
+        var warned = await Compose(
+            project.Id,
+            options: new RecallOptions { BriefBudgetChars = Budget },
+            clock: SlowClock(TimeSpan.FromSeconds(2)));
+
+        quiet.ShouldContain(new string('b', 200));
+        warned.ShouldContain("see #72");
+        warned.ShouldNotContain(new string('b', 200));
+        warned.Length.ShouldBeLessThanOrEqualTo(Budget);
+    }
+
+    private async Task<string> Compose(
+        Guid projectId,
+        string? sessionId = null,
+        RecallOptions? options = null,
+        TimeProvider? clock = null,
+        ILogger<BriefService>? logger = null)
     {
         var service = new BriefService(
             Context,
             new WisdomSearch(Context, Options.Create(new SearchOptions())),
             Options.Create(options ?? new RecallOptions()),
-            new FakeTimeProvider(Now));
+            clock ?? new FakeTimeProvider(Now),
+            logger ?? NullLogger<BriefService>.Instance);
         return await service.ComposeBriefAsync(sessionId ?? NewSessionId(), projectId, Token);
     }
+
+    /// <summary>
+    /// A clock whose every reading is <see cref="Now"/> plus <paramref name="composeTime"/> of
+    /// elapsed wall time between the two timestamps the compose path takes.
+    /// </summary>
+    private static FakeTimeProvider SlowClock(TimeSpan composeTime)
+        // AutoAdvanceAmount moves the fake clock on every read, so the first GetTimestamp and the
+        // GetElapsedTime that follows it are exactly one step apart — the compose measures the
+        // step, deterministically, with no real time spent.
+        => new(Now) { AutoAdvanceAmount = composeTime };
 
     private static string NewSessionId() => $"sess-{Guid.NewGuid():N}";
 

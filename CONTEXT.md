@@ -79,7 +79,7 @@ _Avoid_: write, insert, upsert
 ### Recall
 
 **Brief**:
-The compact, project-aware Wisdom injection delivered at session start.
+The compact, project-aware Wisdom injection delivered at session start. Carries Wisdom, plus one deliberate exception: when composing it crosses the growth tripwire's thresholds, a single warning line rides inside the wrapper. That is the only non-Wisdom content any recall surface volunteers, and it is admitted here rather than hidden, because the failure it warns about — the §11 hook cap, which degrades to an empty Brief and exit 0 — is one no session can tell apart from having nothing to say.
 _Avoid_: context dump, preamble
 
 **Recall**:

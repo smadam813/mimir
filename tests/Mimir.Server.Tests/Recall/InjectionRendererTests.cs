@@ -83,6 +83,33 @@ public class InjectionRendererTests
         text.ShouldNotContain(oversized.Text);
     }
 
+    [Fact]
+    public void Render_ReservesANoticeOutOfTheBudget_AndPlacesItAfterTheEntries()
+    {
+        // The header, two 1000-char entries and the footer come to 2202 chars: inside a 2250-char
+        // budget on their own, and one entry too many once a 60-char notice is reserved as well.
+        var notice = new string('!', 59) + "\n";
+        var (first, second) = (Entry(new string('a', 1000)), Entry(new string('b', 1000)));
+
+        var (quiet, quietIncluded) = InjectionRenderer.Render([first, second], budgetChars: 2250);
+        var (noticed, noticedIncluded) =
+            InjectionRenderer.Render([first, second], budgetChars: 2250, notice);
+
+        quietIncluded.ShouldBe([first, second]);
+        noticedIncluded.ShouldBe([first], "the notice is bought from the entries, not added on top");
+        noticed.Length.ShouldBeLessThanOrEqualTo(2250);
+        noticed.ShouldEndWith(notice + "</mimir-memory>");
+    }
+
+    [Fact]
+    public void Render_WithNothingToSay_CarriesNoNoticeEither()
+    {
+        var (text, included) = InjectionRenderer.Render([], budgetChars: 4000, notice: "⚠ notice\n");
+
+        text.ShouldBeEmpty("the wrapper exists to label Wisdom, and there is none");
+        included.ShouldBeEmpty();
+    }
+
     private static InjectionEntry Entry(
         string text, WisdomKind kind = WisdomKind.Fact, bool isGlobal = true)
         => new(Guid.CreateVersion7(), Score: 1.0, kind, isGlobal, Confirmed, text);
