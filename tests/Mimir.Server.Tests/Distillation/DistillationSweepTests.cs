@@ -111,10 +111,11 @@ public sealed class DistillationSweepTests(ThrowawayDatabaseFixture fixture) : P
     {
         var options = Options.Create(new DistillationOptions());
         var sweep = new DistillationSweep(
-            Context, new ContestedSweep(Context, options, Clock), options, Clock);
+            Context,
+            new DistillationQueue(Context, Clock, options),
+            new ContestedSweep(Context, options, Clock),
+            options,
+            Clock);
         return await sweep.SweepAsync(Token);
     }
-
-    private async Task<Episode> EpisodeAsync(Guid id)
-        => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
 }

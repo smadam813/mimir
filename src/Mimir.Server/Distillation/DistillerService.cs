@@ -62,10 +62,11 @@ internal sealed class DistillerService(
         await using var scope = scopeFactory.CreateAsyncScope();
         try
         {
+            var queue = scope.ServiceProvider.GetRequiredService<DistillationQueue>();
             var run = scope.ServiceProvider.GetRequiredService<DistillationRun>();
             if (!_recovered)
             {
-                var abandoned = await run.RequeueAbandonedAsync(cancellationToken);
+                var abandoned = await queue.RequeueAbandonedAsync(cancellationToken);
                 if (abandoned > 0)
                 {
                     logger.LogInformation(
@@ -76,7 +77,7 @@ internal sealed class DistillerService(
             }
 
             var attempt = await run.RunNextAsync(cancellationToken);
-            var depth = await run.QueueDepthAsync(cancellationToken);
+            var depth = await queue.QueueDepthAsync(cancellationToken);
             switch (attempt)
             {
                 case null:

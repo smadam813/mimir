@@ -90,6 +90,8 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         var tile = await TileAsync(t => t.State == HealthTileState.Degraded);
 
         tile.Summary.ShouldContain("not JSON");
+        tile.QueueDepth.ShouldBe(
+            1, "the parked Episode is still owed, and the tile is the operator's signal that it is");
         (await EpisodeAsync(episode.Id)).Distillation.ShouldBe(
             DistillationState.Failed, "a failed Episode waits for the sweep, never a hot retry");
     }
@@ -127,6 +129,7 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         AddThrowawayStorage(services);
         // The worker's whole graph — with the scripted chat model and deterministic fake
         // embeddings in place of Ollama.
+        services.AddScoped<DistillationQueue>();
         services.AddScoped<DistillationRun>();
         services.AddScoped<EpisodeDistiller>();
         services.AddSingleton<MergeGate>();
@@ -167,7 +170,4 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
         return await seen.Task.WaitAsync(Patience, Token);
     }
-
-    private async Task<Episode> EpisodeAsync(Guid id)
-        => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
 }

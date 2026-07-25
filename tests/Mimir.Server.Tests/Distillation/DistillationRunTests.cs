@@ -156,43 +156,14 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         events.ShouldBe([first.Id, second.Id], ignoreOrder: true);
     }
 
-    [Fact]
-    public async Task QueueDepth_CountsSealedPendingAndRunningOnly()
-    {
-        var project = await AddProjectAsync("distiller");
-        await AddEpisodeAsync(project.Id, sealedAt: Now);
-        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
-        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
-        await AddEpisodeAsync(project.Id);
-
-        (await NewRun().QueueDepthAsync(Token)).ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task BootRecovery_RequeuesAnAbandonedRunningClaim()
-    {
-        var project = await AddProjectAsync("distiller");
-        var abandoned = await AddEpisodeAsync(
-            project.Id,
-            sealedAt: Now.AddHours(-3),
-            distillation: DistillationState.Running,
-            distillationStartedAt: Now.AddHours(-2));
-
-        (await NewRun().RequeueAbandonedAsync(Token)).ShouldBe(1);
-
-        var requeued = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == abandoned.Id, Token));
-        requeued.Distillation.ShouldBe(DistillationState.Pending);
-        requeued.DistillationStartedAt.ShouldBeNull();
-    }
-
     private DistillationRun NewRun(DistillationOptions? options = null)
     {
         var settings = options ?? new DistillationOptions();
         return new DistillationRun(
             Context,
+            new DistillationQueue(Context, Clock, Options.Create(settings)),
             new EpisodeDistiller(Chat, Options.Create(settings)),
             CreateMergeGate(distillation: settings),
-            Clock,
             NullLogger<DistillationRun>.Instance);
     }
 

@@ -50,6 +50,7 @@ public sealed class DistillationSweepServiceTests(ThrowawayDatabaseFixture fixtu
         var services = new ServiceCollection();
         AddThrowawayStorage(services);
         services.AddScoped<DistillationSweep>();
+        services.AddScoped<DistillationQueue>();
         services.AddScoped<ContestedSweep>();
         services.AddSingleton(Options.Create(new DistillationOptions()));
         services.AddSingleton<TimeProvider>(Clock);

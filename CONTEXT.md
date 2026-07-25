@@ -60,6 +60,10 @@ _Avoid_: imported memory, external memory
 Turning a Sealed Episode into Wisdom candidates, performed by the Distiller off any session hot path.
 _Avoid_: summarization, reflection, compression
 
+**Distillation Queue**:
+The Sealed Episodes owed distillation. The queue is state on the Episode row, not a broker: Sealing is what enqueues, a single worker claims oldest-Seal-first, and recovery is a boot re-queue of every claim a dead process left plus the sweep's reset of claims gone stale.
+_Avoid_: job queue, task queue, worker pool
+
 **Merge Gate**:
 The single write-time entry point to the Wisdom tier. A candidate either becomes new Wisdom, Reinforces a matching Wisdom (merged rewrite, prior text versioned), or triggers Adjudication when it disputes one. Every rewrite of a Wisdom's words goes through the gate, a curator's edit included — retiring and deleting do not, since they change a row's standing rather than its words.
 _Avoid_: dedup step, upsert
