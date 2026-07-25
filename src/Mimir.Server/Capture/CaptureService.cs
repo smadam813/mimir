@@ -119,8 +119,10 @@ internal sealed class CaptureService(
 
         // The WHERE guard is first-seal-wins made atomic: a duplicate that lost the race updates
         // zero rows instead of overwriting the session's real end.
-        // §6: Sealing sets distillation=pending. Creation already starts there (the §3 state set
-        // has no earlier value), so this restate matters only to readers of the spec and this code.
+        // §6: Sealing is what enqueues, and it sets distillation=pending to say so. Creation
+        // already starts there (the §3 state set has no earlier value), so this restate matters
+        // only to readers of the spec and this code — DistillationQueue names it as one of the
+        // two deliberate queue writes living outside it.
         var sealedRows = await db.Episodes
             .Where(e => e.Id == episode.Id && e.SealedAt == null)
             .ExecuteUpdateAsync(

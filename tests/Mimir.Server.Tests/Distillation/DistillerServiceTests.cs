@@ -127,6 +127,7 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         AddThrowawayStorage(services);
         // The worker's whole graph — with the scripted chat model and deterministic fake
         // embeddings in place of Ollama.
+        services.AddScoped<DistillationQueue>();
         services.AddScoped<DistillationRun>();
         services.AddScoped<EpisodeDistiller>();
         services.AddSingleton<MergeGate>();
@@ -167,7 +168,4 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
         return await seen.Task.WaitAsync(Patience, Token);
     }
-
-    private async Task<Episode> EpisodeAsync(Guid id)
-        => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
 }

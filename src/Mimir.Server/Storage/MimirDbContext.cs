@@ -72,7 +72,9 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             episode.HasIndex(e => e.SessionId).IsUnique();
             episode.HasIndex(e => e.ProjectId);
             // The §6 queue's working set: sealed Episodes still owed distillation. Done rows —
-            // the table's eventual bulk — stay out of the index.
+            // the table's eventual bulk — stay out of the index. Its consumer is
+            // DistillationQueue's claim and depth queries, which state this contract from the
+            // other side: a predicate change there means revisiting this filter.
             episode.HasIndex(e => e.Distillation)
                 .HasFilter("sealed_at IS NOT NULL AND distillation <> 'Done'");
             episode.HasOne<Project>().WithMany().HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Restrict);

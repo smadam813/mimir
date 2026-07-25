@@ -90,6 +90,14 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
+    /// One seeded Episode read back through a separate context — the assertion counterpart to
+    /// <see cref="AddEpisodeAsync"/>, and what every class asserting on Episode state was writing
+    /// for itself.
+    /// </summary>
+    private protected async Task<Episode> EpisodeAsync(Guid id)
+        => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
+
+    /// <summary>
     /// The real Merge Gate over the fixture's database and this class's fakes. Every harness-backed
     /// caller composes it here, so its six-dependency graph is a one-file edit; the one gate built
     /// by hand is <c>MergeGateGuardTests</c>, which needs a factory that never connects.

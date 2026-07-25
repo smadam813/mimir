@@ -59,6 +59,7 @@ internal sealed class DistillationModule : IMimirModule
         services.AddSingleton<IMergeArbiter, MergeArbiter>();
         services.AddScoped<ContestedSweep>();
         services.AddScoped<EpisodeDistiller>();
+        services.AddScoped<DistillationQueue>();
         services.AddScoped<DistillationRun>();
         services.AddScoped<DistillationSweep>();
         services.AddSingleton<IDistillationTrigger, DistillationTrigger>();

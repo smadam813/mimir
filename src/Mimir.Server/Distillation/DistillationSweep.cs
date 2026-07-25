@@ -14,15 +14,17 @@ internal sealed record SweepResult(int CrashSealed, int StaleReset, int Requeued
 }
 
 /// <summary>
-/// The §6 sweep: re-queues <c>failed</c>, resets <c>running</c> claims stale past
-/// <see cref="DistillationOptions.StaleRunningAfter"/>, and crash-Seals unsealed Episodes idle
-/// past <see cref="DistillationOptions.CrashSealIdleAfter"/> (§4, <c>seal_reason=crash-swept</c>).
-/// A <c>done</c> Episode is never touched — re-processing would push duplicate candidates through
-/// the Merge Gate and inflate Reinforcement. The §6.4 Contested clear rides along: this is the
-/// periodic pass the <see cref="ContestedSweep"/> always said the Distiller could fold it into.
+/// The §6 sweep: crash-Seals unsealed Episodes idle past
+/// <see cref="DistillationOptions.CrashSealIdleAfter"/> (§4, <c>seal_reason=crash-swept</c>), then
+/// asks the <see cref="DistillationQueue"/> for its two recovery legs — stale <c>running</c> claims
+/// reset and <c>failed</c> Episodes re-queued. A <c>done</c> Episode is never touched — re-processing
+/// would push duplicate candidates through the Merge Gate and inflate Reinforcement. The §6.4
+/// Contested clear rides along: this is the periodic pass the <see cref="ContestedSweep"/> always
+/// said the Distiller could fold it into.
 /// </summary>
 internal sealed class DistillationSweep(
     MimirDbContext db,
+    DistillationQueue queue,
     ContestedSweep contested,
     IOptions<DistillationOptions> options,
     TimeProvider clock)
@@ -32,7 +34,10 @@ internal sealed class DistillationSweep(
         var now = clock.GetUtcNow();
 
         // Idle means no Event lately — a session is its Event stream, so the last Event's arrival
-        // (or the Episode's start, before any arrive) is when it was last seen alive.
+        // (or the Episode's start, before any arrive) is when it was last seen alive. The pending
+        // restate below is one of the two deliberate queue writes outside DistillationQueue: the
+        // sealed_at IS NULL guard makes it a no-op (an unsealed row is already pending), and it
+        // rides along so this reads as the §6 enqueue it is.
         var idleCutoff = now - options.Value.CrashSealIdleAfter;
         var crashSealed = await db.Episodes
             .Where(e => e.SealedAt == null
@@ -46,25 +51,8 @@ internal sealed class DistillationSweep(
                     .SetProperty(e => e.Distillation, DistillationState.Pending),
                 cancellationToken);
 
-        // A Running claim without a start stamp cannot prove it is fresh; only the live worker's
-        // own claim (always stamped) is ever entitled to Running, so both go back to the queue.
-        var staleCutoff = now - options.Value.StaleRunningAfter;
-        var staleReset = await db.Episodes
-            .Where(e => e.Distillation == DistillationState.Running
-                && (e.DistillationStartedAt == null || e.DistillationStartedAt < staleCutoff))
-            .ExecuteUpdateAsync(
-                update => update
-                    .SetProperty(e => e.Distillation, DistillationState.Pending)
-                    .SetProperty(e => e.DistillationStartedAt, (DateTimeOffset?)null),
-                cancellationToken);
-
-        var requeued = await db.Episodes
-            .Where(e => e.Distillation == DistillationState.Failed)
-            .ExecuteUpdateAsync(
-                update => update
-                    .SetProperty(e => e.Distillation, DistillationState.Pending)
-                    .SetProperty(e => e.DistillationStartedAt, (DateTimeOffset?)null),
-                cancellationToken);
+        var staleReset = await queue.RequeueStaleAsync(cancellationToken);
+        var requeued = await queue.RequeueFailedAsync(cancellationToken);
 
         var contestedCleared = await contested.ClearExpiredAsync(cancellationToken);
         return new SweepResult(crashSealed, staleReset, requeued, contestedCleared);
