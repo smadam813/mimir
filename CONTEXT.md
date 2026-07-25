@@ -39,7 +39,7 @@ The links from a Wisdom back to the Episodes, Events, and Harvested Items it der
 _Avoid_: source, citation
 
 **Retire**:
-The reversible exclusion of a Wisdom from all recall and default search, keeping its versions and Provenance. Superseded Wisdom is Retired automatically; deletion is a separate, explicit, permanent act.
+The reversible exclusion of a Wisdom from all recall and default search, keeping its versions and Provenance. Superseded Wisdom is Retired automatically; deletion is a separate, explicit, permanent act. Retire changes standing, not words: a Retired Wisdom's text remains editable, and an edit never unretires it.
 _Avoid_: archive, soft delete, disable
 
 ### Pipeline
