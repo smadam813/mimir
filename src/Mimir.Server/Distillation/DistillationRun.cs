@@ -59,8 +59,9 @@ internal sealed class DistillationRun(
         {
             logger.LogWarning(ex, "Distilling Episode {EpisodeId} failed; the sweep will re-queue it", episode.Id);
             // State-guarded, and deliberately not a tracked write: the claim is queue state, and
-            // this must not fire on an Episode some other turn has moved on. Nothing of the
-            // failed batch is tracked here — the gate ran on its own context (§6).
+            // this must not fire on an Episode some other turn has moved on. The failed batch
+            // needs no cleanup here — it ran on a context of the gate's own making (§6), which
+            // is why this handler no longer clears the change tracker.
             await db.Episodes
                 .Where(e => e.Id == episode.Id && e.Distillation == DistillationState.Running)
                 .ExecuteUpdateAsync(
