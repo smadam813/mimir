@@ -64,15 +64,18 @@ internal sealed class BriefService(
             .ThenBy(e => e.WisdomId)
             .ToList();
 
+        // Measured before rendering: everything that grows with the corpus has happened by here,
+        // and the render is bounded by the budget it is about to be handed.
+        var notice = BriefTripwire.Fire(logger, clock.GetElapsedTime(started), candidates.Count);
         var (brief, included) = InjectionRenderer.Render(
-            entries,
-            options.Value.BriefBudgetChars,
-            // Measured before rendering: everything that grows with the corpus has happened by
-            // here, and the render is bounded by the budget it is about to be handed.
-            BriefTripwire.Fire(logger, clock.GetElapsedTime(started), candidates.Count));
+            entries, options.Value.BriefBudgetChars, notice);
         if (included.Count == 0)
         {
-            return "";
+            // §7: an empty decision leaves no trace, so no Injection row — but a tripwire line, if
+            // one fired, still goes out. Returning "" here would make a degraded compose look
+            // exactly like a healthy Brief with nothing to say, which is the confusion the
+            // tripwire exists to prevent.
+            return brief;
         }
 
         InjectionLog.Record(

@@ -102,11 +102,24 @@ public class InjectionRendererTests
     }
 
     [Fact]
-    public void Render_WithNothingToSay_CarriesNoNoticeEither()
+    public void Render_WithANoticeAndNoEntries_StillCarriesTheNotice()
     {
         var (text, included) = InjectionRenderer.Render([], budgetChars: 4000, notice: "⚠ notice\n");
 
-        text.ShouldBeEmpty("the wrapper exists to label Wisdom, and there is none");
+        // Injecting nothing is how a lane says "nothing to recall". A notice that vanished with
+        // the last entry would therefore be silent in exactly the case it was raised for.
+        text.ShouldContain("⚠ notice");
+        text.ShouldEndWith("</mimir-memory>");
+        included.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Render_WithANoticeTooLargeForTheBudget_StaysEmpty()
+    {
+        var (text, included) = InjectionRenderer.Render(
+            [], budgetChars: 60, notice: new string('!', 500) + "\n");
+
+        text.ShouldBeEmpty("§11 binds this lane whether or not it has Wisdom to spend it on");
         included.ShouldBeEmpty();
     }
 

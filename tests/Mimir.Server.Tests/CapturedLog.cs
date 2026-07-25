@@ -13,6 +13,11 @@ internal class CapturedLog : ILogger
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
+    /// <summary>
+    /// Enabled for every level, and filtered on the capture side instead: a service that guards a
+    /// log behind <c>IsEnabled</c> should still run that branch under test, exactly as it would
+    /// against a real provider.
+    /// </summary>
     public bool IsEnabled(LogLevel logLevel) => true;
 
     public void Log<TState>(

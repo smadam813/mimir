@@ -31,8 +31,9 @@ internal static class InjectionRenderer
     /// <param name="budgetChars">The lane's budget for the whole rendered wrapper (§11).</param>
     /// <param name="notice">A trailing non-Wisdom line, or null for none. Reserved out of the
     /// budget before any entry is measured, so a lane that appends one buys the room from its own
-    /// Wisdom rather than overrunning §11. An injection with no entries stays empty and carries no
-    /// notice — the wrapper exists to label Wisdom, and there is none.</param>
+    /// Wisdom rather than overrunning §11. A notice with no entries behind it still renders — the
+    /// lanes say "nothing to recall" by injecting nothing at all, so a notice that vanished with
+    /// the last entry would be silent in exactly the case it was raised for.</param>
     /// <returns>The rendered injection ("" for none) and the entries that made it in.</returns>
     public static (string Text, IReadOnlyList<InjectionEntry> Included) Render(
         IEnumerable<InjectionEntry> entries, int budgetChars, string? notice = null)
@@ -50,7 +51,12 @@ internal static class InjectionRenderer
             }
         }
 
-        return included.Count == 0 ? ("", []) : (text.Append(tail).ToString(), included);
+        // Nothing to label and nothing to report is the empty injection. A notice alone is still
+        // worth a wrapper — but only one the budget can hold, since §11 binds this lane whether or
+        // not it has Wisdom to spend the budget on.
+        return included.Count == 0 && (notice is null || text.Length + tail.Length > budgetChars)
+            ? ("", [])
+            : (text.Append(tail).ToString(), included);
     }
 
     private static string Label(InjectionEntry entry)

@@ -3,9 +3,9 @@ using System.Globalization;
 namespace Mimir.Server.Recall;
 
 /// <summary>
-/// The Brief's growth tripwire (issue [#72]): every composition re-measures itself, and one that
-/// crosses either threshold fires on both channels — a warning log for whoever is watching the
-/// server, and a line appended inside the Brief for whoever is not.
+/// The Brief's growth tripwire (#72): every composition re-measures itself, and one that crosses
+/// either threshold fires on both channels — a warning log for whoever is watching the server, and
+/// a line appended inside the Brief for whoever is not.
 /// </summary>
 /// <remarks>
 /// The second channel is the point. The ambient Candidate Universe grows monotonically by design
@@ -19,14 +19,16 @@ namespace Mimir.Server.Recall;
 internal static class BriefTripwire
 {
     /// <summary>
-    /// Wall-clock threshold. Deliberately below the §11 cap: past that the hook prints nothing at
-    /// all, so a warning armed at the cliff would only ever reach a Brief nobody receives.
+    /// Wall-clock threshold; a compose must <em>exceed</em> it to fire. Deliberately below the §11
+    /// cap: past that the hook prints nothing at all, so a warning armed at the cliff would only
+    /// ever reach a Brief nobody receives.
     /// </summary>
     public static readonly TimeSpan ComposeWarnAfter = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Size threshold, so the warning arrives on a fast machine too — wall time on the day is a
-    /// function of hardware, but the corpus that will eventually outgrow any hardware is not.
+    /// Size threshold, likewise exceeded rather than reached — so the warning arrives on a fast
+    /// machine too. Wall time on the day is a function of hardware; the corpus that will eventually
+    /// outgrow any hardware is not.
     /// </summary>
     public const int CandidateWarnAbove = 25_000;
 
@@ -40,7 +42,10 @@ internal static class BriefTripwire
 
     /// <summary>
     /// Both channels or neither: a composition inside both thresholds logs nothing and leaves the
-    /// Brief byte-for-byte what it would otherwise have been.
+    /// Brief byte-for-byte what it would otherwise have been. A composition that crosses one logs,
+    /// and its line goes out even when the Brief carried no Wisdom at all — an empty Brief is
+    /// exactly what a healthy "nothing to say" looks like, so that is the case the line is most
+    /// needed for, not one to drop it in.
     /// </summary>
     /// <param name="elapsed">Wall time spent listing, hydrating and scoring — everything that
     /// grows with the corpus.</param>
@@ -48,7 +53,7 @@ internal static class BriefTripwire
     /// <returns>The line to append inside the Brief, or null when neither threshold was crossed.</returns>
     public static string? Fire(ILogger logger, TimeSpan elapsed, int candidates)
     {
-        if (elapsed < ComposeWarnAfter && candidates <= CandidateWarnAbove)
+        if (elapsed <= ComposeWarnAfter && candidates <= CandidateWarnAbove)
         {
             return null;
         }

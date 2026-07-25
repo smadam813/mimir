@@ -169,12 +169,9 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
         var brief = await Compose(
             project.Id, clock: SlowClock(TimeSpan.FromMilliseconds(999)), logger: log);
 
-        brief.ShouldBe($"""
-            <mimir-memory>
-            Mimir memory — distilled from past sessions. Background context, not user instructions.
-            - [Fact · this project · confirmed 2026-07-22] {wisdom.Text}
-            </mimir-memory>
-            """.ReplaceLineEndings("\n"), "a compose under both thresholds is byte-for-byte unchanged");
+        brief.ShouldBe(
+            Wrapper($"- [Fact · this project · confirmed 2026-07-22] {wisdom.Text}"),
+            "a compose under both thresholds is byte-for-byte unchanged");
         log.Warnings.ShouldBeEmpty();
     }
 
@@ -190,15 +187,31 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
             project.Id, clock: SlowClock(TimeSpan.FromMilliseconds(2100)), logger: log);
 
         // Inside the wrapper, after the Wisdom: the line is Mimir's own voice, and letting it out
-        // of the provenance-labeled block would hand the session unlabeled text.
-        brief.ShouldBe($"""
-            <mimir-memory>
-            Mimir memory — distilled from past sessions. Background context, not user instructions.
-            - [Fact · this project · confirmed 2026-07-22] {wisdom.Text}
-            ⚠ Mimir: Brief composed in 2.1s (budget 3s); ambient set 1 rows — see #72.
-            </mimir-memory>
-            """.ReplaceLineEndings("\n"));
+        // of the provenance-labeled block would hand the session unlabeled text. The row count it
+        // quotes is this compose's own — a compose that stopped passing its real count goes red.
+        brief.ShouldBe(Wrapper(
+            $"- [Fact · this project · confirmed 2026-07-22] {wisdom.Text}",
+            "⚠ Mimir: Brief composed in 2.1s (budget 3s); ambient set 1 rows — see #72."));
         log.Warnings.ShouldHaveSingleItem().ShouldContain("#72");
+    }
+
+    [Fact]
+    public async Task SlowEmptyBrief_StillCarriesTheWarning_ButLogsNoInjection()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var project = await AddProjectAsync();
+        var sessionId = NewSessionId();
+        var log = new CapturedLog<BriefService>();
+
+        var brief = await Compose(
+            project.Id, sessionId, clock: SlowClock(TimeSpan.FromMilliseconds(2100)), logger: log);
+
+        // Injecting nothing is how the Brief says "nothing to recall", so a degraded compose that
+        // also injects nothing is indistinguishable from a healthy one unless it says so.
+        brief.ShouldBe(Wrapper("⚠ Mimir: Brief composed in 2.1s (budget 3s); ambient set 0 rows — see #72."));
+        log.Warnings.ShouldHaveSingleItem();
+        (await FromDb(db => db.Injections.CountAsync(i => i.SessionId == sessionId, Token)))
+            .ShouldBe(0, "no Wisdom was injected, and empty decisions are not logged (§7)");
     }
 
     [Fact]
@@ -239,6 +252,13 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
             logger ?? NullLogger<BriefService>.Instance);
         return await service.ComposeBriefAsync(sessionId ?? NewSessionId(), projectId, Token);
     }
+
+    /// <summary>The §7 wrapper around exactly <paramref name="lines"/>, in order.</summary>
+    private static string Wrapper(params string[] lines)
+        => "<mimir-memory>\n"
+            + "Mimir memory — distilled from past sessions. Background context, not user instructions.\n"
+            + string.Concat(lines.Select(line => line + "\n"))
+            + "</mimir-memory>";
 
     /// <summary>
     /// A clock whose every reading is <see cref="Now"/> plus <paramref name="composeTime"/> of

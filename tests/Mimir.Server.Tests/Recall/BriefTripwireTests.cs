@@ -15,7 +15,7 @@ public class BriefTripwireTests
     private static readonly TimeSpan Quick = TimeSpan.FromMilliseconds(10);
 
     [Fact]
-    public void InsideBothThresholds_FiresNeitherChannel()
+    public void Fire_InsideBothThresholds_FiresNeitherChannel()
     {
         var log = new CapturedLog();
 
@@ -25,30 +25,30 @@ public class BriefTripwireTests
     }
 
     [Fact]
-    public void AtTheWallClockThreshold_FiresBothChannels()
+    public void Fire_AtTheWallClockThreshold_FiresNeitherChannel()
     {
         var log = new CapturedLog();
 
-        var notice = BriefTripwire.Fire(log, BriefTripwire.ComposeWarnAfter, candidates: 12);
+        // §72 arms both legs on "exceeds", not "reaches" — the size leg below is the same shape.
+        BriefTripwire.Fire(log, BriefTripwire.ComposeWarnAfter, candidates: 12).ShouldBeNull();
+
+        log.Warnings.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Fire_OneTickPastTheWallClockThreshold_FiresBothChannels()
+    {
+        var log = new CapturedLog();
+
+        var notice = BriefTripwire.Fire(
+            log, BriefTripwire.ComposeWarnAfter + TimeSpan.FromMilliseconds(1), candidates: 12);
 
         notice.ShouldNotBeNull();
         log.Warnings.ShouldHaveSingleItem();
     }
 
     [Fact]
-    public void JustUnderTheWallClockThreshold_FiresNeitherChannel()
-    {
-        var log = new CapturedLog();
-
-        BriefTripwire.Fire(
-            log, BriefTripwire.ComposeWarnAfter - TimeSpan.FromMilliseconds(1), candidates: 12)
-            .ShouldBeNull();
-
-        log.Warnings.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void OneRowPastTheSizeThreshold_FiresBothChannels_EvenWhenTheComposeWasInstant()
+    public void Fire_OneRowPastTheSizeThreshold_FiresBothChannels_EvenWhenTheComposeWasInstant()
     {
         var log = new CapturedLog();
 
@@ -62,7 +62,7 @@ public class BriefTripwireTests
     }
 
     [Fact]
-    public void TheNoticeIsOneLine_NamingTheSeconds_TheRowCount_AndTheIssue()
+    public void Fire_TheNoticeIsOneLine_NamingTheSeconds_TheRowCount_AndTheIssue()
     {
         var notice = BriefTripwire.Fire(
             new CapturedLog(), TimeSpan.FromMilliseconds(2149), candidates: 48_102);
@@ -72,7 +72,7 @@ public class BriefTripwireTests
     }
 
     [Fact]
-    public void TheWarningLog_NamesTheSameFactsAsTheNotice()
+    public void Fire_TheWarningLog_NamesTheSameFactsAsTheNotice()
     {
         var log = new CapturedLog();
 
