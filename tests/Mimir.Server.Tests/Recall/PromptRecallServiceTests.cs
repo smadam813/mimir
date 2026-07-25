@@ -145,7 +145,9 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
         // against, so an override here reaches the whole path rather than half of it.
         var recall = options ?? new RecallOptions();
         var service = new PromptRecallService(
-            Context, CreateQueryRanking(recall: recall), Options.Create(recall), Clock);
+            CreateQueryRanking(recall: recall),
+            new InjectionLog(Context, Clock),
+            Options.Create(recall));
         return await service.ComposeInjectionAsync(
             sessionId ?? NewSessionId(), projectId, Prompt, Token);
     }

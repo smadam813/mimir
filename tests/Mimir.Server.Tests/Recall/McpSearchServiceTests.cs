@@ -152,7 +152,7 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
         text.ShouldBe($"No Wisdom or Episode matches for \"{Query}\".");
         (await FromDb(db => db.Injections.CountAsync(Token)))
-            .ShouldBe(0, "an empty answer leaves no Injection row (§7)");
+            .ShouldBe(0, "the lane's own 'nothing matched' wording recalled nothing to log (§7)");
     }
 
     [Fact]
@@ -186,11 +186,10 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         Project requester, Overrides overrides, SearchOptions? searchOptions = null)
     {
         var service = new McpSearchService(
-            Context,
             CreateQueryRanking(searchOptions),
             new EventSearch(Context),
             new McpProjects(Context),
-            Clock);
+            new InjectionLog(Context, Clock));
         return await service.SearchAsync(
             new McpSearchRequest
             {

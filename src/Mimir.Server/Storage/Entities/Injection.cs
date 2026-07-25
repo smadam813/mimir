@@ -16,6 +16,10 @@ public sealed class Injection
     /// </summary>
     public required string SessionId { get; set; }
 
+    /// <summary>
+    /// The Project the lane recorded this row against. What that means is not one thing across the
+    /// three lanes; <see cref="Recall.InjectionContext"/> states which each of them passes.
+    /// </summary>
     public Guid ProjectId { get; set; }
 
     public DateTimeOffset At { get; set; }

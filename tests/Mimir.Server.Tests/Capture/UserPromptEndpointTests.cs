@@ -75,7 +75,9 @@ public sealed class UserPromptEndpointTests(ThrowawayDatabaseFixture fixture) : 
             Clock,
             new EpisodeFeed());
         var promptRecall = new PromptRecallService(
-            Context, CreateQueryRanking(recall: recall), Options.Create(recall), Clock);
+            CreateQueryRanking(recall: recall),
+            new InjectionLog(Context, Clock),
+            Options.Create(recall));
         return await CaptureEndpoints.UserPromptAsync(
             request, capture, promptRecall, NullLoggerFactory.Instance, Token);
     }
