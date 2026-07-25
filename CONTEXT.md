@@ -79,7 +79,7 @@ _Avoid_: write, insert, upsert
 ### Recall
 
 **Brief**:
-The compact, project-aware Wisdom injection delivered at session start.
+The compact, project-aware Wisdom injection delivered at session start. When composition nears its time budget, the Brief carries a single self-reporting warning line — the only non-Wisdom content any recall surface volunteers.
 _Avoid_: context dump, preamble
 
 **Recall**:
