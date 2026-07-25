@@ -211,8 +211,9 @@ internal sealed class WisdomBrowser(
     /// The §8.1 edit, handed to the Merge Gate: the new text becomes current — re-embedded,
     /// appended to the chain as a <c>cause=edited</c> WisdomVersion — while Reinforcement and
     /// recency stay put, since an edit rewords and only the gate's Admissions confirm (§6). An
-    /// unchanged text is a no-op. The edit can wait behind an in-flight Admission batch, the
-    /// same acceptance <c>mimir_remember</c> makes.
+    /// unchanged text is a no-op; a Retired one is not, since Retire changes a row's standing and
+    /// not its words — see the gate for the full set. The edit can wait behind an in-flight
+    /// Admission batch, the same acceptance <c>mimir_remember</c> makes.
     /// </summary>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
         => await gate.EditAsync(wisdomId, text, cancellationToken);
