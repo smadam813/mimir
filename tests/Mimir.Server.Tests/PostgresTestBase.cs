@@ -107,12 +107,17 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
     /// the four consumers that replay a query through it all want the same graph.
     /// </summary>
-    private protected QueryRanking CreateQueryRanking(SearchOptions? search = null)
+    private protected QueryRanking CreateQueryRanking(
+        SearchOptions? search = null, RecallOptions? recall = null)
         => new(
             Context,
             Embeddings,
             new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
-            Options.Create(new RecallOptions()),
+            // Takes its own RecallOptions rather than always the defaults: the ranking reads the
+            // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
+            // overrides one for the service under test has to be able to hand the same instance
+            // here — otherwise the test pins a value the ranked rows were never scored with.
+            Options.Create(recall ?? new RecallOptions()),
             Clock);
 
     /// <summary>
@@ -182,7 +187,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         EventType type = EventType.UserPromptSubmit,
         DateTimeOffset? at = null,
         string? payload = null,
-        bool? salient = null)
+        bool salient = false)
     {
         var body = payload ?? """{"prompt":"remember this"}""";
         var evt = new Event
@@ -194,7 +199,10 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             At = at ?? Now,
             Payload = body,
             PayloadFullSize = body.Length,
-            Salient = salient ?? type == EventType.Remember,
+            // Taken from the caller, never derived from the type: deriving it would restate
+            // CaptureService's salience rule in shared test infrastructure, and the day that rule
+            // changes every seeded row here would go on asserting the old one.
+            Salient = salient,
         };
         Context.Events.Add(evt);
         await Context.SaveChangesAsync(Token);
@@ -280,6 +288,69 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     }
 
     /// <summary>
+    /// A Wisdom sourced from <paramref name="projectId"/>'s auto-memory and nothing else — the
+    /// shape §7's native-content exclusion turns on, and the one provenance helper two suites
+    /// wrote identically.
+    /// </summary>
+    private protected async Task<Provenance> AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
+    {
+        var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
+        return await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
+    }
+
+    /// <summary>
+    /// One logged injection (§3). <paramref name="items"/> are the injected Wisdom and the scores
+    /// that ordered them, in rank order.
+    /// </summary>
+    private protected async Task<Injection> AddInjectionAsync(
+        Guid projectId,
+        string sessionId = "sess-injection",
+        InjectionLane lane = InjectionLane.Prompt,
+        string? queryContext = "a prompt",
+        DateTimeOffset? at = null,
+        int chars = 240,
+        IReadOnlyList<(Guid WisdomId, double Score)>? items = null)
+    {
+        var injection = new Injection
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = sessionId,
+            ProjectId = projectId,
+            At = at ?? Now,
+            Lane = lane,
+            QueryContext = queryContext,
+            Chars = chars,
+            Items = [.. (items ?? []).Select(
+                i => new InjectionItem { WisdomId = i.WisdomId, Score = i.Score })],
+        };
+        Context.Injections.Add(injection);
+        await Context.SaveChangesAsync(Token);
+        return injection;
+    }
+
+    /// <summary>One golden-set regression case (§9); hand-inserted unless a promotion is named.</summary>
+    private protected async Task<GoldenCase> AddGoldenCaseAsync(
+        Guid projectId,
+        Guid expectedWisdomId,
+        string queryContext = "a prompt",
+        Guid? createdFromInjectionId = null,
+        string note = "test case")
+    {
+        var goldenCase = new GoldenCase
+        {
+            Id = Guid.CreateVersion7(),
+            QueryContext = queryContext,
+            ProjectId = projectId,
+            ExpectedWisdomId = expectedWisdomId,
+            CreatedFromInjectionId = createdFromInjectionId,
+            Note = note,
+        };
+        Context.GoldenCases.Add(goldenCase);
+        await Context.SaveChangesAsync(Token);
+        return goldenCase;
+    }
+
+    /// <summary>
     /// Empties the database before each test. A derived override runs its own setup around
     /// <c>base.InitializeAsync()</c>.
     /// </summary>
@@ -287,7 +358,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     {
         SkipIfUnavailable();
         await using var context = fixture.CreateContext();
-        await ResetAsync(context);
+        await ResetAsync(context, fixture.GlobalSeed);
     }
 
     public virtual async ValueTask DisposeAsync()
@@ -300,17 +371,20 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
 
     /// <summary>
     /// Truncates every mapped table — CASCADE, so it reaches unmapped tables referencing one — and
-    /// puts the §3 Global pseudo-project back, carried over rather than fabricated: the migration's
-    /// <c>HasData</c> is what first put that row there, so a harness re-inserting a hand-built copy
-    /// would keep passing after the seed was dropped from the model. The table list comes from the
-    /// EF model rather than a hand-list, so a later entity is emptied the day it is mapped.
+    /// puts the §3 Global pseudo-project back from <see cref="ThrowawayDatabaseFixture.GlobalSeed"/>:
+    /// the pristine row, read once before any test ran, rather than whatever the outgoing test left
+    /// in that row. Restoring what was just read would carry a rename or an appended RootPath into
+    /// every later test in the class — the one row that could still reintroduce #20/#22 ordering.
+    /// It stays migration-sourced, so dropping the <c>HasData</c> seed leaves nothing to restore and
+    /// the harness's own pin fails, which a hand-built copy here would hide. A fresh instance each
+    /// time: re-adding the snapshot itself would hand every reset the same tracked object.
+    ///
+    /// The table list comes from the EF model rather than a hand-list, so a later entity is emptied
+    /// the day it is mapped — but by the same token a second <c>HasData</c> seed, in any table,
+    /// gets truncated and is not restored here. Adding one means extending this.
     /// </summary>
-    private static async Task ResetAsync(MimirDbContext context)
+    private static async Task ResetAsync(MimirDbContext context, Project? globalSeed)
     {
-        var global = await context.Projects
-            .AsNoTracking()
-            .SingleOrDefaultAsync(project => project.Id == Project.GlobalId, Token);
-
         var tables = context.Model.GetEntityTypes()
             .Select(entity => entity.GetTableName())
             .OfType<string>()
@@ -322,9 +396,15 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         var truncate = $"TRUNCATE TABLE {string.Join(", ", tables)} CASCADE";
         await context.Database.ExecuteSqlRawAsync(truncate, Token);
 
-        if (global is not null)
+        if (globalSeed is not null)
         {
-            context.Projects.Add(global);
+            context.Projects.Add(new Project
+            {
+                Id = globalSeed.Id,
+                Identity = globalSeed.Identity,
+                RootPaths = [.. globalSeed.RootPaths],
+                DisplayName = globalSeed.DisplayName,
+            });
             await context.SaveChangesAsync(Token);
         }
     }

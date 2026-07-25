@@ -34,8 +34,9 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     public override async ValueTask InitializeAsync()
     {
-        _root = Directory.CreateTempSubdirectory("mimir-harvester-").FullName;
+        // Base first — see HarvestScannerTests: a temp root created before the skip outlives it.
         await base.InitializeAsync();
+        _root = Directory.CreateTempSubdirectory("mimir-harvester-").FullName;
     }
 
     public override async ValueTask DisposeAsync()

@@ -10,6 +10,12 @@ namespace Mimir.Server.Tests.Storage;
 /// pinned against a real one. The scratch tables each test creates need no cleanup: the harness's
 /// database is thrown away with the class, which is also why these CREATEs no longer land in the
 /// development database.
+///
+/// They are the one thing the per-test reset does not reach — it truncates the EF-mapped tables,
+/// and these are unmapped with no FK for CASCADE to follow — so a test here sees its siblings'
+/// tables still standing. Harmless for what these assert, each naming its own table; an assertion
+/// counting the catalog, or claiming a table is the only one, would be order-dependent and belongs
+/// nowhere in this class.
 /// </summary>
 public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {

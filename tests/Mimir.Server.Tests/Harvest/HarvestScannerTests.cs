@@ -22,8 +22,11 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
 
     public override async ValueTask InitializeAsync()
     {
-        _root = Directory.CreateTempSubdirectory("mimir-harvest-").FullName;
+        // Base first: its no-Postgres skip throws out of InitializeAsync, and xUnit runs no
+        // DisposeAsync after that — a directory created above this line is never cleaned up, once
+        // per test per run, because the class is built per test.
         await base.InitializeAsync();
+        _root = Directory.CreateTempSubdirectory("mimir-harvest-").FullName;
     }
 
     public override async ValueTask DisposeAsync()

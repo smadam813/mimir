@@ -17,10 +17,10 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        var early = await SeedInjectionAsync(
+        var early = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now.AddMinutes(-10),
             items: [(wisdom.Id, 0.02)]);
-        var late = await SeedInjectionAsync(
+        var late = await AddInjectionAsync(
             project.Id, "sess-b", InjectionLane.Prompt, "how do I deploy?", Now,
             items: [(wisdom.Id, 0.03)]);
 
@@ -42,7 +42,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var (project, other) = (await AddProjectAsync("injection"), await AddProjectAsync("injection"));
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        await SeedInjectionAsync(
+        await AddInjectionAsync(
             other.Id, "sess-other", InjectionLane.Prompt, "elsewhere", Now,
             items: [(wisdom.Id, 0.03)]);
 
@@ -57,7 +57,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var first = await AddWisdomAsync(project.Id, "the stronger match");
         var second = await AddWisdomAsync(project.Id, "the weaker match");
-        await SeedInjectionAsync(
+        await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(first.Id, 0.03), (second.Id, 0.02)]);
 
@@ -76,7 +76,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        await SeedInjectionAsync(
+        await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
         await Context.Wisdom.Where(w => w.Id == wisdom.Id).ExecuteDeleteAsync(Token);
@@ -94,7 +94,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
 
@@ -120,13 +120,14 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var items = new[] { (wisdom.Id, 0.03) };
-        var useful1 = await SeedInjectionAsync(
-            project.Id, "sess-a", InjectionLane.Prompt, "p1", Now, items);
-        var useful2 = await SeedInjectionAsync(
-            project.Id, "sess-a", InjectionLane.Prompt, "p2", Now, items);
-        var noise = await SeedInjectionAsync(
-            project.Id, "sess-a", InjectionLane.Prompt, "p3", Now, items);
-        await SeedInjectionAsync(project.Id, "sess-a", InjectionLane.Brief, null, Now, items);
+        var useful1 = await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "p1", Now, items: items);
+        var useful2 = await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "p2", Now, items: items);
+        var noise = await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "p3", Now, items: items);
+        await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Brief, null, Now, items: items);
 
         await Browser().MarkAsync(useful1.Id, InjectionVerdict.Useful, Token);
         await Browser().MarkAsync(useful2.Id, InjectionVerdict.Useful, Token);
@@ -156,7 +157,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var top = await AddWisdomAsync(project.Id, "the top match");
         var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "how do I deploy?", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
 
@@ -181,7 +182,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var top = await AddWisdomAsync(project.Id, "the top match");
         var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
         await Context.Wisdom.Where(w => w.Id == top.Id).ExecuteDeleteAsync(Token);
@@ -199,7 +200,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var top = await AddWisdomAsync(project.Id, "the top match");
         var runnerUp = await AddWisdomAsync(project.Id, "the runner-up");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(top.Id, 0.03), (runnerUp.Id, 0.02)]);
         await RetireAsync(top.Id);
@@ -217,7 +218,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("injection");
         var retired = await AddWisdomAsync(project.Id, "soon retired");
         var deleted = await AddWisdomAsync(project.Id, "soon deleted");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(retired.Id, 0.03), (deleted.Id, 0.02)]);
         await RetireAsync(retired.Id);
@@ -238,26 +239,16 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        var oldest = await SeedInjectionAsync(
+        var oldest = await AddInjectionAsync(
             project.Id, "sess-old", InjectionLane.Prompt, "the cut entry", Now.AddMinutes(-1),
             items: [(wisdom.Id, 0.03)]);
         await Browser().MarkAsync(oldest.Id, InjectionVerdict.Useful, Token);
         for (var i = 0; i < InjectionBrowser.RecentEntryLimit; i++)
         {
-            Context.Injections.Add(new Injection
-            {
-                Id = Guid.CreateVersion7(),
-                SessionId = "sess-a",
-                ProjectId = project.Id,
-                At = Now,
-                Lane = InjectionLane.Prompt,
-                QueryContext = $"prompt {i}",
-                Chars = 240,
-                Items = [new InjectionItem { WisdomId = wisdom.Id, Score = 0.03 }],
-            });
+            await AddInjectionAsync(
+                project.Id, "sess-a", InjectionLane.Prompt, $"prompt {i}", Now,
+                items: [(wisdom.Id, 0.03)]);
         }
-
-        await Context.SaveChangesAsync(Token);
 
         var view = await Browser().ListAsync(project.Id, Token);
 
@@ -275,7 +266,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now,
             items: [(wisdom.Id, 0.03)]);
 
@@ -290,7 +281,7 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     {
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
-        var injection = await SeedInjectionAsync(
+        var injection = await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
 
@@ -302,30 +293,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     private InjectionBrowser Browser() => new(Contexts, Clock);
-
-    private async Task<Injection> SeedInjectionAsync(
-        Guid projectId,
-        string sessionId,
-        InjectionLane lane,
-        string? queryContext,
-        DateTimeOffset at,
-        IReadOnlyList<(Guid WisdomId, double Score)> items)
-    {
-        var injection = new Injection
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = sessionId,
-            ProjectId = projectId,
-            At = at,
-            Lane = lane,
-            QueryContext = queryContext,
-            Chars = 240,
-            Items = items.Select(i => new InjectionItem { WisdomId = i.WisdomId, Score = i.Score }).ToList(),
-        };
-        Context.Injections.Add(injection);
-        await Context.SaveChangesAsync(Token);
-        return injection;
-    }
 
     private async Task RetireAsync(Guid wisdomId)
         => await Context.Wisdom.Where(w => w.Id == wisdomId)

@@ -21,6 +21,14 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         => await SeedOneOfEverythingAsync();
 
     [Fact]
+    public async Task AMutatedGlobalRow_DoesNotOutliveItsTest_First()
+        => await AssertGlobalIsPristineThenMutateItAsync();
+
+    [Fact]
+    public async Task AMutatedGlobalRow_DoesNotOutliveItsTest_Second()
+        => await AssertGlobalIsPristineThenMutateItAsync();
+
+    [Fact]
     public async Task AfterTheReset_TheGlobalPseudoProjectIsTheOnlyProject()
     {
         var projects = await FromDb(db => db.Projects.ToListAsync(Token));
@@ -30,6 +38,23 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         global.Identity.ShouldBe(Project.GlobalIdentity);
         global.DisplayName.ShouldBe("Global");
         global.RootPaths.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The second pollution pair, for the one row the reset restores rather than deletes. Global is
+    /// the single survivor of the truncate, so it is the single way a test's writes could still
+    /// reach the next one: assert it pristine, then rename it and hand it a root — exactly what a
+    /// resolver or merger path would do to a Project — and let the sibling assert first.
+    /// </summary>
+    private async Task AssertGlobalIsPristineThenMutateItAsync()
+    {
+        var global = await Context.Projects.SingleAsync(p => p.Id == Project.GlobalId, Token);
+        global.DisplayName.ShouldBe("Global", "a sibling's rename must not have survived its test");
+        global.RootPaths.ShouldBeEmpty("nor a sibling's appended root");
+
+        global.DisplayName = "renamed by a test";
+        global.RootPaths = [@"C:\git\somewhere"];
+        await Context.SaveChangesAsync(Token);
     }
 
     /// <summary>
@@ -45,28 +70,13 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         var item = await AddHarvestedItemAsync(project.Id);
         var wisdom = await AddWisdomAsync(project.Id, "the only Wisdom in the database");
         await AddProvenanceAsync(wisdom.Id, episode.Id, evt.Id, item.Id);
-        var injection = new Injection
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = episode.SessionId,
-            ProjectId = project.Id,
-            At = Now,
-            Lane = InjectionLane.Prompt,
-            QueryContext = "a prompt",
-            Chars = 240,
-            Items = [new InjectionItem { WisdomId = wisdom.Id, Score = 0.03 }],
-        };
-        Context.Injections.Add(injection);
-        Context.GoldenCases.Add(new GoldenCase
-        {
-            Id = Guid.CreateVersion7(),
-            QueryContext = "a prompt",
-            ProjectId = project.Id,
-            ExpectedWisdomId = wisdom.Id,
-            CreatedFromInjectionId = injection.Id,
-            Note = "the only case in the database",
-        });
-        await Context.SaveChangesAsync(Token);
+        var injection = await AddInjectionAsync(
+            project.Id, episode.SessionId, items: [(wisdom.Id, 0.03)]);
+        await AddGoldenCaseAsync(
+            project.Id,
+            wisdom.Id,
+            createdFromInjectionId: injection.Id,
+            note: "the only case in the database");
 
         (await FromDb(db => db.Projects.CountAsync(Token)))
             .ShouldBe(2, "this test's Project and the Global pseudo-project, and nothing else");

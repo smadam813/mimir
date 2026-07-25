@@ -97,7 +97,8 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
         var remembered = await AddWisdomAsync(Project.GlobalId, "unrelated filler two", cosine: 0.90);
         var episode = await AddEpisodeAsync(project.Id);
         var evt = await AddEventAsync(
-            episode.Id, seq: 1, EventType.Remember, payload: """{"content":"remember this"}""");
+            episode.Id, seq: 1, EventType.Remember,
+            payload: """{"content":"remember this"}""", salient: true);
         await AddProvenanceAsync(remembered.Id, episode.Id, evt.Id);
 
         var ranked = await RankEverythingAsync(project.Id);

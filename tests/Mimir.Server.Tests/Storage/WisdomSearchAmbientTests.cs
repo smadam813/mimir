@@ -75,12 +75,6 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
     private WisdomSearch Search(int perLegTopN = 50)
         => new(Context, Options.Create(new SearchOptions { PerLegTopN = perLegTopN }));
 
-    private async Task AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
-    {
-        var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
-        await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
-    }
-
     private async Task<Guid> AddEventProvenanceAsync(Guid wisdomId, Guid projectId)
     {
         var episode = await AddEpisodeAsync(projectId);

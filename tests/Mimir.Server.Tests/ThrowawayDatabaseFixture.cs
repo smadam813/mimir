@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Mimir.Server.Storage;
+using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests;
 
@@ -23,6 +24,16 @@ public sealed class ThrowawayDatabaseFixture : IAsyncLifetime
     /// <summary>Connection string to the migrated throwaway database.</summary>
     public string ConnectionString { get; private set; } = "";
 
+    /// <summary>
+    /// The §3 Global pseudo-project exactly as the migration's <c>HasData</c> left it, read once
+    /// before any test could touch it. The per-test reset truncates it away with everything else
+    /// and restores a copy of this; reading it fresh each time would instead carry a test's
+    /// mutation of that row into every later test in the class. Still migration-sourced, so
+    /// dropping the seed leaves this null and the harness's own pin goes red rather than passing
+    /// against a hand-built stand-in.
+    /// </summary>
+    public Project? GlobalSeed { get; private set; }
+
     /// <summary>A context on the throwaway database. Callers dispose it.</summary>
     public MimirDbContext CreateContext()
         => new(new DbContextOptionsBuilder<MimirDbContext>()
@@ -42,6 +53,10 @@ public sealed class ThrowawayDatabaseFixture : IAsyncLifetime
 
             await using var context = CreateContext();
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            GlobalSeed = await context.Projects
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    project => project.Id == Project.GlobalId, TestContext.Current.CancellationToken);
         }
         catch (Exception ex)
         {

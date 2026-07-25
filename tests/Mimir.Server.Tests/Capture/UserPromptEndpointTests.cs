@@ -67,14 +67,15 @@ public sealed class UserPromptEndpointTests(ThrowawayDatabaseFixture fixture) : 
 
     private async Task<UserPromptReply> InvokeAsync(HookEventRequest request)
     {
-        var recallOptions = Options.Create(new RecallOptions());
+        var recall = new RecallOptions();
         var capture = new CaptureService(
             Context,
             new ProjectResolver(Context),
             Options.Create(new CaptureOptions()),
             Clock,
             new EpisodeFeed());
-        var promptRecall = new PromptRecallService(Context, CreateQueryRanking(), recallOptions, Clock);
+        var promptRecall = new PromptRecallService(
+            Context, CreateQueryRanking(recall: recall), Options.Create(recall), Clock);
         return await CaptureEndpoints.UserPromptAsync(
             request, capture, promptRecall, NullLoggerFactory.Instance, Token);
     }

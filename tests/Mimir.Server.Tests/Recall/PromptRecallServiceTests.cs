@@ -141,8 +141,11 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
     private async Task<string> ComposeAsync(
         Guid projectId, string? sessionId = null, RecallOptions? options = null)
     {
-        var recallOptions = Options.Create(options ?? new RecallOptions());
-        var service = new PromptRecallService(Context, CreateQueryRanking(), recallOptions, Clock);
+        // One RecallOptions for both: the ranking scores with the same knobs the service budgets
+        // against, so an override here reaches the whole path rather than half of it.
+        var recall = options ?? new RecallOptions();
+        var service = new PromptRecallService(
+            Context, CreateQueryRanking(recall: recall), Options.Create(recall), Clock);
         return await service.ComposeInjectionAsync(
             sessionId ?? NewSessionId(), projectId, Prompt, Token);
     }

@@ -141,18 +141,6 @@ public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : Postgr
         return await runner.RunAsync(Token);
     }
 
-    private async Task<GoldenCase> AddCaseAsync(Guid projectId, Guid expectedWisdomId)
-    {
-        var goldenCase = new GoldenCase
-        {
-            Id = Guid.CreateVersion7(),
-            QueryContext = Query,
-            ProjectId = projectId,
-            ExpectedWisdomId = expectedWisdomId,
-            Note = "test case",
-        };
-        Context.GoldenCases.Add(goldenCase);
-        await Context.SaveChangesAsync(Token);
-        return goldenCase;
-    }
+    private Task<GoldenCase> AddCaseAsync(Guid projectId, Guid expectedWisdomId)
+        => AddGoldenCaseAsync(projectId, expectedWisdomId, Query);
 }

@@ -30,6 +30,9 @@ public sealed class HarvestConverterTests(ThrowawayDatabaseFixture fixture) : Po
         (await FromDb(db => db.HarvestedItems.CountAsync(i => i.ConvertedAt == null, Token))).ShouldBe(0);
 
         (await Converter().ConvertPendingAsync(Token)).ShouldBe(0);
+        // The count first: the return value above counts conversions, not rows, so a second pass
+        // that *removed* Wisdom would still report zero — and ShouldAllBe passes over an empty set.
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(2);
         (await FromDb(db => db.Wisdom.ToListAsync(Token)))
             .ShouldAllBe(w => w.ScopeProjectId == project.Id && w.Reinforcement == 1);
     }

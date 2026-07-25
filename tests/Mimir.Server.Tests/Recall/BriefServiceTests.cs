@@ -240,12 +240,6 @@ public sealed class BriefServiceTests(ThrowawayDatabaseFixture fixture) : Postgr
 
     private static string NewSessionId() => $"sess-{Guid.NewGuid():N}";
 
-    private async Task AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
-    {
-        var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
-        await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
-    }
-
     private async Task AddEventProvenanceAsync(Guid wisdomId, Guid projectId, bool salient)
     {
         var episode = await AddEpisodeAsync(projectId);
@@ -253,7 +247,8 @@ public sealed class BriefServiceTests(ThrowawayDatabaseFixture fixture) : Postgr
             episode.Id,
             seq: 1,
             salient ? EventType.Remember : EventType.UserPromptSubmit,
-            payload: """{"content":"remember this"}""");
+            payload: """{"content":"remember this"}""",
+            salient: salient);
         await AddProvenanceAsync(wisdomId, episode.Id, evt.Id);
     }
 }
