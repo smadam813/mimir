@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
-using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Recall;
@@ -9,14 +8,14 @@ namespace Mimir.Server.Recall;
 /// The Prompt lane (§7): relevant prompts pull Wisdom mid-session; most prompts inject nothing.
 /// The prompt query-ranks the ambient candidate universe — the same §7 universe and native-content
 /// exclusion as the Brief — and the gate opens only when the best eligible match reaches the
-/// cosine threshold (a cosine, never a fused score, per §3). Every actual injection logs an
-/// Injection row carrying the prompt as <c>query_context</c>; an empty decision leaves no trace.
+/// cosine threshold (a cosine, never a fused score, per §3). Rendering and the §7 recording rules
+/// belong to <see cref="InjectionLog"/>; this lane decides what to hand it, carrying the prompt as
+/// <c>query_context</c> and the session's Project.
 /// </summary>
 internal sealed class PromptRecallService(
-    MimirDbContext db,
     QueryRanking ranking,
-    IOptions<RecallOptions> options,
-    TimeProvider clock)
+    InjectionLog injections,
+    IOptions<RecallOptions> options)
 {
     public async Task<string> ComposeInjectionAsync(
         string sessionId, Guid projectId, string prompt, CancellationToken cancellationToken)
@@ -34,17 +33,13 @@ internal sealed class PromptRecallService(
             return "";
         }
 
-        var (injection, included) = InjectionRenderer.Render(
-            ranked.Select(r => r.ToInjectionEntry()), options.Value.PromptBudgetChars);
-        if (included.Count == 0)
-        {
-            return "";
-        }
-
-        InjectionLog.Record(
-            db, sessionId, projectId, clock.GetUtcNow(),
-            InjectionLane.Prompt, prompt, injection, included);
-        await db.SaveChangesAsync(cancellationToken);
-        return injection;
+        // This lane raises no notice, so nothing renders once the entries stop fitting: "" out is
+        // the same empty injection an unopened gate returns.
+        return await injections.RenderAndRecordAsync(
+            new InjectionContext(InjectionLane.Prompt, sessionId, projectId, prompt),
+            ranked.Select(r => r.ToInjectionEntry()),
+            options.Value.PromptBudgetChars,
+            notice: null,
+            cancellationToken);
     }
 }

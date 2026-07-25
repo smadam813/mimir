@@ -11,14 +11,15 @@ namespace Mimir.Server.Recall;
 /// query exists yet, so rank is <c>brief_score</c> over the ambient Candidate Universe — the
 /// session's Project plus Global, non-Retired, minus Wisdom the built-in already loads natively.
 /// Storage owns that universe (<see cref="WisdomSearch.ListAmbientAsync"/>) for every lane, so
-/// this one lists its ids and hydrates them, exactly as the query lanes do. Every actual injection
-/// logs an Injection row; an empty decision leaves no trace (§7). Nothing in that chain is bounded
-/// by anything but the corpus, which is why every composition measures itself against
-/// <see cref="BriefTripwire"/>.
+/// this one lists its ids and hydrates them, exactly as the query lanes do. Rendering and the §7
+/// recording rules belong to <see cref="InjectionLog"/>; this lane decides what to hand it and
+/// records the session's Project. Nothing in that chain is bounded by anything but the corpus,
+/// which is why every composition measures itself against <see cref="BriefTripwire"/>.
 /// </summary>
 internal sealed class BriefService(
     MimirDbContext db,
     WisdomSearch search,
+    InjectionLog injections,
     IOptions<RecallOptions> options,
     TimeProvider clock,
     ILogger<BriefService> logger)
@@ -67,21 +68,16 @@ internal sealed class BriefService(
         // Measured before rendering: everything that grows with the corpus has happened by here,
         // and the render is bounded by the budget it is about to be handed.
         var notice = BriefTripwire.Fire(logger, clock.GetElapsedTime(started), candidates.Count);
-        var (brief, included) = InjectionRenderer.Render(
-            entries, options.Value.BriefBudgetChars, notice);
-        if (included.Count == 0)
-        {
-            // §7: an empty decision leaves no trace, so no Injection row — but a tripwire line, if
-            // one fired, still goes out. Returning "" here would make a degraded compose look
-            // exactly like a healthy Brief with nothing to say, which is the confusion the
-            // tripwire exists to prevent.
-            return brief;
-        }
 
-        InjectionLog.Record(
-            db, sessionId, projectId, now, InjectionLane.Brief,
-            queryContext: null, brief, included);
-        await db.SaveChangesAsync(cancellationToken);
-        return brief;
+        // The keeper renders, applies the §7 empty-trace rule and logs the row. A tripwire line
+        // still comes back out of a Brief that had no Wisdom to log — a degraded compose that
+        // returned "" would look exactly like a healthy Brief with nothing to say, which is the
+        // confusion the tripwire exists to prevent.
+        return await injections.RenderAndRecordAsync(
+            new InjectionContext(InjectionLane.Brief, sessionId, projectId, QueryContext: null),
+            entries,
+            options.Value.BriefBudgetChars,
+            notice,
+            cancellationToken);
     }
 }
