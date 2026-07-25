@@ -215,6 +215,7 @@ public sealed class BriefServiceTests(ThrowawayDatabaseFixture fixture) : Postgr
         var service = new BriefService(
             Context,
             new WisdomSearch(Context, Options.Create(new SearchOptions())),
+            new InjectionLog(Context, clock ?? Clock),
             Options.Create(options ?? new RecallOptions()),
             clock ?? Clock,
             logger ?? NullLogger<BriefService>.Instance);

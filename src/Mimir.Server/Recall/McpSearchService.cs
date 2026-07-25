@@ -11,16 +11,18 @@ namespace Mimir.Server.Recall;
 /// query ranking — scope-unfiltered, so other Projects' Wisdom is reachable, with Retired rows
 /// only on request; the Episode leg is FTS-only over <c>Event.tsv</c> plus metadata filters. The
 /// two legs' scores are incommensurable (a §7 query score vs. a bare <c>ts_rank</c>), so "fused"
-/// results are two ranked sections of one answer, not one interleaved list. Any non-empty answer
-/// logs an Injection row (lane=MCP, the query as <c>query_context</c>); an empty one leaves no
-/// trace, like every lane (§7).
+/// results are two ranked sections of one answer, not one interleaved list. This lane composes its
+/// own answer rather than the ambient wrapper, and hands it to <see cref="InjectionLog"/> to record
+/// (lane=MCP, the query as <c>query_context</c>, the affinity Project). The replies that answer
+/// without recalling anything — an unknown kind, an unresolvable Project filter, a query nothing
+/// matched — return before the keeper: they are this lane's own wording, not an injection, and §7
+/// leaves no trace of them.
 /// </summary>
 internal sealed partial class McpSearchService(
-    MimirDbContext db,
     QueryRanking ranking,
     EventSearch events,
     McpProjects projects,
-    TimeProvider clock)
+    InjectionLog injections)
 {
     /// <summary>Rendering caps — deliberate recall wants the best few, not the §3 top-50 pool.</summary>
     private const int MaxWisdom = 10;
@@ -87,10 +89,14 @@ internal sealed partial class McpSearchService(
             cancellationToken);
         var text = Render(request.Query, wisdom, eventHits, names);
 
-        InjectionLog.Record(
-            db, request.SessionId, affinityProjectId, clock.GetUtcNow(), InjectionLane.Mcp,
-            request.Query, text, wisdom.Select(w => w.ToInjectionEntry()).ToList());
-        await db.SaveChangesAsync(cancellationToken);
+        // The affinity Project, not any Project in the answer: this lane reaches every scope, and
+        // what the row records is the context the ranking boosted under (§7.1).
+        await injections.RecordAsync(
+            new InjectionContext(
+                InjectionLane.Mcp, request.SessionId, affinityProjectId, request.Query),
+            text,
+            wisdom.Select(w => w.ToInjectionEntry()).ToList(),
+            cancellationToken);
         return text;
     }
 
@@ -109,9 +115,11 @@ internal sealed partial class McpSearchService(
                 var scope = w.ScopeProjectId == Project.GlobalId
                     ? "Global"
                     : names.GetValueOrDefault(w.ScopeProjectId, McpTexts.UnknownProject);
-                var retired = w.RetiredAt is { } at ? $" · Retired {McpTexts.Date(at)}" : "";
-                text.Append(
-                    $"- [{w.Kind} · {scope} · confirmed {McpTexts.Date(w.LastConfirmedAt)}{retired}] {w.Text}\n");
+                // The shared §7 label line, with this surface's own scope wording and Retired tag —
+                // the Retired date reads from the same builder, so one line cannot carry two
+                // date rules.
+                var retired = w.RetiredAt is { } at ? $" · Retired {InjectionLabel.Date(at)}" : "";
+                text.Append(InjectionLabel.Line(w.Kind, scope, w.LastConfirmedAt, w.Text, retired));
             }
         }
 

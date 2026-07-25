@@ -79,6 +79,7 @@ internal sealed class RecallModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddScoped<InjectionLog>();
         services.AddScoped<BriefService>();
         services.AddScoped<QueryRanking>();
         services.AddScoped<PromptRecallService>();
