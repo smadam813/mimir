@@ -27,15 +27,6 @@ public sealed record WisdomSearchFilter
 
     /// <summary>Keep only Wisdom confirmed at or after this instant.</summary>
     public DateTimeOffset? Since { get; init; }
-
-    /// <summary>
-    /// §7: restrict both legs to the ambient Candidate Universe of this session Project — the
-    /// Project plus Global, non-Retired, minus the native-content exclusion. The EF form in
-    /// <c>AmbientCandidates</c> owns the rule; a parity test pins the SQL here to it. Combining
-    /// with <see cref="IncludeRetired"/> or <see cref="ScopeProjectId"/> contradicts the
-    /// universe's definition and is rejected at the search seam.
-    /// </summary>
-    public Guid? AmbientProjectId { get; init; }
 }
 
 /// <summary>
@@ -57,18 +48,27 @@ public sealed class WisdomSearchHit
 /// The §3 hybrid search over non-Retired Wisdom: pgvector cosine KNN + tsvector FTS, top
 /// <see cref="SearchOptions.PerLegTopN"/> per leg, fused with RRF (k = <see cref="SearchOptions.RrfK"/>)
 /// in hand-written SQL — EF Core cannot express window-ranked fusion, and ADR-0005 plans for
-/// exactly this split. Serves the Merge Gate now and the §7 recall lanes later.
+/// exactly this split. Serves the Merge Gate and the §7 recall lanes.
 /// </summary>
+/// <remarks>
+/// The Candidate Universe is named by the method, never assembled by the caller: <see
+/// cref="SearchAmbientAsync"/> and <see cref="ListAmbientAsync"/> are the ambient universe (with
+/// and without a query), <see cref="SearchAsync(Vector, string, WisdomSearchFilter,
+/// CancellationToken)"/> is everything, narrowed only by the filter. Storage owns the universe, so
+/// no combination of filter properties can contradict it and no lane can forget it.
+/// </remarks>
 public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> options)
 {
     /// <summary>
-    /// The ambient Candidate Universe (§7) in SQL, shared verbatim by both legs so the rule
-    /// cannot drift into two rules — self-contained, carrying all three of the universe's
-    /// predicates: scope is the session's Project or Global, non-Retired (making the base
-    /// predicate's <c>@include_retired</c> guard a redundancy here, not the rule's only keeper),
-    /// minus the native-content exclusion — Wisdom whose only Provenance is HarvestedItems of the
-    /// session's Project never ranks ambiently; orphaned provenance is not harvest-only, so it
-    /// stays in. <c>AmbientCandidates</c> owns the EF form; a parity test pins this clause to it.
+    /// The ambient Candidate Universe (§7) in SQL — the only implementation of the rule, shared
+    /// verbatim by both search legs and by the queryless listing so it cannot drift into two
+    /// rules. Self-contained, carrying all three of the universe's predicates: scope is the
+    /// session's Project or Global, non-Retired (making the search's <c>@include_retired</c>
+    /// guard a redundancy here, not the rule's only keeper), minus the native-content exclusion —
+    /// Wisdom whose only Provenance is HarvestedItems of the session's Project never surfaces
+    /// ambiently; orphaned provenance is not harvest-only, so it stays in. The null-parameter
+    /// escape is how <see cref="Sql"/> serves the everything universe off the same text; the
+    /// queryless listing always binds a Project, so for it the escape never fires.
     /// </summary>
     private const string AmbientClause = """
         (@ambient_project_id IS NULL
@@ -128,35 +128,58 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
         ORDER BY "FusedScore" DESC, "WisdomId"
         """;
 
+    /// <remarks>
+    /// No LIMIT and no ordering: the ambient lanes that have no query rank the whole universe
+    /// themselves, so truncating or ordering here would be a second, silent ranking.
+    /// </remarks>
+    private const string AmbientIdsSql = $"""
+        SELECT id AS "Value"
+        FROM wisdom
+        WHERE {AmbientClause}
+        """;
+
     /// <param name="embedding">The query embedding (qwen3-embedding:0.6b, 1024 dims).</param>
     /// <param name="query">The query text, for the FTS leg.</param>
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding, string query, CancellationToken cancellationToken)
         => await SearchAsync(embedding, query, WisdomSearchFilter.None, cancellationToken);
 
+    /// <summary>The everything universe: every Project's Wisdom, narrowed only by
+    /// <paramref name="filter"/>.</summary>
     public async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
         Vector embedding, string query, WisdomSearchFilter filter, CancellationToken cancellationToken)
+        => await SearchAsync(embedding, query, filter, ambientProjectId: null, cancellationToken);
+
+    /// <summary>
+    /// The ambient Candidate Universe (§7) of <paramref name="projectId"/> as a search mode: both
+    /// legs restrict to it <em>before</em> their per-leg LIMIT, so a nearer foreign corpus can
+    /// never crowd an eligible match out of the pool.
+    /// </summary>
+    public async Task<IReadOnlyList<WisdomSearchHit>> SearchAmbientAsync(
+        Vector embedding, string query, Guid projectId, CancellationToken cancellationToken)
+        => await SearchAsync(embedding, query, WisdomSearchFilter.None, projectId, cancellationToken);
+
+    /// <summary>
+    /// The same universe with no query: every Wisdom id inside it, for the lanes that rank without
+    /// a search (§7's Brief). Unordered and unlimited — the caller ranks, and hydrates the ids it
+    /// keeps.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> ListAmbientAsync(
+        Guid projectId, CancellationToken cancellationToken)
+        => await db.Database
+            .SqlQueryRaw<Guid>(
+                AmbientIdsSql,
+                new NpgsqlParameter("ambient_project_id", NpgsqlDbType.Uuid) { Value = projectId },
+                new NpgsqlParameter("global_id", NpgsqlDbType.Uuid) { Value = Project.GlobalId })
+            .ToListAsync(cancellationToken);
+
+    private async Task<IReadOnlyList<WisdomSearchHit>> SearchAsync(
+        Vector embedding,
+        string query,
+        WisdomSearchFilter filter,
+        Guid? ambientProjectId,
+        CancellationToken cancellationToken)
     {
-        if (filter.AmbientProjectId is not null)
-        {
-            if (filter.IncludeRetired)
-            {
-                throw new ArgumentException(
-                    "The ambient Candidate Universe never ranks Retired Wisdom; " +
-                    $"{nameof(filter.IncludeRetired)} contradicts {nameof(filter.AmbientProjectId)}.",
-                    nameof(filter));
-            }
-
-            if (filter.ScopeProjectId is not null)
-            {
-                throw new ArgumentException(
-                    "The ambient Candidate Universe fixes its own scope (the session's Project " +
-                    $"plus Global); {nameof(filter.ScopeProjectId)} contradicts " +
-                    $"{nameof(filter.AmbientProjectId)}.",
-                    nameof(filter));
-            }
-        }
-
         // The vector arrives as its text form and is cast in SQL, so the query needs no vector
         // type mapping on the raw-SQL path (Vector.ToString is the pgvector input syntax).
         var hits = await db.Database
@@ -181,7 +204,7 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
                 },
                 new NpgsqlParameter("ambient_project_id", NpgsqlDbType.Uuid)
                 {
-                    Value = (object?)filter.AmbientProjectId ?? DBNull.Value,
+                    Value = (object?)ambientProjectId ?? DBNull.Value,
                 },
                 new NpgsqlParameter("global_id", NpgsqlDbType.Uuid)
                 {

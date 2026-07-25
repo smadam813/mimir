@@ -87,7 +87,7 @@ How memories reach a session: the Brief, per-prompt retrieval above a confidence
 _Avoid_: retrieval (for the whole surface), RAG
 
 **Candidate Universe**:
-The set of Wisdom a recall surface may draw from. **Ambient** (the Brief and the Prompt lane): the session's Project plus Global, non-Retired, minus the native-content exclusion. **Everything** (`mimir_search`, the golden runner): the whole tier, optionally narrowed. The universe restricts the search itself, never a ranked result after the fact.
+The set of Wisdom a recall surface may draw from. **Ambient** (the Brief and the Prompt lane): the session's Project plus Global, non-Retired, minus the native-content exclusion. **Everything** (`mimir_search`, the golden runner): the whole tier, optionally narrowed. The universe restricts the search itself, never a ranked result after the fact — Storage owns each universe as its own entry point, and a Recall lane names the one it wants rather than assembling it.
 _Avoid_: pool, corpus, scope filter
 
 ### Structure
