@@ -31,8 +31,8 @@ internal abstract record MergeRuling
 
 /// <summary>
 /// The LLM half of the Merge Gate (§6 steps 3–4): classify a matched pair as agreement or
-/// contradiction and produce the rewrite or adjudication. Backed by the distiller model
-/// (qwen3:8b, <c>/no_think</c>) through the §2 model-client layer; faked in gate tests.
+/// contradiction and produce the rewrite or adjudication. Backed by the distiller model through
+/// the §2 model-client layer; faked in gate tests.
 /// </summary>
 internal interface IMergeArbiter
 {

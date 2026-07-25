@@ -19,7 +19,7 @@ internal sealed record DistillationAttempt(Guid EpisodeId, bool Succeeded, int C
 internal sealed class DistillationRun(
     MimirDbContext db,
     DistillationQueue queue,
-    EpisodeDistiller distiller,
+    IEpisodeDistiller distiller,
     MergeGate gate,
     ILogger<DistillationRun> logger)
 {

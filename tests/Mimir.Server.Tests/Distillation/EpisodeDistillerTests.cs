@@ -148,6 +148,24 @@ public class EpisodeDistillerTests
     }
 
     [Fact]
+    public async Task AGoodChunkThenAnUnparseableOne_Throws_LettingNoPartialListOut()
+    {
+        // Two chunks at this budget, the first answered cleanly: the candidates from it are in
+        // hand when the second chunk fails, and must not escape as the Episode's answer. Partial
+        // is worse than none — the caller re-queues the whole Episode (§6), so half an Episode
+        // returned here is half of it admitted and then distilled again on the retry.
+        var events = Enumerable.Range(1, 4)
+            .Select(seq => NewEvent(seq, EventType.PostToolUse, new string('x', 700)))
+            .ToList();
+        _chat.Reply("""{"candidates":[{"kind":"fact","scope":"project","text":"From chunk one.","events":[1]}]}""");
+        _chat.Reply("no json at all");
+
+        await Should.ThrowAsync<DistillerException>(() => DistillAsync(chunkTokens: 400, [.. events]));
+
+        _chat.Calls.Count.ShouldBe(2, "the first chunk did answer, so there was a partial list to leak");
+    }
+
+    [Fact]
     public async Task NoEvents_MeansNoModelCalls_AndNoCandidates()
     {
         (await DistillAsync()).ShouldBeEmpty();

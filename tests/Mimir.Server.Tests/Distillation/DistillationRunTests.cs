@@ -8,12 +8,16 @@ using Mimir.Server.Storage.Entities;
 namespace Mimir.Server.Tests.Distillation;
 
 /// <summary>
-/// The §6 queue turn against a real Postgres: Seal → pending → done with candidates reaching the
-/// gate carrying Event Provenance; failure → failed with nothing admitted; later chunks' candidates
-/// merging with the Wisdom earlier chunks just created (the Merge Gate as the reduce).
+/// The §6 queue turn against a real Postgres, over a scripted <see cref="IEpisodeDistiller"/>:
+/// Seal → pending → done with candidates reaching the gate carrying Event Provenance; an unusable
+/// answer → failed with nothing admitted; an Episode's candidates reaching the gate as one batch,
+/// so a later one merges with the Wisdom an earlier one just created. What the model said, and
+/// what it takes to get candidates out of it, is the Distiller's own suite.
 /// </summary>
 public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
+    private readonly FakeDistiller _distiller = new();
+
     [Fact]
     public async Task ASealedPendingEpisode_DistillsToDone_WithEventProvenance()
     {
@@ -21,15 +25,21 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
         var evt = await AddEventAsync(episode.Id, seq: 1);
         const string text = "Always pin the SDK feature band";
-        Chat.Reply($$"""
-            {"candidates":[{"kind":"lesson","scope":"project","text":"{{text}}","events":[1]}]}
-            """);
+        _distiller.Enqueue(new WisdomCandidate(
+            WisdomKind.Lesson, project.Id, text, EpisodeId: episode.Id, EventIds: [evt.Id]));
 
         var attempt = (await NewRun().RunNextAsync(Token)).ShouldNotBeNull();
 
         attempt.Succeeded.ShouldBeTrue();
         attempt.EpisodeId.ShouldBe(episode.Id);
         attempt.Candidates.ShouldBe(1);
+
+        // The run's own work before the seam: the claimed Episode, its Project's identity, and its
+        // Events in seq order are what the Distiller is handed.
+        var call = _distiller.Calls.ShouldHaveSingleItem();
+        call.EpisodeId.ShouldBe(episode.Id);
+        call.ProjectIdentity.ShouldBe(project.Identity);
+        call.Events.Select(e => e.Id).ShouldBe([evt.Id]);
 
         var done = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == episode.Id, Token));
         done.Distillation.ShouldBe(DistillationState.Done);
@@ -56,8 +66,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         await AddEpisodeAsync(project.Id, sealedAt: Now.AddDays(-1), distillation: DistillationState.Done);
         await AddEventAsync(newer.Id, seq: 1, EventType.Stop);
         await AddEventAsync(older.Id, seq: 1, EventType.Stop);
-        Chat.Reply("""{"candidates":[]}""");
-        Chat.Reply("""{"candidates":[]}""");
 
         var run = NewRun();
         (await run.RunNextAsync(Token)).ShouldNotBeNull().EpisodeId.ShouldBe(older.Id);
@@ -66,20 +74,17 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
     }
 
     [Fact]
-    public async Task AFailure_MarksFailed_AndAdmitsNothing_EvenFromTheChunksThatParsed()
+    public async Task AnUnusableAnswer_MarksFailed_AndAdmitsNothing()
     {
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
-        // Two chunks at this budget: the first answers cleanly, the second is garbage — the
-        // Episode must fail whole, with the first chunk's candidate never admitted, so the
+        await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
+        // The Distiller declares this failure and answers nothing on it (whether one chunk failed
+        // or all of them is behind its seam); the Episode must land Failed, never Done, so the
         // sweep's re-queue redoes it without inflating Reinforcement.
-        await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
-        await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
-        Chat.Reply("""{"candidates":[{"kind":"fact","scope":"project","text":"From the good chunk.","events":[1]}]}""");
-        Chat.Reply("no json at all");
+        _distiller.Failure = new DistillerException("the distiller's answer is not JSON");
 
-        var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
-            .ShouldNotBeNull();
+        var attempt = (await NewRun().RunNextAsync(Token)).ShouldNotBeNull();
 
         attempt.Succeeded.ShouldBeFalse();
         attempt.Error.ShouldNotBeNull();
@@ -94,28 +99,25 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
     {
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
-        await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
-        await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
-        // Both chunks parse and the whole Episode reaches the gate as one batch, where the
-        // second candidate matches the first and the arbiter throws. The existing failure test
-        // fails at the distiller, before the gate; this one fails inside the batch, which is the
-        // path that used to run in the Run's own transaction and now runs in the gate's — the
-        // Episode must come back Failed and owed, never Done, with the first candidate's
-        // already-saved admission taken back with the failing one.
+        var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
+        var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
+        // Both candidates reach the gate as one batch, where the second matches the first and the
+        // arbiter throws. The unusable-answer test fails at the Distiller, before the gate; this
+        // one fails inside the batch, which is the path that used to run in the Run's own
+        // transaction and now runs in the gate's — the Episode must come back Failed and owed,
+        // never Done, with the first candidate's already-saved admission taken back with the
+        // failing one.
         const string born = "The lock serializes the gate";
         const string confirming = "Gate admissions are serialized";
         Embeddings.Map(born, TestVectors.Basis);
         Embeddings.Map(confirming, TestVectors.WithCosine(0.9));
-        Chat.Reply($$"""
-            {"candidates":[{"kind":"lesson","scope":"project","text":"{{born}}","events":[1]}]}
-            """);
-        Chat.Reply($$"""
-            {"candidates":[{"kind":"lesson","scope":"project","text":"{{confirming}}","events":[2]}]}
-            """);
+        _distiller.Enqueue(
+            new WisdomCandidate(WisdomKind.Lesson, project.Id, born, EpisodeId: episode.Id, EventIds: [first.Id]),
+            new WisdomCandidate(
+                WisdomKind.Lesson, project.Id, confirming, EpisodeId: episode.Id, EventIds: [second.Id]));
         Arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
 
-        var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
-            .ShouldNotBeNull();
+        var attempt = (await NewRun().RunNextAsync(Token)).ShouldNotBeNull();
 
         attempt.Succeeded.ShouldBeFalse();
         var failed = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == episode.Id, Token));
@@ -127,45 +129,39 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
     }
 
     [Fact]
-    public async Task LaterChunksCandidates_MergeWithEarlierChunksWisdom()
+    public async Task OneEpisodesCandidates_MergeWithEachOther_InsideTheOneBatch()
     {
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
-        var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse, payload: PayloadOfChars(4000));
-        var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse, payload: PayloadOfChars(4000));
+        var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
+        var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
+        // The Merge Gate is the reduce (§6): a candidate the Distiller produced later in the same
+        // Episode meets the Wisdom an earlier one just created, rather than duplicating it — which
+        // is what makes chunking behind the Distiller's seam need no reduce step of its own.
         const string born = "The build needs the full SDK version";
         const string confirming = "Full SDK version required by the build";
         Embeddings.Map(born, TestVectors.Basis);
         Embeddings.Map(confirming, TestVectors.WithCosine(0.85));
-        Chat.Reply($$"""
-            {"candidates":[{"kind":"lesson","scope":"project","text":"{{born}}","events":[1]}]}
-            """);
-        Chat.Reply($$"""
-            {"candidates":[{"kind":"lesson","scope":"project","text":"{{confirming}}","events":[2]}]}
-            """);
+        _distiller.Enqueue(
+            new WisdomCandidate(WisdomKind.Lesson, project.Id, born, EpisodeId: episode.Id, EventIds: [first.Id]),
+            new WisdomCandidate(
+                WisdomKind.Lesson, project.Id, confirming, EpisodeId: episode.Id, EventIds: [second.Id]));
 
-        var attempt = (await NewRun(new DistillationOptions { ChunkTokens = 1024 }).RunNextAsync(Token))
-            .ShouldNotBeNull();
+        var attempt = (await NewRun().RunNextAsync(Token)).ShouldNotBeNull();
 
         attempt.Succeeded.ShouldBeTrue();
         attempt.Candidates.ShouldBe(2);
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
-        wisdom.Text.ShouldBe(born, "the second chunk's candidate reinforced instead of duplicating");
+        wisdom.Text.ShouldBe(born, "the second candidate reinforced instead of duplicating");
         wisdom.Reinforcement.ShouldBe(2);
         var events = await FromDb(db => db.Provenance.Select(p => p.EventId).ToListAsync(Token));
         events.ShouldBe([first.Id, second.Id], ignoreOrder: true);
     }
 
-    private DistillationRun NewRun(DistillationOptions? options = null)
-    {
-        var settings = options ?? new DistillationOptions();
-        return new DistillationRun(
-            Context,
-            new DistillationQueue(Context, Clock, Options.Create(settings)),
-            new EpisodeDistiller(Chat, Options.Create(settings)),
-            CreateMergeGate(distillation: settings),
-            NullLogger<DistillationRun>.Instance);
-    }
-
-    private static string PayloadOfChars(int chars) => $$"""{"note":"{{new string('x', chars)}}"}""";
+    private DistillationRun NewRun() => new(
+        Context,
+        new DistillationQueue(Context, Clock, Options.Create(new DistillationOptions())),
+        _distiller,
+        CreateMergeGate(),
+        NullLogger<DistillationRun>.Instance);
 }

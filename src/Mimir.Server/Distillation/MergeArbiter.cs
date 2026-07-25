@@ -5,8 +5,8 @@ using Mimir.Server.Storage.Entities;
 namespace Mimir.Server.Distillation;
 
 /// <summary>
-/// <see cref="IMergeArbiter"/> on the distiller model through the §2 model-client layer: one
-/// schema-constrained JSON call (qwen3:8b, <c>/no_think</c>, temperature 0) classifying the
+/// <see cref="IMergeArbiter"/> on the distiller model through the §2 model-client layer: one call,
+/// made the way <see cref="DistillerCall"/> says every call to it is made, classifying the
 /// matched pair and producing the §6 rewrite or adjudication. Rewrites are capped at
 /// <see cref="ModelAnswer.MaxTextLength"/>; anything else unusable throws
 /// <see cref="MergeArbiterException"/>.
@@ -20,10 +20,10 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
     };
 
     /// <summary>
-    /// Structured output: Ollama grammar-constrains decoding to this schema (OllamaSharp passes
-    /// it through as the request's <c>format</c>), so the verdict enum and shape are enforced at
-    /// generation time. Deliberately flat — the per-verdict required texts are conditional, which
-    /// grammar constraint can't express, so <see cref="Parse"/> stays the arbiter of usability.
+    /// The schema handed to <see cref="DistillerCall.ChatSettings"/> as the generation constraint,
+    /// so the verdict enum and shape are enforced while decoding. Deliberately flat — the
+    /// per-verdict required texts are conditional, which a grammar can't express, so
+    /// <see cref="Parse"/> stays the arbiter of usability.
     /// </summary>
     private static readonly JsonElement Schema = JsonSerializer.Deserialize<JsonElement>("""
         {
@@ -38,14 +38,7 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
         }
         """);
 
-    // Temperature 0 keeps the verdict as reproducible as the model allows; num_ctx is the §11
-    // distiller context, mapped to Ollama by OllamaSharp's option passthrough.
-    private static readonly ChatOptions Options = new()
-    {
-        Temperature = 0,
-        ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "merge_ruling"),
-        AdditionalProperties = new AdditionalPropertiesDictionary { ["num_ctx"] = 16384 },
-    };
+    private static readonly ChatOptions ChatSettings = DistillerCall.ChatSettings(Schema, "merge_ruling");
 
     private const string Instructions = """
         You are the merge arbiter of a memory system. You are given two memory notes on the same
@@ -77,11 +70,11 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
 
                 CANDIDATE ({candidate.Kind}, {OriginOf(candidate, existing)}):
                 {candidate.Text}
-                /no_think
+                {DistillerCall.NoThink}
                 """),
         ];
 
-        var response = await chat.GetResponseAsync(messages, Options, cancellationToken);
+        var response = await chat.GetResponseAsync(messages, ChatSettings, cancellationToken);
         return Parse(response.Text);
     }
 

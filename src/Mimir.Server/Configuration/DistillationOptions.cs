@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Mimir.Server.Distillation;
 
 namespace Mimir.Server.Configuration;
 
@@ -32,10 +33,10 @@ public sealed class DistillationOptions
 
     /// <summary>
     /// §6: an Episode whose Event stream exceeds this is chunked chronologically and distilled
-    /// per chunk (~12K tokens, leaving prompt-and-answer room inside the 16384 context). The
-    /// range's ceiling is that context: the distiller pins <c>num_ctx</c> per §11, and a chunk
-    /// budget past it would silently overflow the window instead of chunking.
+    /// per chunk (~12K tokens, leaving prompt-and-answer room inside the distiller's context). The
+    /// range's ceiling is that context itself — a chunk budget past it would silently overflow the
+    /// window instead of chunking — so it is taken from where §11 pins it rather than restated.
     /// </summary>
-    [Range(1024, 16_384)]
+    [Range(1024, DistillerCall.ContextTokens)]
     public int ChunkTokens { get; init; } = 12_288;
 }

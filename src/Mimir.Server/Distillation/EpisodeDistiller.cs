@@ -8,13 +8,34 @@ using Mimir.Server.Storage.Entities;
 namespace Mimir.Server.Distillation;
 
 /// <summary>
-/// The §6 Distiller: one Sealed Episode's Event stream in, zero or more Wisdom candidates out,
-/// on the distiller model (qwen3:8b, <c>/no_think</c>, <c>num_ctx</c> 16384) through the §2
-/// model-client layer. Oversized Episodes are chunked by <see cref="EpisodeChunker"/> and
-/// distilled per chunk — the Merge Gate downstream is the reduce. Events are labelled
-/// <c>[eN]</c> by seq so the model's provenance references map back to Event ids.
+/// The §6 Distiller: one Sealed Episode's Event stream in, zero or more Wisdom candidates out, on
+/// the distiller model through the §2 model-client layer. Chunking an oversized Episode is behind
+/// this seam — a caller hands over the whole stream and is answered for the whole Episode or not
+/// at all. Faked in the queue-turn tests, the way <see cref="IMergeArbiter"/> is in the gate's.
+/// </summary>
+internal interface IEpisodeDistiller
+{
+    /// <exception cref="DistillerException">
+    /// The model's answer was unusable anywhere in the Episode; no partial list comes back with
+    /// it. Callers let it propagate: the Episode stays owed distillation (§6), so the sweep's
+    /// re-queue redoes it whole rather than admitting a partial reading of the session.
+    /// </exception>
+    Task<IReadOnlyList<WisdomCandidate>> DistillAsync(
+        Episode episode,
+        string projectIdentity,
+        IReadOnlyList<Event> events,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// <see cref="IEpisodeDistiller"/> on the distiller model, called the way
+/// <see cref="DistillerCall"/> says every call to it is made. Oversized Episodes are chunked by
+/// <see cref="EpisodeChunker"/> and distilled per chunk — the Merge Gate downstream is the reduce.
+/// Events are labelled <c>[eN]</c> by seq so the model's provenance references map back to Event
+/// ids.
 /// </summary>
 internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOptions> options)
+    : IEpisodeDistiller
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -22,9 +43,10 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
     };
 
     /// <summary>
-    /// Structured output, grammar-constrained by Ollama like the <see cref="MergeArbiter"/>'s:
-    /// the kind and scope enums are enforced at generation time; the per-candidate semantic
-    /// checks (usable text, real event refs) stay in <see cref="Parse"/>.
+    /// The schema handed to <see cref="DistillerCall.ChatSettings"/> as the generation constraint,
+    /// so the kind and scope enums are enforced while decoding. The per-candidate semantic checks
+    /// (usable text, real event refs) are what a grammar can't express, so they stay in
+    /// <see cref="Parse"/>.
     /// </summary>
     private static readonly JsonElement Schema = JsonSerializer.Deserialize<JsonElement>("""
         {
@@ -48,14 +70,10 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         }
         """);
 
-    // Named apart from the primary constructor's IOptions<DistillationOptions> `options` — the
-    // two would otherwise read as one thing at call sites.
-    private static readonly ChatOptions ChatSettings = new()
-    {
-        Temperature = 0,
-        ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema, "wisdom_candidates"),
-        AdditionalProperties = new AdditionalPropertiesDictionary { ["num_ctx"] = 16384 },
-    };
+    // Not "Options": the primary constructor's IOptions<DistillationOptions> already owns that
+    // word here, and the two would otherwise read as one thing at call sites. The arbiter's copy
+    // is named to match, so one concept reads the same at both call sites.
+    private static readonly ChatOptions ChatSettings = DistillerCall.ChatSettings(Schema, "wisdom_candidates");
 
     // The §6 prompting guidance verbatim: durable, reusable lessons only — not session
     // narration; prefer no candidates over weak ones. A Remember Event is the user deliberately
@@ -82,6 +100,7 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         always produce a candidate from it.
         """;
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<WisdomCandidate>> DistillAsync(
         Episode episode,
         string projectIdentity,
@@ -111,7 +130,7 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
 
                 EVENTS:
                 {Render(chunk)}
-                /no_think
+                {DistillerCall.NoThink}
                 """),
         ];
 
