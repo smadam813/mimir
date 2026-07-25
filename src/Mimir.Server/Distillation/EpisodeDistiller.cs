@@ -15,6 +15,12 @@ namespace Mimir.Server.Distillation;
 /// </summary>
 internal interface IEpisodeDistiller
 {
+    /// <param name="events">
+    /// The Episode's whole Event stream in seq order. A session read out of order is a different
+    /// session, so ordering is the caller's to supply rather than each implementation's to
+    /// rediscover — <see cref="EpisodeDistiller"/> re-sorts only because chunking must slice
+    /// chronologically whatever it is handed.
+    /// </param>
     /// <exception cref="DistillerException">
     /// The model's answer was unusable anywhere in the Episode; no partial list comes back with
     /// it. Callers let it propagate: the Episode stays owed distillation (§6), so the sweep's

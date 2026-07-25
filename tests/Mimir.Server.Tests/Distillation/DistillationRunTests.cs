@@ -23,6 +23,10 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
     {
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
+        // Seeded newest-first so the rows' natural order is not already seq order: the run's
+        // ORDER BY is the only thing that can put them right, which is what makes the assertion
+        // below able to fail.
+        await AddEventAsync(episode.Id, seq: 2);
         var evt = await AddEventAsync(episode.Id, seq: 1);
         const string text = "Always pin the SDK feature band";
         _distiller.Enqueue(new WisdomCandidate(
@@ -35,11 +39,12 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         attempt.Candidates.ShouldBe(1);
 
         // The run's own work before the seam: the claimed Episode, its Project's identity, and its
-        // Events in seq order are what the Distiller is handed.
+        // whole Event stream in seq order, handed over in one call — the Episode is the unit the
+        // seam is answered for, so two Events are still one call (§6, IEpisodeDistiller).
         var call = _distiller.Calls.ShouldHaveSingleItem();
         call.EpisodeId.ShouldBe(episode.Id);
         call.ProjectIdentity.ShouldBe(project.Identity);
-        call.Events.Select(e => e.Id).ShouldBe([evt.Id]);
+        call.Events.Select(e => e.Seq).ShouldBe([1, 2]);
 
         var done = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == episode.Id, Token));
         done.Distillation.ShouldBe(DistillationState.Done);
@@ -66,6 +71,10 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         await AddEpisodeAsync(project.Id, sealedAt: Now.AddDays(-1), distillation: DistillationState.Done);
         await AddEventAsync(newer.Id, seq: 1, EventType.Stop);
         await AddEventAsync(older.Id, seq: 1, EventType.Stop);
+        // Both turns distil to no candidates — said, not left unscripted, so the two turns this
+        // test does expect are the two it gets.
+        _distiller.Enqueue();
+        _distiller.Enqueue();
 
         var run = NewRun();
         (await run.RunNextAsync(Token)).ShouldNotBeNull().EpisodeId.ShouldBe(older.Id);
