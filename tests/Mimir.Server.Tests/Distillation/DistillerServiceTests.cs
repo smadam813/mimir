@@ -131,7 +131,7 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         // embeddings in place of Ollama.
         services.AddScoped<DistillationQueue>();
         services.AddScoped<DistillationRun>();
-        services.AddScoped<EpisodeDistiller>();
+        services.AddScoped<IEpisodeDistiller, EpisodeDistiller>();
         services.AddSingleton<MergeGate>();
         services.AddSingleton<IMergeArbiter>(Arbiter);
         services.AddSingleton<IChatClient>(Chat);

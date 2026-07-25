@@ -13,7 +13,8 @@ internal static class EpisodeChunker
     /// <summary>
     /// The chars-per-token estimate the budget is priced in. Crude and deliberately so: payloads
     /// are JSON-heavy English, qwen3's tokenizer averages 3–4 chars/token on that, and the §11
-    /// budget leaves headroom inside the 16384 context for the estimate to be wrong.
+    /// budget leaves headroom inside <see cref="DistillerCall.ContextTokens"/> for the estimate to
+    /// be wrong.
     /// </summary>
     private const int CharsPerToken = 4;
 
