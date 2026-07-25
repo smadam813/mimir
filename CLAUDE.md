@@ -10,11 +10,12 @@ Run it: `docker compose up -d postgres ollama`, then `dotnet run --project src/M
 
 - `dotnet test Mimir.slnx --filter "requires!=ollama"` — matches CI's filter (the golden suite needs Ollama, which CI deliberately lacks). Postgres-backed tests skip themselves when no Postgres is reachable (`docker compose up -d postgres`, or set `MIMIR_TEST_POSTGRES`). CI fails on any skip, so check the skip count locally before trusting green.
 - Postgres test classes share one throwaway database per class, and xUnit's test order differs across machines: a test that queries beyond its own rows (counts, "oldest pending" claims) must first park or clean other tests' leftovers. This has broken CI twice (#20, #22) while passing locally.
-- A test that pins a mechanism (a lock, a rollback, a cleanup) gets mutation-checked before review: remove the mechanism, confirm the test fails, restore. Review rounds reject vacuous assertions (#61).
+- A test that pins a mechanism (a lock, a rollback, a cleanup) gets mutation-checked before review: remove the mechanism, confirm the test fails, restore. Record each result in the commit message or PR body — reviewers ask for the red runs otherwise. Review rounds reject vacuous assertions (#61).
 - Whoever owns a transaction on the shared scoped DbContext also owns `ChangeTracker.Clear()` on failure — rolled-back `Added` entities re-insert on the caller's next save (see MergeGate.AdmitAllAsync, HarvestConverter, DistillationRun).
 - EF migrations: `dotnet restore` first in a fresh worktree, then from `src/Mimir.Server`: `dotnet ef migrations add <Name> --output-dir Storage/Migrations`.
 - A test that never issues SQL (argument checks, pure validation) must not reach the code through a fixture's skip-gated context — build it over a never-connected `MimirDbContext` (plain `UseNpgsql("Host=...")`) so it runs, and fails, without Postgres.
-- A test that pins a structural property (filter-before-LIMIT, SQL/EF parity) proves nothing until mutation-checked: apply the regression temporarily, confirm the test goes red, revert.
+- A test that pins a structural property (filter-before-LIMIT, two methods over one clause) proves nothing until mutation-checked: apply the regression temporarily, confirm the test goes red, revert. Run each mutation against every entry point — a predicate enforced redundantly elsewhere keeps one of them green (#67: the search legs' own `@include_retired` masked a broken ambient clause; only the queryless listing caught it).
+- Reading Wisdom as ids-then-hydrate opens a window — the row can retire between the two queries. Re-assert `RetiredAt == null` in the hydration (`BriefService` and `InjectionBrowser.PromoteAsync` do; `QueryRanking` does not, so the Prompt lane's window is still open). No test can force the window without an interceptor, so it is defense in depth, not a pinned mechanism.
 - After pushing a PR: `gh pr checks <n> --watch` — CI is the arbiter (fails on skips, runs on Linux); local green is not.
 - Bumping `global.json`'s SDK version is a dependency bump: SDK-delivered packages are pinned in every `packages.lock.json`. Local restores are unlocked so it passes quietly; CI restores locked and fails. Regenerate all five lock files in the same commit.
 - `appsettings.json` restates the §11 defaults baked into the `Configuration/` options classes, and `AppSettingsTests` fails on drift — change a default in both places.
@@ -29,6 +30,8 @@ Issues live in this repo's GitHub Issues (smadam813/mimir), managed via the `gh`
 ### Triage labels
 
 Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), each matching its GitHub label 1:1. See `docs/agents/triage-labels.md`.
+
+A follow-up filed out of a review round is `needs-triage` until its fix has been grilled to a decision record; `ready-for-agent` means that decision walk is done (#66/#67 versus #68/#72).
 
 ### Domain docs
 

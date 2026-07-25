@@ -8,12 +8,15 @@ namespace Mimir.Server.Recall;
 
 /// <summary>
 /// The Brief (§7): the compact, project-aware Wisdom injection delivered at session start. No
-/// query exists yet, so rank is <c>brief_score</c> over the ambient candidate universe — the
+/// query exists yet, so rank is <c>brief_score</c> over the ambient Candidate Universe — the
 /// session's Project plus Global, non-Retired, minus Wisdom the built-in already loads natively.
-/// Every actual injection logs an Injection row; an empty decision leaves no trace (§7).
+/// Storage owns that universe (<see cref="WisdomSearch.ListAmbientAsync"/>) for every lane, so
+/// this one lists its ids and hydrates them, exactly as the query lanes do. Every actual injection
+/// logs an Injection row; an empty decision leaves no trace (§7).
 /// </summary>
 internal sealed class BriefService(
     MimirDbContext db,
+    WisdomSearch search,
     IOptions<RecallOptions> options,
     TimeProvider clock)
 {
@@ -21,7 +24,17 @@ internal sealed class BriefService(
         string sessionId, Guid projectId, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        var candidates = await AmbientCandidates.Of(db, projectId)
+        var ids = await search.ListAmbientAsync(projectId, cancellationToken);
+        // Hydration is where every rendered field comes from, so a Wisdom hard-deleted (§8)
+        // between the listing and this query simply yields no row and never renders — the same
+        // drop QueryRanking makes explicit against its own hits. Retirement in that same window
+        // needs saying, because it leaves the row in place: the guard here is not a second
+        // keeper of the universe (scope and the native-content exclusion stay Storage's alone),
+        // it is the §7 rule that no lane may ever render a Retired row, re-asserted at the last
+        // read before rendering — the same one-predicate re-check InjectionBrowser makes when it
+        // hydrates ids of its own.
+        var candidates = await db.Wisdom
+            .Where(w => ids.Contains(w.Id) && w.RetiredAt == null)
             .Select(w => new
             {
                 w.Id,

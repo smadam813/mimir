@@ -52,11 +52,12 @@ internal sealed class QueryRanking(
     /// affinity context ranked under — always the same value in the ambient lane.</param>
     public async Task<IReadOnlyList<RankedWisdom>> RankAmbientAsync(
         string query, Guid sessionProjectId, CancellationToken cancellationToken)
-        => await RankAsync(
-            query,
-            sessionProjectId,
-            new WisdomSearchFilter { AmbientProjectId = sessionProjectId },
-            cancellationToken);
+    {
+        var embedding = await EmbedAsync(query, cancellationToken);
+        var hits = await search.SearchAmbientAsync(
+            embedding, query, sessionProjectId, cancellationToken);
+        return await RankAsync(hits, sessionProjectId, cancellationToken);
+    }
 
     /// <summary>
     /// Ranks every Project's Wisdom, narrowed only by <paramref name="filter"/> — the
@@ -75,25 +76,19 @@ internal sealed class QueryRanking(
         WisdomSearchFilter filter,
         CancellationToken cancellationToken)
     {
-        // The method name is the universe in both directions: no caller may reach the ambient
-        // universe without saying so, and none may smuggle it past a name that says everything.
-        if (filter.AmbientProjectId is not null)
-        {
-            throw new ArgumentException(
-                $"{nameof(WisdomSearchFilter.AmbientProjectId)} names a universe this method does " +
-                $"not rank; call {nameof(RankAmbientAsync)} instead.",
-                nameof(filter));
-        }
-
-        return await RankAsync(query, affinityProjectId, filter, cancellationToken);
+        var embedding = await EmbedAsync(query, cancellationToken);
+        var hits = await search.SearchAsync(embedding, query, filter, cancellationToken);
+        return await RankAsync(hits, affinityProjectId, cancellationToken);
     }
 
+    private async Task<Vector> EmbedAsync(string query, CancellationToken cancellationToken)
+        => new(await embeddings.GenerateVectorAsync(query, cancellationToken: cancellationToken));
+
     private async Task<IReadOnlyList<RankedWisdom>> RankAsync(
-        string query, Guid affinityProjectId, WisdomSearchFilter filter, CancellationToken cancellationToken)
+        IReadOnlyList<WisdomSearchHit> hits,
+        Guid affinityProjectId,
+        CancellationToken cancellationToken)
     {
-        var embedding = new Vector(
-            await embeddings.GenerateVectorAsync(query, cancellationToken: cancellationToken));
-        var hits = await search.SearchAsync(embedding, query, filter, cancellationToken);
         if (hits.Count == 0)
         {
             return [];
