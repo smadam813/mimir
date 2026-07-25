@@ -79,11 +79,15 @@ _Avoid_: write, insert, upsert
 ### Recall
 
 **Brief**:
-The compact, project-aware Wisdom injection delivered at session start.
+The compact, project-aware Wisdom injection delivered at session start. Carries Wisdom, plus the **growth tripwire**'s line when it fires — the single exception to "ambient recall carries Wisdom only".
 _Avoid_: context dump, preamble
 
+**Growth tripwire**:
+The Brief's self-measurement: a composition that exceeds one second, or an ambient Candidate Universe past 25,000 rows, appends one warning line inside the Brief's own wrapper and logs a warning. The Brief is the channel because it is the one every session reads, and because the failure being watched for is silent — past the §11 hook cap the session gets an empty Brief and exit 0, which is indistinguishable from Mimir having nothing to say.
+_Avoid_: health check, monitoring, alert
+
 **Recall**:
-How memories reach a session: the Brief, per-prompt retrieval above a confidence threshold, and deliberate tool calls. Ambient recall carries Wisdom only; Episodes surface only through tools. Recall fails open — when Mimir is down, sessions proceed with nothing injected.
+How memories reach a session: the Brief, per-prompt retrieval above a confidence threshold, and deliberate tool calls. Ambient recall carries Wisdom only — Episodes surface only through tools, and the sole non-Wisdom exception is the Brief's **growth tripwire** line. Recall fails open — when Mimir is down, sessions proceed with nothing injected.
 _Avoid_: retrieval (for the whole surface), RAG
 
 **Candidate Universe**:

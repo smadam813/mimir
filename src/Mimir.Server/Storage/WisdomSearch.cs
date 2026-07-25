@@ -131,6 +131,32 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <remarks>
     /// No LIMIT and no ordering: the ambient lanes that have no query rank the whole universe
     /// themselves, so truncating or ordering here would be a second, silent ranking.
+    /// <para>
+    /// Unbounded is measured, not overlooked (#72). A LIMIT here could only truncate arbitrarily —
+    /// <c>brief_score</c> is not computable in this query, since it combines reinforcement,
+    /// explicit salience and a recency term against the clock, all in C# after hydration — which is
+    /// the crowd-out pathology the search legs spent #54/#57/#58 removing, reintroduced on the
+    /// queryless side. Capping honestly would instead mean relocating §7 scoring into SQL, and the
+    /// numbers do not ask for that. Benchmarked at a 50,000-row design ceiling (~2–10× any
+    /// plausible single-user reality, given Merge Gate convergence), the whole compose path — this
+    /// listing, the hydration, the scoring and the render — is flat: ~0.3 s steady state, and
+    /// <em>indistinguishable from the same path over an empty universe</em>, which is the finding
+    /// that matters. Quadrupling the text hydrated per row did not move it; neither did Release.
+    /// </para>
+    /// <para>
+    /// The number that is <em>not</em> ~0.3 s: the first compose in a fresh process cost 0.62–0.85 s
+    /// (1.07 s against a freshly bulk-loaded table). That is EF compiling these queries, the JIT and
+    /// the first physical connection — a long-lived server pays it once at startup, not once per
+    /// session, and no cap would remove it. But it is close enough to the tripwire's own one-second
+    /// threshold that on a slower host the first Brief after a restart will fire the warning. That
+    /// is the tripwire reporting what it measured, once per restart, not a miscalibration.
+    /// </para>
+    /// <para>
+    /// What keeps all of this honest is <see cref="Recall.BriefTripwire"/>, which re-measures every
+    /// real composition on the real machine and says so, in the Brief itself, if one ever exceeds a
+    /// second or the set ever passes 25,000 rows. Growth here is monotonic by design (§10 has no
+    /// age-based retirement), so the guard is the measurement, not the absence of one.
+    /// </para>
     /// </remarks>
     private const string AmbientIdsSql = $"""
         SELECT id AS "Value"
@@ -162,7 +188,8 @@ public sealed class WisdomSearch(MimirDbContext db, IOptions<SearchOptions> opti
     /// <summary>
     /// The same universe with no query: every Wisdom id inside it, for the lanes that rank without
     /// a search (§7's Brief). Unordered and unlimited — the caller ranks, and hydrates the ids it
-    /// keeps.
+    /// keeps. Both halves of that promise are load-bearing and measured; see
+    /// <see cref="AmbientIdsSql"/>.
     /// </summary>
     public async Task<IReadOnlyList<Guid>> ListAmbientAsync(
         Guid projectId, CancellationToken cancellationToken)
