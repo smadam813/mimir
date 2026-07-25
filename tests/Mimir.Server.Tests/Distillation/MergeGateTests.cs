@@ -706,6 +706,44 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task AnEdit_RewordsARetiredWisdom_AndLeavesItRetired()
+    {
+        // Retire and edit are independent axes (#71): Retire governs a row's standing, an edit
+        // its words, and the gate never consults the one to decide the other. So a curator can
+        // repair something shelved without unretire → edit → retire, which would expose the bad
+        // text to live recall on the way past.
+        await Context.ResetWisdomAsync(Token);
+        var item = await AddHarvestedItemAsync();
+        var text = $"Retired but badly worded {Guid.NewGuid():N}";
+        var editedText = $"Retired and now worded well {Guid.NewGuid():N}";
+        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+
+        // Retired the way §10 retires (WisdomBrowser.RetireAsync), at a moment of its own and
+        // with the clock moved on after it — so an edit that re-stamped RetiredAt reads as red
+        // as one that cleared it.
+        var retiredAt = Now.AddMinutes(30);
+        await Context.Wisdom.Where(w => w.Id == wisdom.Id)
+            .ExecuteUpdateAsync(w => w.SetProperty(x => x.RetiredAt, retiredAt), Token);
+        _clock.Advance(TimeSpan.FromHours(1));
+
+        await NewGate().EditAsync(wisdom.Id, editedText, Token);
+
+        var edited = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
+        edited.Text.ShouldBe(editedText, "an edit rewords regardless of standing");
+        edited.RetiredAt.ShouldBe(retiredAt, "an edit neither unretires nor re-stamps the retirement");
+
+        var versions = await FromDb(db => db.WisdomVersions
+            .Where(v => v.WisdomId == wisdom.Id)
+            .OrderBy(v => v.Version)
+            .ToListAsync(Token));
+        versions.Select(v => (v.Version, v.Cause)).ShouldBe(
+            [(1, WisdomVersionCause.Distilled), (2, WisdomVersionCause.Edited)],
+            "a Retired row grows the same cause=edited chain a live one does");
+        versions[1].Text.ShouldBe(editedText);
+    }
+
+    [Fact]
     public async Task ABlankEdit_ReturnsBeforeTheGateOpensAnything()
     {
         // The blank-text guard returns before the gate embeds, opens a context, or takes the

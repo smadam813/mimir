@@ -131,9 +131,17 @@ internal sealed class MergeGate(
     /// current — re-embedded, appended to the chain as a <c>cause=edited</c> WisdomVersion — under
     /// the same advisory lock an Admission batch takes, so an interactive edit and a background
     /// rewrite cannot both claim the same version number. Reinforcement and recency are untouched:
-    /// an edit rewords, only an Admission confirms (§6). A blank or unchanged text, or a Wisdom
-    /// already deleted, is a no-op.
+    /// an edit rewords, only an Admission confirms (§6). The no-op set is exactly three: blank
+    /// text, an id no Wisdom answers to, and text unchanged from what is current.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Wisdom.RetiredAt"/> is deliberately not consulted, so a Retired Wisdom is not a
+    /// fourth no-op: Retire governs a row's standing and an edit governs its words, independently
+    /// (CONTEXT.md, Retire). A Retired Wisdom rewords like any other and stays Retired — so a
+    /// curator repairing something shelved never has to route the fix back through live recall,
+    /// which <c>unretire → edit → retire</c> would. Superseded losers are Retired rows like any
+    /// other and get no carve-out; a rewording leaves <see cref="Wisdom.SupersededBy"/> untouched.
+    /// </remarks>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
     {
         var trimmed = text.Trim();
