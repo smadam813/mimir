@@ -190,9 +190,9 @@ public sealed class McpRememberServiceTests(CaptureDatabaseFixture fixture)
                 clock,
                 new EpisodeFeed()),
             new MergeGate(
-                Context,
+                new FixtureContextFactory(fixture),
                 _embeddings,
-                new WisdomSearch(Context, Options.Create(new SearchOptions())),
+                Options.Create(new SearchOptions()),
                 _arbiter,
                 Options.Create(new DistillationOptions()),
                 clock));

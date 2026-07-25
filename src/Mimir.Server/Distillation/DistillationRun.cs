@@ -58,10 +58,10 @@ internal sealed class DistillationRun(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Distilling Episode {EpisodeId} failed; the sweep will re-queue it", episode.Id);
-            // The gate clears what its own rolled-back batch staged; this covers the rest of the
-            // turn — the finalizer's detached done marker, anything the distill step tracked — so
-            // nothing from a failed run rides a later save on this scoped context.
-            db.ChangeTracker.Clear();
+            // State-guarded, and deliberately not a tracked write: the claim is queue state, and
+            // this must not fire on an Episode some other turn has moved on. The failed batch
+            // needs no cleanup here — it ran on a context of the gate's own making (§6), which
+            // is why this handler no longer clears the change tracker.
             await db.Episodes
                 .Where(e => e.Id == episode.Id && e.Distillation == DistillationState.Running)
                 .ExecuteUpdateAsync(
@@ -106,18 +106,32 @@ internal sealed class DistillationRun(
     }
 
     /// <summary>
-    /// The Episode's candidates as one Admission batch, its <c>done</c> marker staged by the
-    /// finalizer so the marker commits with the Wisdom the Episode produced or not at all.
+    /// The Episode's candidates as one Admission batch, its <c>done</c> marker written by the
+    /// finalizer on the gate's batch context so the marker commits with the Wisdom the Episode
+    /// produced or not at all.
     /// </summary>
     private async Task AdmitAsync(
         Episode episode, IReadOnlyList<WisdomCandidate> candidates, CancellationToken cancellationToken)
-        => await gate.AdmitAllAsync(
+    {
+        await gate.AdmitAllAsync(
             candidates,
-            _ =>
+            async (batch, ct) =>
             {
-                episode.Distillation = DistillationState.Done;
-                episode.DistilledAt = clock.GetUtcNow();
-                return Task.CompletedTask;
+                // Read into a local: EF cannot translate a TimeProvider call inside SetProperty.
+                var distilledAt = clock.GetUtcNow();
+                await batch.Episodes
+                    .Where(e => e.Id == episode.Id)
+                    .ExecuteUpdateAsync(
+                        update => update
+                            .SetProperty(e => e.Distillation, DistillationState.Done)
+                            .SetProperty(e => e.DistilledAt, distilledAt),
+                        ct);
             },
             cancellationToken);
+
+        // The marker committed on the gate's context, so the copy this run still tracks would
+        // read Running — the claim it was given, not the state it is in. Nothing writes that copy
+        // back today, but anything that reads it after this point should read the truth.
+        await db.Entry(episode).ReloadAsync(cancellationToken);
+    }
 }

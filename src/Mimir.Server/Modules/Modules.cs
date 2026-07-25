@@ -53,8 +53,10 @@ internal sealed class DistillationModule : IMimirModule
 {
     public void AddServices(IServiceCollection services, IConfiguration configuration)
     {
-        services.AddScoped<MergeGate>();
-        services.AddScoped<IMergeArbiter, MergeArbiter>();
+        // The gate creates the context every batch runs on, so it holds no scoped state and can
+        // serve the §8 curation surface, which is a Singleton outliving any request scope.
+        services.AddSingleton<MergeGate>();
+        services.AddSingleton<IMergeArbiter, MergeArbiter>();
         services.AddScoped<ContestedSweep>();
         services.AddScoped<EpisodeDistiller>();
         services.AddScoped<DistillationRun>();

@@ -441,16 +441,12 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         var firstText = $"Batches are atomic {Guid.NewGuid():N}";
         var secondText = $"The gate owns the transaction {Guid.NewGuid():N}";
 
-        await NewGate(Context).AdmitAllAsync(
+        await NewGate().AdmitAllAsync(
             [
                 new WisdomCandidate(WisdomKind.Fact, item.ProjectId, firstText, HarvestedItemId: item.Id),
                 new WisdomCandidate(WisdomKind.Fact, item.ProjectId, secondText, HarvestedItemId: item.Id),
             ],
-            _ =>
-            {
-                item.ConvertedAt = Now;
-                return Task.CompletedTask;
-            },
+            MarkConverted(item.Id),
             Token);
 
         _embeddings.Batches.ShouldBe(1, "the gate batches the whole Admission's embeddings in one round-trip");
@@ -478,16 +474,12 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
 
         // The first candidate admits cleanly; the second matches it and the arbiter throws —
         // so the rollback must take back an already-saved admission, not just the failed one.
-        await Should.ThrowAsync<MergeArbiterException>(async () => await NewGate(Context).AdmitAllAsync(
+        await Should.ThrowAsync<MergeArbiterException>(async () => await NewGate().AdmitAllAsync(
             [
                 new WisdomCandidate(WisdomKind.Fact, item.ProjectId, firstText, HarvestedItemId: item.Id),
                 new WisdomCandidate(WisdomKind.Fact, item.ProjectId, matchingText, HarvestedItemId: item.Id),
             ],
-            _ =>
-            {
-                item.ConvertedAt = Now;
-                return Task.CompletedTask;
-            },
+            MarkConverted(item.Id),
             Token));
 
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
@@ -508,12 +500,11 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         // The finalizer writes the marker to the database inside the transaction and then
         // fails — so the rollback has a genuinely written marker to take back, not one that
         // was never staged.
-        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate(Context).AdmitAllAsync(
+        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate().AdmitAllAsync(
             [new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id)],
-            async ct =>
+            async (batch, ct) =>
             {
-                item.ConvertedAt = Now;
-                await Context.SaveChangesAsync(ct);
+                await MarkConverted(item.Id)(batch, ct);
                 throw new InvalidOperationException("the finalizer failed after writing the marker");
             },
             Token));
@@ -524,7 +515,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     }
 
     [Fact]
-    public async Task APoisonedRewriteEmbedding_FailsTheBatch_LeavingTheContextClean()
+    public async Task APoisonedRewriteEmbedding_FailsTheBatch_LeavingTheCallersOwnWorkIntact()
     {
         // Whole-table assertions below; parking other tests' leftovers first.
         await Context.ResetWisdomAsync(Token);
@@ -538,7 +529,13 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         _embeddings.Poison(mergedText);
         _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
-        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate(Context).AdmitAllAsync(
+        // Work of the caller's own, staged and not yet saved when the batch fails. On a gate
+        // that borrowed this context, the failure's ChangeTracker.Clear() detached this row as
+        // collateral and the save below silently lost it.
+        var staged = NewHarvestedItem(first.ProjectId);
+        Context.HarvestedItems.Add(staged);
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await NewGate().AdmitAllAsync(
             [
                 new WisdomCandidate(WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id),
                 new WisdomCandidate(WisdomKind.Fact, second.ProjectId, matchingText, HarvestedItemId: second.Id),
@@ -546,10 +543,14 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             finalizer: null,
             Token));
 
-        // The failure struck mid-merge, with staged-but-unsaved rows in the tracker. The gate
-        // clears them on its way out, so a later save on the same scoped context re-inserts
-        // nothing — left dirty, it would push Provenance at a rolled-back Wisdom.
+        Context.Entry(staged).State.ShouldBe(
+            EntityState.Added, "a failed batch has no business touching the caller's change tracker");
         await Context.SaveChangesAsync(Token);
+        (await FromDb(db => db.HarvestedItems.CountAsync(i => i.Id == staged.Id, Token)))
+            .ShouldBe(1, "the caller's own staged row still saves after the batch failed");
+
+        // The failure struck mid-merge, with staged-but-unsaved rows on the batch's context.
+        // Disposing it is the rollback: nothing of the batch survives to be re-inserted.
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.WisdomVersions.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.Provenance.CountAsync(Token))).ShouldBe(0);
@@ -567,18 +568,11 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         await using var holder = fixture.CreateContext();
         await using var held = await holder.Database.BeginTransactionAsync(Token);
         await holder.Database.ExecuteSqlAsync(
-            $"SELECT pg_advisory_xact_lock({0x6D696D6972L})", Token); // MergeGate.AdmissionLockKey
+            $"SELECT pg_advisory_xact_lock({MergeGate.AdmissionLockKey})", Token);
 
         using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(Token);
         giveUp.CancelAfter(TimeSpan.FromSeconds(10));
-        await NewGate(Context).AdmitAllAsync(
-            [],
-            _ =>
-            {
-                item.ConvertedAt = Now;
-                return Task.CompletedTask;
-            },
-            giveUp.Token);
+        await NewGate().AdmitAllAsync([], MarkConverted(item.Id), giveUp.Token);
 
         await held.RollbackAsync(Token);
         (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
@@ -597,16 +591,13 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         _embeddings.Map(firstText, TestVectors.Basis);
         _embeddings.Map(secondText, TestVectors.Basis);
 
-        await using var contextA = fixture.CreateContext();
-        await using var contextB = fixture.CreateContext();
-
         // Stage the exact race the advisory lock exists to close: batch A holds its transaction
         // open until batch B is observed *waiting* on the lock. Unserialized, B's search would
         // run before A commits, see nothing on its own connection, and insert a duplicate.
         var admittedA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var batchA = NewGate(contextA).AdmitAllAsync(
+        var batchA = NewGate().AdmitAllAsync(
             [new WisdomCandidate(WisdomKind.Lesson, first.ProjectId, firstText, HarvestedItemId: first.Id)],
-            async ct =>
+            async (_, ct) =>
             {
                 admittedA.SetResult();
                 await WaitForAnAdvisoryLockWaiterAsync(ct);
@@ -626,28 +617,168 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
         async Task RunBatchBAsync()
         {
             await admittedA.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
-            await NewGate(contextB).AdmitAllAsync(
+            await NewGate().AdmitAllAsync(
                 [new WisdomCandidate(WisdomKind.Lesson, second.ProjectId, secondText, HarvestedItemId: second.Id)],
                 finalizer: null,
                 Token);
         }
     }
 
+    [Fact]
+    public async Task AnEditRacingABatchRewrite_SerializesBehindIt_AndTheChainKeepsGrowing()
+    {
+        await Context.ResetWisdomAsync(Token);
+        // §8.1's edit and §6's rewrite both append to the same (wisdom_id, version) chain. Run
+        // unserialized they read the same max version and insert the same number: a unique
+        // violation on whichever loses. The gate's lock is what makes them queue instead.
+        var first = await AddHarvestedItemAsync();
+        var second = await AddHarvestedItemAsync(first.ProjectId);
+        var originalText = $"The chain has one writer {Guid.NewGuid():N}";
+        var confirmingText = $"One writer per chain {Guid.NewGuid():N}";
+        var mergedText = $"A version chain has exactly one writer {Guid.NewGuid():N}";
+        var editedText = $"A version chain has one writer, by hand {Guid.NewGuid():N}";
+        _embeddings.Map(originalText, TestVectors.Basis);
+        _embeddings.Map(confirmingText, TestVectors.WithCosine(0.9));
+        _embeddings.Map(mergedText, TestVectors.WithCosine(0.95));
+        _embeddings.Map(editedText, TestVectors.WithCosine(0.5));
+        _arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Fact, first.ProjectId, originalText, HarvestedItemId: first.Id));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+
+        // The rewriting batch holds the lock until the edit is observed waiting on it.
+        var rewriting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var batch = NewGate().AdmitAllAsync(
+            [new WisdomCandidate(WisdomKind.Fact, second.ProjectId, confirmingText, HarvestedItemId: second.Id)],
+            async (_, ct) =>
+            {
+                rewriting.SetResult();
+                await WaitForABlockedSessionAsync(ct);
+            },
+            Token);
+        var edit = EditWhileTheBatchHoldsTheLockAsync();
+        await Task.WhenAll(batch, edit);
+
+        var versions = await FromDb(db => db.WisdomVersions
+            .Where(v => v.WisdomId == wisdom.Id)
+            .OrderBy(v => v.Version)
+            .ToListAsync(Token));
+        versions.Select(v => (v.Version, v.Cause)).ShouldBe(
+            [
+                (1, WisdomVersionCause.Distilled),
+                (2, WisdomVersionCause.Merged),
+                (3, WisdomVersionCause.Edited),
+            ],
+            "the edit numbers its version off the chain the batch left behind");
+        versions[2].Text.ShouldBe(editedText);
+        var edited = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
+        edited.Text.ShouldBe(editedText);
+        edited.Reinforcement.ShouldBe(2, "the batch confirmed; the edit only reworded (§8.1)");
+
+        async Task EditWhileTheBatchHoldsTheLockAsync()
+        {
+            await rewriting.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
+            await NewGate().EditAsync(wisdom.Id, editedText, Token);
+        }
+    }
+
+    [Fact]
+    public async Task AnEdit_LeavesConfirmationAloneAndSkipsAnUnchangedOrMissingWisdom()
+    {
+        await Context.ResetWisdomAsync(Token);
+        var item = await AddHarvestedItemAsync();
+        var text = $"An edit is not a confirmation {Guid.NewGuid():N}";
+        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, item.ProjectId, text, HarvestedItemId: item.Id));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+
+        var embeddedBefore = _embeddings.Batches;
+        await NewGate().EditAsync(wisdom.Id, $"  {text}  ", Token);
+        await NewGate().EditAsync(Guid.NewGuid(), "into the void", Token);
+
+        _embeddings.Batches.ShouldBe(
+            embeddedBefore, "the unlocked pre-check settles a no-op before the model is asked");
+        (await FromDb(db => db.WisdomVersions.CountAsync(v => v.WisdomId == wisdom.Id, Token)))
+            .ShouldBe(1, "an unchanged or missing edit writes no version");
+        var unchanged = await FromDb(db => db.Wisdom.SingleAsync(w => w.Id == wisdom.Id, Token));
+        unchanged.Reinforcement.ShouldBe(1);
+        unchanged.LastConfirmedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task ABlankEdit_ReturnsBeforeTheGateOpensAnything()
+    {
+        // The blank-text guard returns before the gate embeds, opens a context, or takes the
+        // lock — so this runs without Postgres, over a factory whose contexts never connect.
+        // Delete the guard and it goes red everywhere, never into a local skip.
+        var gate = new MergeGate(
+            new DisconnectedContextFactory(),
+            _embeddings,
+            Options.Create(new SearchOptions()),
+            _arbiter,
+            Options.Create(new DistillationOptions()),
+            _clock);
+
+        await gate.EditAsync(Guid.NewGuid(), "   \t\n ", Token);
+
+        _embeddings.Batches.ShouldBe(0, "a blank edit is not even worth an embedding");
+    }
+
+    /// <summary>Hands out contexts pointed at a host that does not resolve.</summary>
+    private sealed class DisconnectedContextFactory : IDbContextFactory<MimirDbContext>
+    {
+        public MimirDbContext CreateDbContext()
+            => new(new DbContextOptionsBuilder<MimirDbContext>()
+                .UseNpgsql("Host=guard-checks-never-connect")
+                .Options);
+    }
+
     /// <summary>Polls pg_locks until some session waits on an advisory lock in this database.</summary>
-    private async Task WaitForAnAdvisoryLockWaiterAsync(CancellationToken cancellationToken)
+    private Task WaitForAnAdvisoryLockWaiterAsync(CancellationToken cancellationToken)
+        => PollUntilAnyAsync(
+            """
+            SELECT count(*)::int AS "Value"
+            FROM pg_locks l
+            JOIN pg_database d ON d.oid = l.database
+            WHERE l.locktype = 'advisory' AND NOT l.granted AND d.datname = current_database()
+            """,
+            "no session ever waited on the gate's advisory lock",
+            cancellationToken);
+
+    /// <summary>
+    /// Polls until some other session on this database is blocked on one of the two locks an edit
+    /// can collide on. Wider than the advisory-only probe on purpose, and only where an edit is
+    /// the racer: an edit that skipped the gate's lock would block on the version chain's unique
+    /// index instead, so the mutation check goes red on that collision rather than timing out here
+    /// waiting for a lock the mutant never takes. Naming both rather than accepting any
+    /// <c>Lock</c> wait keeps an unrelated waiter — autovacuum, a stray backend — from releasing
+    /// the test early and leaving the serialization it is named for unexercised.
+    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
+    /// no database oid to filter this class's throwaway database by — and an unfiltered pg_locks
+    /// would see other classes' databases.
+    /// </summary>
+    private Task WaitForABlockedSessionAsync(CancellationToken cancellationToken)
+        => PollUntilAnyAsync(
+            """
+            SELECT count(*)::int AS "Value"
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND wait_event IN ('advisory', 'transactionid')
+              AND pid <> pg_backend_pid()
+            """,
+            "no session ever blocked behind the batch holding the gate's lock",
+            cancellationToken);
+
+    /// <summary>Runs <paramref name="countingSql"/> every 25 ms until it counts something.</summary>
+    private async Task PollUntilAnyAsync(
+        string countingSql, string timeoutMessage, CancellationToken cancellationToken)
     {
         await using var context = fixture.CreateContext();
         for (var attempt = 0; attempt < 400; attempt++)
         {
-            var waiters = await context.Database
-                .SqlQuery<int>($"""
-                    SELECT count(*)::int AS "Value"
-                    FROM pg_locks l
-                    JOIN pg_database d ON d.oid = l.database
-                    WHERE l.locktype = 'advisory' AND NOT l.granted AND d.datname = current_database()
-                    """)
-                .SingleAsync(cancellationToken);
-            if (waiters > 0)
+            var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
+            if (found > 0)
             {
                 return;
             }
@@ -655,7 +786,7 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             await Task.Delay(25, cancellationToken);
         }
 
-        throw new TimeoutException("no session ever waited on the gate's advisory lock");
+        throw new TimeoutException(timeoutMessage);
     }
 
     /// <summary>
@@ -663,16 +794,28 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     /// and the commit, so the helper only builds a gate and calls it.
     /// </summary>
     private async Task AdmitAsync(WisdomCandidate candidate)
-        => await NewGate(Context).AdmitAllAsync([candidate], finalizer: null, Token);
+        => await NewGate().AdmitAllAsync([candidate], finalizer: null, Token);
 
-    /// <summary>A gate on <paramref name="context"/> — its own search, the shared fakes.</summary>
-    private MergeGate NewGate(MimirDbContext context) => new(
-        context,
+    /// <summary>
+    /// A gate over the fixture's database — it opens a context per batch itself — and the shared
+    /// fakes. Every call may return a fresh instance: the gate carries no state between batches.
+    /// </summary>
+    private MergeGate NewGate() => new(
+        new FixtureContextFactory(fixture),
         _embeddings,
-        new WisdomSearch(context, Options.Create(new SearchOptions())),
+        Options.Create(new SearchOptions()),
         _arbiter,
         Options.Create(new DistillationOptions()),
         _clock);
+
+    /// <summary>
+    /// A §5-shaped finalizer: the conversion marker written on the gate's own batch context, the
+    /// way <see cref="Mimir.Server.Harvest.HarvestConverter"/> writes it.
+    /// </summary>
+    private static Func<MimirDbContext, CancellationToken, Task> MarkConverted(Guid itemId)
+        => async (batch, ct) => await batch.HarvestedItems
+            .Where(i => i.Id == itemId)
+            .ExecuteUpdateAsync(update => update.SetProperty(i => i.ConvertedAt, Now), ct);
 
     /// <summary>A fresh Project with one Episode carrying <paramref name="eventCount"/> Events.</summary>
     private async Task<(Guid ProjectId, Guid EpisodeId, IReadOnlyList<Guid> EventIds)> AddEpisodeWithEventsAsync(
@@ -707,7 +850,6 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
     /// <summary>An item on its own fresh Project, so per-scope assertions see only this test.</summary>
     private async Task<HarvestedItem> AddHarvestedItemAsync(Guid? projectId = null)
     {
-        var suffix = Guid.NewGuid().ToString("N");
         if (projectId is null)
         {
             var project = TestData.NewProject("gate");
@@ -715,19 +857,25 @@ public sealed class MergeGateTests(CaptureDatabaseFixture fixture)
             projectId = project.Id;
         }
 
-        var item = new HarvestedItem
+        var item = NewHarvestedItem(projectId.Value);
+        Context.HarvestedItems.Add(item);
+        await Context.SaveChangesAsync(Token);
+        return item;
+    }
+
+    private static HarvestedItem NewHarvestedItem(Guid projectId)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        return new HarvestedItem
         {
             Id = Guid.CreateVersion7(),
-            ProjectId = projectId.Value,
+            ProjectId = projectId,
             Path = $"slug-{suffix}/memory/MEMORY.md",
             ContentHash = suffix,
             Content = "unused by the gate",
             FirstSeen = Now,
             LastChanged = Now,
         };
-        Context.HarvestedItems.Add(item);
-        await Context.SaveChangesAsync(Token);
-        return item;
     }
 
     private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)

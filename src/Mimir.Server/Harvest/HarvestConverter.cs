@@ -55,13 +55,6 @@ internal sealed class HarvestConverter(
                 logger.LogWarning(ex, "Converting harvested item {ItemId} failed; continuing with the rest", itemId);
                 firstFailure ??= ExceptionDispatchInfo.Capture(ex);
             }
-            finally
-            {
-                // The scoped context outlives the whole run and no entity is needed across
-                // items — the gate clears what its own rolled-back batch staged, this drops the
-                // rest, item included, so nothing from one item rides another's admission.
-                db.ChangeTracker.Clear();
-            }
         }
 
         if (converted > 0)
@@ -75,7 +68,10 @@ internal sealed class HarvestConverter(
 
     private async Task ConvertAsync(Guid itemId, CancellationToken cancellationToken)
     {
-        var item = await db.HarvestedItems.FirstAsync(i => i.Id == itemId, cancellationToken);
+        // No tracking: the item is read for its content and its ids, and the marker is written
+        // on the gate's own batch context — so this run's context never holds anything worth
+        // clearing, whether the batch commits or throws.
+        var item = await db.HarvestedItems.AsNoTracking().FirstAsync(i => i.Id == itemId, cancellationToken);
         var candidates = HarvestCandidates.Of(item.Content, options.Value.CandidateCap);
 
         // One Admission batch per item: the finalizer's marker commits with the item's Wisdom or
@@ -85,10 +81,13 @@ internal sealed class HarvestConverter(
             candidates
                 .Select(c => new WisdomCandidate(c.Kind, item.ProjectId, c.Text, HarvestedItemId: item.Id))
                 .ToList(),
-            _ =>
+            async (batch, ct) =>
             {
-                item.ConvertedAt = clock.GetUtcNow();
-                return Task.CompletedTask;
+                // Read into a local: EF cannot translate a TimeProvider call inside SetProperty.
+                var convertedAt = clock.GetUtcNow();
+                await batch.HarvestedItems
+                    .Where(i => i.Id == itemId)
+                    .ExecuteUpdateAsync(update => update.SetProperty(i => i.ConvertedAt, convertedAt), ct);
             },
             cancellationToken);
     }

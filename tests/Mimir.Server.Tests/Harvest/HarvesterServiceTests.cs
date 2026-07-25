@@ -147,16 +147,20 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         }
 
         var services = new ServiceCollection();
-        services.AddDbContext<MimirDbContext>(options =>
-            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector()));
+        // Both registrations, and Singleton options, exactly as AddMimirStorage does it: the
+        // scoped context the converter reads through, and the factory the gate opens each
+        // Admission batch on.
+        void Configure(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector());
+        services.AddDbContextFactory<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
         // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's
         // whole graph rides along — with deterministic fake embeddings in place of Ollama.
         services.AddScoped<HarvestConverter>();
-        services.AddScoped<MergeGate>();
-        services.AddScoped<IMergeArbiter>(_ => new FakeArbiter());
-        services.AddScoped<WisdomSearch>();
+        services.AddSingleton<MergeGate>();
+        services.AddSingleton<IMergeArbiter>(_ => new FakeArbiter());
         services.AddSingleton(embeddings ?? new FakeEmbeddings());
         services.AddSingleton(Options.Create(new SearchOptions()));
         services.AddSingleton(Options.Create(new DistillationOptions()));
