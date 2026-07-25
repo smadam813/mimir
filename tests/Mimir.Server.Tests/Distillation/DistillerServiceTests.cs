@@ -90,6 +90,8 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         var tile = await TileAsync(t => t.State == HealthTileState.Degraded);
 
         tile.Summary.ShouldContain("not JSON");
+        tile.QueueDepth.ShouldBe(
+            1, "the parked Episode is still owed, and the tile is the operator's signal that it is");
         (await EpisodeAsync(episode.Id)).Distillation.ShouldBe(
             DistillationState.Failed, "a failed Episode waits for the sweep, never a hot retry");
     }

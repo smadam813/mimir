@@ -15,16 +15,24 @@ namespace Mimir.Server.Tests.Distillation;
 /// </summary>
 public sealed class DistillationQueueTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
+    /// <summary>
+    /// Depth is what is <em>owed</em>, not what is claimable: a parked failure is owed until the
+    /// sweep re-queues it, so leaving it out would report "queue empty" for the whole sweep
+    /// interval after a failure. Only <c>done</c> — never re-distilled (§6) — leaves the queue,
+    /// which is the same membership rule the partial index states as its filter.
+    /// </summary>
     [Fact]
-    public async Task QueueDepth_CountsSealedPendingAndRunningOnly()
+    public async Task QueueDepth_CountsEverySealedEpisodeNotYetDone()
     {
         var project = await AddProjectAsync("queue");
         await AddEpisodeAsync(project.Id, sealedAt: Now);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
+        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Failed);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
         await AddEpisodeAsync(project.Id);
 
-        (await NewQueue().QueueDepthAsync(Token)).ShouldBe(2);
+        (await NewQueue().QueueDepthAsync(Token)).ShouldBe(
+            3, "pending, running and failed are all still owed; done and unsealed are not");
     }
 
     [Fact]

@@ -26,7 +26,9 @@ namespace Mimir.Server.Distillation;
 /// <para>The claim and depth queries are the consumers of the partial index over
 /// <c>distillation</c> (<c>sealed_at IS NOT NULL AND distillation &lt;&gt; 'Done'</c>) declared in
 /// <see cref="MimirDbContext"/>: both restrict on a Seal and neither can match a <c>done</c> row.
-/// Changing a predicate here means revisiting that filter.</para>
+/// That filter is also the queue's membership rule — everything Sealed and not yet <c>done</c> is
+/// owed — which <see cref="QueueDepthAsync"/> restates verbatim as its predicate. Changing a
+/// predicate here means revisiting that filter.</para>
 /// </remarks>
 internal sealed class DistillationQueue(
     MimirDbContext db,
@@ -131,11 +133,15 @@ internal sealed class DistillationQueue(
                     .SetProperty(e => e.DistillationStartedAt, (DateTimeOffset?)null),
                 cancellationToken);
 
-    /// <summary>The §8 tile figure: Sealed Episodes still owed distillation.</summary>
+    /// <summary>
+    /// The §8 tile figure: Sealed Episodes still owed distillation — <c>failed</c> included, since
+    /// <see cref="RequeueFailedAsync"/> is the proof that one is still owed. Counting only the
+    /// claimable-or-claimed states would report "queue empty" for the whole sweep interval after a
+    /// failure, and the tile's brief Degraded flash is the operator's only other signal.
+    /// </summary>
     public async Task<int> QueueDepthAsync(CancellationToken cancellationToken)
         => await db.Episodes.CountAsync(
-            e => e.SealedAt != null
-                && (e.Distillation == DistillationState.Pending || e.Distillation == DistillationState.Running),
+            e => e.SealedAt != null && e.Distillation != DistillationState.Done,
             cancellationToken);
 
     /// <summary>
