@@ -18,6 +18,10 @@ namespace Mimir.Server.Tests.Evaluation;
 /// without it like every other integration test. The trait keeps it out of CI's zero-skip run
 /// (.github/workflows/ci.yml): CI provides Postgres but never Ollama, so under FailSkips this
 /// dev-time suite would fail every build for a dependency CI is never meant to have.
+///
+/// Deliberately NOT over <c>PostgresTestBase</c>, unlike every other Postgres-backed class: the
+/// harness hands out an emptied throwaway database, and the cases this suite exists to replay only
+/// live in the development one. Converted, it would sweep zero cases and pass forever.
 /// </summary>
 [Trait("requires", "ollama")]
 public sealed class GoldenSuiteTests(ITestOutputHelper output)

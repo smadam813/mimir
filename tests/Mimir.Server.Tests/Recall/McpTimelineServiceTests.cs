@@ -1,8 +1,5 @@
 using Mimir.Contracts.Mcp;
 using Mimir.Server.Recall;
-using Mimir.Server.Storage;
-using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 
 namespace Mimir.Server.Tests.Recall;
 
@@ -10,29 +7,14 @@ namespace Mimir.Server.Tests.Recall;
 /// <c>mimir_timeline</c> (§7) against a real Postgres: Episodes newest first, each carrying its
 /// seal state — live, or sealed with the §4 reason — narrowed by the project and since filters.
 /// </summary>
-public sealed class McpTimelineServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class McpTimelineServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task Timeline_ListsNewestFirst_WithSealState()
     {
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-timeline");
         var sealedEpisode = await AddEpisodeAsync(
-            project.Id, startedAt: Now.AddHours(-3), sealedAt: Now.AddHours(-2), reason: "clear");
+            project.Id, startedAt: Now.AddHours(-3), sealedAt: Now.AddHours(-2));
         var live = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
 
         var text = await TimelineAsync(new() { Project = project.DisplayName });
@@ -48,7 +30,7 @@ public sealed class McpTimelineServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ProjectAndSinceFilters_NarrowTheTimeline()
     {
-        var (mine, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (mine, other) = (await AddProjectAsync("mine"), await AddProjectAsync("theirs"));
         var recent = await AddEpisodeAsync(mine.Id, startedAt: Now.AddHours(-1));
         var old = await AddEpisodeAsync(mine.Id, startedAt: Now.AddDays(-10));
         var foreign = await AddEpisodeAsync(other.Id, startedAt: Now);
@@ -64,7 +46,7 @@ public sealed class McpTimelineServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task AnUnknownProject_NamesTheKnownOnes()
     {
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("mcp-timeline");
 
         var text = await TimelineAsync(new() { Project = "no-such-project" });
 
@@ -75,45 +57,4 @@ public sealed class McpTimelineServiceTests(CaptureDatabaseFixture fixture)
     private async Task<string> TimelineAsync(McpTimelineRequest request)
         => await new McpTimelineService(Context, new McpProjects(Context))
             .TimelineAsync(request, Token);
-
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("mcp-timeline");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Episode> AddEpisodeAsync(
-        Guid projectId, DateTimeOffset startedAt, DateTimeOffset? sealedAt = null, string? reason = null)
-    {
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{Guid.NewGuid():N}",
-            ProjectId = projectId,
-            StartedAt = startedAt,
-            SealedAt = sealedAt,
-            SealReason = reason,
-            Cwd = @"C:\work",
-        };
-        Context.Episodes.Add(episode);
-        await Context.SaveChangesAsync(Token);
-        return episode;
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
 }

@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.AI;
 using Mimir.Contracts.Health;
 using Mimir.Server.Capture;
@@ -12,8 +11,6 @@ using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 using Mimir.Server.Health;
 using Mimir.Server.Storage;
-using Mimir.Server.Tests.Capture;
-using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Harvest;
 
@@ -22,13 +19,12 @@ namespace Mimir.Server.Tests.Harvest;
 /// trigger causes a rescan with no timer involved — the fake clock never ticks, so any second
 /// scan can only have come from the trigger.
 /// </summary>
-public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 7, 20, 12, 0, 0, TimeSpan.Zero));
-    private readonly string _slug = $"C--git-harvester-{Guid.NewGuid():N}";
+    private const string Slug = "C--git-harvester";
+
     private readonly HealthState _health = new();
     private readonly HarvestScanTrigger _trigger = new();
 
@@ -36,13 +32,14 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
     private HarvesterService? _service;
     private ServiceProvider? _provider;
 
-    public ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
+        // Base first — see HarvestScannerTests: a temp root created before the skip outlives it.
+        await base.InitializeAsync();
         _root = Directory.CreateTempSubdirectory("mimir-harvester-").FullName;
-        return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (_service is not null)
         {
@@ -56,6 +53,7 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         }
 
         Directory.Delete(_root, recursive: true);
+        await base.DisposeAsync();
     }
 
     [Fact]
@@ -68,7 +66,7 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
 
         tile.Items.ShouldBe(1);
         tile.Changed.ShouldBe(1);
-        tile.LastScanAt.ShouldBe(_clock.GetUtcNow());
+        tile.LastScanAt.ShouldBe(Now);
         tile.Summary.ShouldBe("1 item · 1 changed");
     }
 
@@ -82,10 +80,10 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         WriteMemoryFile("MEMORY.md", "second thoughts");
         // One second is far short of the 5-minute interval, so the timer cannot be what rescans;
         // it only re-stamps the clock so the second scan is distinguishable from the first.
-        _clock.Advance(TimeSpan.FromSeconds(1));
+        Clock.Advance(TimeSpan.FromSeconds(1));
         _trigger.Request();
 
-        var tile = await TileAsync(t => t.LastScanAt == _clock.GetUtcNow());
+        var tile = await TileAsync(t => t.LastScanAt == Clock.GetUtcNow());
         tile.State.ShouldBe(HealthTileState.Ready);
         tile.Items.ShouldBe(1);
         tile.Changed.ShouldBe(1, "the edited file must have stored a new version");
@@ -120,7 +118,7 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
         var degraded = await TileAsync(t => t.State == HealthTileState.Degraded);
         degraded.Items.ShouldBe(1, "the scan succeeded and its figures must survive the conversion failure");
         degraded.Changed.ShouldBe(1);
-        degraded.LastScanAt.ShouldBe(_clock.GetUtcNow());
+        degraded.LastScanAt.ShouldBe(Now);
         degraded.Summary.ShouldBe("embedding model offline");
     }
 
@@ -141,31 +139,22 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
 
     private async Task StartServiceAsync(IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
-        if (fixture.UnavailableReason is { } reason)
-        {
-            Assert.Skip(TestPostgres.SkipMessage(reason));
-        }
-
         var services = new ServiceCollection();
-        // Both registrations, and Singleton options, exactly as AddMimirStorage does it: the
-        // scoped context the converter reads through, and the factory the gate opens each
+        // The scoped context the converter reads through, and the factory the gate opens each
         // Admission batch on.
-        void Configure(DbContextOptionsBuilder options) =>
-            options.UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector());
-        services.AddDbContextFactory<MimirDbContext>(Configure);
-        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+        AddThrowawayStorage(services);
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
         // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's
         // whole graph rides along — with deterministic fake embeddings in place of Ollama.
         services.AddScoped<HarvestConverter>();
         services.AddSingleton<MergeGate>();
-        services.AddSingleton<IMergeArbiter>(_ => new FakeArbiter());
-        services.AddSingleton(embeddings ?? new FakeEmbeddings());
+        services.AddSingleton<IMergeArbiter>(Arbiter);
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(embeddings ?? Embeddings);
         services.AddSingleton(Options.Create(new SearchOptions()));
         services.AddSingleton(Options.Create(new DistillationOptions()));
         services.AddSingleton(Options.Create(new HarvestOptions { Root = _root }));
-        services.AddSingleton<TimeProvider>(_clock);
+        services.AddSingleton<TimeProvider>(Clock);
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _provider = services.BuildServiceProvider();
 
@@ -174,9 +163,9 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
             _trigger,
             _health,
             Options.Create(new HarvestOptions { Root = _root }),
-            _clock,
+            Clock,
             NullLogger<HarvesterService>.Instance);
-        await _service.StartAsync(TestContext.Current.CancellationToken);
+        await _service.StartAsync(Token);
     }
 
     /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
@@ -196,12 +185,12 @@ public sealed class HarvesterServiceTests(CaptureDatabaseFixture fixture)
             return _health.Current.Harvester;
         }
 
-        return await seen.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        return await seen.Task.WaitAsync(Patience, Token);
     }
 
     private void WriteMemoryFile(string relativePath, string content)
     {
-        var path = Path.Combine(_root, _slug, "memory", relativePath);
+        var path = Path.Combine(_root, Slug, "memory", relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
     }

@@ -1,16 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Mimir.Server.Storage;
+using Mimir.Server.Storage.Entities;
 
-namespace Mimir.Server.Tests.Capture;
+namespace Mimir.Server.Tests;
 
 /// <summary>
 /// A migrated, throwaway database per test class: created on first use, dropped on dispose, so
-/// capture tests never leave rows in the development database. Skips (via
-/// <see cref="UnavailableReason"/>) when no Postgres is reachable, same as the storage tests;
-/// <c>docker compose up -d postgres</c> turns them on.
+/// tests never leave rows in the development database. Skips (via <see cref="UnavailableReason"/>)
+/// when no Postgres is reachable; <c>docker compose up -d postgres</c> turns them on. Named for
+/// what it is rather than its first consumer — every Postgres-backed class in the suite reaches it
+/// through <see cref="PostgresTestBase"/>.
 /// </summary>
-public sealed class CaptureDatabaseFixture : IAsyncLifetime
+public sealed class ThrowawayDatabaseFixture : IAsyncLifetime
 {
     private readonly string _adminConnectionString = TestPostgres.AdminConnectionString;
 
@@ -21,6 +23,16 @@ public sealed class CaptureDatabaseFixture : IAsyncLifetime
 
     /// <summary>Connection string to the migrated throwaway database.</summary>
     public string ConnectionString { get; private set; } = "";
+
+    /// <summary>
+    /// The §3 Global pseudo-project exactly as the migration's <c>HasData</c> left it, read once
+    /// before any test could touch it. The per-test reset truncates it away with everything else
+    /// and restores a copy of this; reading it fresh each time would instead carry a test's
+    /// mutation of that row into every later test in the class. Still migration-sourced, so
+    /// dropping the seed leaves this null and the harness's own pin goes red rather than passing
+    /// against a hand-built stand-in.
+    /// </summary>
+    public Project? GlobalSeed { get; private set; }
 
     /// <summary>A context on the throwaway database. Callers dispose it.</summary>
     public MimirDbContext CreateContext()
@@ -41,6 +53,10 @@ public sealed class CaptureDatabaseFixture : IAsyncLifetime
 
             await using var context = CreateContext();
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            GlobalSeed = await context.Projects
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    project => project.Id == Project.GlobalId, TestContext.Current.CancellationToken);
         }
         catch (Exception ex)
         {

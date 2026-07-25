@@ -1,13 +1,10 @@
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
 using Mimir.Server.Evaluation;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 using Mimir.Server.Tests.Distillation;
-using Pgvector;
 
 namespace Mimir.Server.Tests.Evaluation;
 
@@ -17,37 +14,21 @@ namespace Mimir.Server.Tests.Evaluation;
 /// its expected Wisdom ranks within the golden-set k. The report carries each case's actual rank
 /// and the pass rate over the suite.
 /// </summary>
-public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
     /// <summary>A query with no word overlap with any test Wisdom, so only the vector leg ranks.</summary>
     private const string Query = "how do I deploy the pipeline?";
 
-    private readonly FakeEmbeddings _embeddings = new();
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
-        _embeddings.Map(Query, TestVectors.Basis);
-        return ValueTask.CompletedTask;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
+        await base.InitializeAsync();
+        Embeddings.Map(Query, TestVectors.Basis);
     }
 
     [Fact]
     public async Task ExpectedWisdomInTopK_Passes_WithItsRank()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         var expected = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
         var goldenCase = await AddCaseAsync(project.Id, expected.Id);
 
@@ -64,8 +45,7 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ExpectedWisdomBelowK_Fails_WithItsActualRank()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         for (var i = 0; i < 5; i++)
         {
             await AddWisdomAsync(project.Id, $"unrelated filler {i}", cosine: 0.9 - (i * 0.01));
@@ -85,8 +65,7 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task ExpectedWisdomOffBothLegs_Fails_WithNoRank()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
         var expected = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.1);
         await AddCaseAsync(project.Id, expected.Id);
@@ -103,8 +82,7 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task CasesRankUnderTheirOwnAffinityContext()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var expected = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
         await AddCaseAsync(project.Id, expected.Id);
@@ -119,8 +97,7 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task MixedSuite_ReportsThePassRate()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         var near = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
         var far = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.5);
         await AddCaseAsync(project.Id, near.Id);
@@ -136,8 +113,7 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task CasesSharingAQueryAndProject_ReplayOneRanking()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("golden");
         var near = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
         var far = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.5);
         await AddCaseAsync(project.Id, near.Id);
@@ -146,14 +122,12 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
         var report = await RunAsync();
 
         report.Results.Count.ShouldBe(2);
-        _embeddings.Batches.ShouldBe(1);
+        Embeddings.Batches.ShouldBe(1);
     }
 
     [Fact]
     public async Task EmptySuite_PassesVacuously()
     {
-        await Context.ResetWisdomAsync(Token);
-
         var report = await RunAsync();
 
         report.Results.ShouldBeEmpty();
@@ -162,71 +136,11 @@ public sealed class GoldenRunnerTests(CaptureDatabaseFixture fixture)
 
     private async Task<GoldenReport> RunAsync(SearchOptions? searchOptions = null)
     {
-        var search = Options.Create(searchOptions ?? new SearchOptions());
-        var runner = new GoldenRunner(
-            Context,
-            new QueryRanking(
-                Context,
-                _embeddings,
-                new WisdomSearch(Context, search),
-                Options.Create(new RecallOptions()),
-                new FakeTimeProvider(Now)),
-            search);
+        var search = searchOptions ?? new SearchOptions();
+        var runner = new GoldenRunner(Context, CreateQueryRanking(search), Options.Create(search));
         return await runner.RunAsync(Token);
     }
 
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("golden");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Wisdom> AddWisdomAsync(Guid scopeProjectId, string text, double cosine)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = scopeProjectId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
-    private async Task<GoldenCase> AddCaseAsync(Guid projectId, Guid expectedWisdomId)
-    {
-        var goldenCase = new GoldenCase
-        {
-            Id = Guid.CreateVersion7(),
-            QueryContext = Query,
-            ProjectId = projectId,
-            ExpectedWisdomId = expectedWisdomId,
-            Note = "test case",
-        };
-        Context.GoldenCases.Add(goldenCase);
-        await Context.SaveChangesAsync(Token);
-        return goldenCase;
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
+    private Task<GoldenCase> AddCaseAsync(Guid projectId, Guid expectedWisdomId)
+        => AddGoldenCaseAsync(projectId, expectedWisdomId, Query);
 }

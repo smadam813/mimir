@@ -7,9 +7,6 @@ using Mimir.Server.Configuration;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
-using Mimir.Server.Tests.Distillation;
-using Pgvector;
 
 namespace Mimir.Server.Tests.Recall;
 
@@ -18,28 +15,12 @@ namespace Mimir.Server.Tests.Recall;
 /// Global, non-Retired), brief_score ordering, the native-content exclusion, and the §3 Injection
 /// logging — every actual injection logs a row, empty decisions log nothing.
 /// </summary>
-public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class BriefServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
-
     [Fact]
     public async Task Brief_DrawsFromProjectAndGlobal_NeverOtherProjects_OrderedByBriefScore()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, other) = (await AddProjectAsync("brief"), await AddProjectAsync("brief"));
         var reinforced = await AddWisdomAsync(project.Id, "reinforced project wisdom", reinforcement: 7);
         var global = await AddWisdomAsync(Project.GlobalId, "global wisdom");
         var foreign = await AddWisdomAsync(other.Id, "another project's wisdom");
@@ -57,8 +38,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Brief_ExcludesRetiredWisdom()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var live = await AddWisdomAsync(project.Id, "living wisdom");
         var retired = await AddWisdomAsync(project.Id, "retired wisdom", retiredAt: Now);
 
@@ -71,8 +51,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Brief_ExcludesHarvestOnlyWisdomOfTheCurrentProject_OtherSourcesStay()
     {
-        await Context.ResetWisdomAsync(Token);
-        var (project, other) = (await AddProjectAsync(), await AddProjectAsync());
+        var (project, other) = (await AddProjectAsync("brief"), await AddProjectAsync("brief"));
         var nativeOnly = await AddWisdomAsync(project.Id, "harvested from this project's auto-memory");
         await AddHarvestProvenanceAsync(nativeOnly.Id, project.Id);
         var foreignHarvest = await AddWisdomAsync(Project.GlobalId, "harvested from another project");
@@ -92,8 +71,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Brief_RanksSalientWisdomAboveAnOtherwiseEqualOne()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var plain = await AddWisdomAsync(project.Id, "aaa plain wisdom");
         var remembered = await AddWisdomAsync(project.Id, "zzz deliberately saved wisdom");
         await AddEventProvenanceAsync(remembered.Id, project.Id, salient: true);
@@ -107,16 +85,15 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Brief_LogsOneInjectionRow_WithTheItemsAndSizeItInjected()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var reinforced = await AddWisdomAsync(project.Id, "first by score", reinforcement: 7);
         var global = await AddWisdomAsync(Project.GlobalId, "second by score");
         var sessionId = NewSessionId();
 
         var brief = await Compose(project.Id, sessionId);
 
-        var logged = await FromDb(db => db.Injections
-            .SingleAsync(i => i.SessionId == sessionId, Token));
+        var logged = await FromDb(db => db.Injections.SingleAsync(Token));
+        logged.SessionId.ShouldBe(sessionId);
         logged.ProjectId.ShouldBe(project.Id);
         logged.Lane.ShouldBe(InjectionLane.Brief);
         logged.QueryContext.ShouldBeNull("no query exists at session start (§3)");
@@ -130,39 +107,34 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task EmptyBrief_InjectsNothing_AndLogsNothing()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
-        var sessionId = NewSessionId();
+        var project = await AddProjectAsync("brief");
 
-        var brief = await Compose(project.Id, sessionId);
+        var brief = await Compose(project.Id);
 
         brief.ShouldBeEmpty();
-        (await FromDb(db => db.Injections.CountAsync(i => i.SessionId == sessionId, Token)))
+        (await FromDb(db => db.Injections.CountAsync(Token)))
             .ShouldBe(0, "empty decisions are not logged (§7)");
     }
 
     [Fact]
     public async Task Brief_FillsToTheBudget_AndLogsOnlyWhatMadeItIn()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var injected = await AddWisdomAsync(project.Id, new string('a', 200), reinforcement: 7);
         await AddWisdomAsync(project.Id, new string('b', 200));
-        var sessionId = NewSessionId();
 
         // A budget with room for the header and one 200-char entry, not two.
-        var brief = await Compose(project.Id, sessionId, new RecallOptions { BriefBudgetChars = 450 });
+        var brief = await Compose(project.Id, options: new RecallOptions { BriefBudgetChars = 450 });
 
         brief.Length.ShouldBeLessThanOrEqualTo(450);
-        var logged = await FromDb(db => db.Injections.SingleAsync(i => i.SessionId == sessionId, Token));
+        var logged = await FromDb(db => db.Injections.SingleAsync(Token));
         logged.Items.Select(i => i.WisdomId).ShouldBe([injected.Id]);
     }
 
     [Fact]
     public async Task Brief_ComposedInsideBothTripwireThresholds_CarriesNoWarning_AndLogsNone()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var wisdom = await AddWisdomAsync(project.Id, "unremarkable wisdom");
         var log = new CapturedLog<BriefService>();
 
@@ -178,8 +150,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Brief_ComposedPastTheTimeThreshold_CarriesTheWarning_AndLogsIt()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         var wisdom = await AddWisdomAsync(project.Id, "unremarkable wisdom");
         var log = new CapturedLog<BriefService>();
 
@@ -198,27 +169,24 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task SlowEmptyBrief_StillCarriesTheWarning_ButLogsNoInjection()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
-        var sessionId = NewSessionId();
+        var project = await AddProjectAsync("brief");
         var log = new CapturedLog<BriefService>();
 
         var brief = await Compose(
-            project.Id, sessionId, clock: SlowClock(TimeSpan.FromMilliseconds(2100)), logger: log);
+            project.Id, clock: SlowClock(TimeSpan.FromMilliseconds(2100)), logger: log);
 
         // Injecting nothing is how the Brief says "nothing to recall", so a degraded compose that
         // also injects nothing is indistinguishable from a healthy one unless it says so.
         brief.ShouldBe(Wrapper("⚠ Mimir: Brief composed in 2.1s (budget 3s); ambient set 0 rows — see #72."));
         log.Warnings.ShouldHaveSingleItem();
-        (await FromDb(db => db.Injections.CountAsync(i => i.SessionId == sessionId, Token)))
+        (await FromDb(db => db.Injections.CountAsync(Token)))
             .ShouldBe(0, "no Wisdom was injected, and empty decisions are not logged (§7)");
     }
 
     [Fact]
     public async Task Brief_WarningLine_IsBoughtFromTheWisdomBudget_NotAddedToIt()
     {
-        await Context.ResetWisdomAsync(Token);
-        var project = await AddProjectAsync();
+        var project = await AddProjectAsync("brief");
         await AddWisdomAsync(project.Id, new string('a', 200), reinforcement: 7);
         await AddWisdomAsync(project.Id, new string('b', 200));
 
@@ -248,7 +216,7 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
             Context,
             new WisdomSearch(Context, Options.Create(new SearchOptions())),
             Options.Create(options ?? new RecallOptions()),
-            clock ?? new FakeTimeProvider(Now),
+            clock ?? Clock,
             logger ?? NullLogger<BriefService>.Instance);
         return await service.ComposeBriefAsync(sessionId ?? NewSessionId(), projectId, Token);
     }
@@ -272,110 +240,15 @@ public sealed class BriefServiceTests(CaptureDatabaseFixture fixture)
 
     private static string NewSessionId() => $"sess-{Guid.NewGuid():N}";
 
-    private async Task<Project> AddProjectAsync()
-    {
-        var project = TestData.NewProject("brief");
-        Context.Projects.Add(project);
-        await Context.SaveChangesAsync(Token);
-        return project;
-    }
-
-    private async Task<Wisdom> AddWisdomAsync(
-        Guid scopeProjectId,
-        string text,
-        int reinforcement = 1,
-        DateTimeOffset? retiredAt = null)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = scopeProjectId,
-            Text = text,
-            Embedding = new Vector(TestVectors.Basis),
-            Reinforcement = reinforcement,
-            LastConfirmedAt = Now,
-            RetiredAt = retiredAt,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
-    private async Task AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var item = new HarvestedItem
-        {
-            Id = Guid.CreateVersion7(),
-            ProjectId = projectId,
-            Path = $"brief-{suffix}/memory/MEMORY.md",
-            ContentHash = suffix,
-            Content = "harvested content",
-            FirstSeen = Now,
-            LastChanged = Now,
-        };
-        Context.HarvestedItems.Add(item);
-        Context.Provenance.Add(new Provenance
-        {
-            Id = Guid.CreateVersion7(),
-            WisdomId = wisdomId,
-            HarvestedItemId = item.Id,
-        });
-        await Context.SaveChangesAsync(Token);
-    }
-
     private async Task AddEventProvenanceAsync(Guid wisdomId, Guid projectId, bool salient)
     {
-        var suffix = Guid.NewGuid().ToString("N");
-        var episode = new Episode
-        {
-            Id = Guid.CreateVersion7(),
-            SessionId = $"sess-{suffix}",
-            ProjectId = projectId,
-            StartedAt = Now,
-            Cwd = $@"C:\git\brief-{suffix}",
-        };
-        var evt = new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = 1,
-            Type = salient ? EventType.Remember : EventType.UserPromptSubmit,
-            At = Now,
-            Payload = """{"content":"remember this"}""",
-            PayloadFullSize = 30,
-            Salient = salient,
-        };
-        Context.AddRange(episode, evt);
-        Context.Provenance.Add(new Provenance
-        {
-            Id = Guid.CreateVersion7(),
-            WisdomId = wisdomId,
-            EpisodeId = episode.Id,
-            EventId = evt.Id,
-        });
-        await Context.SaveChangesAsync(Token);
-    }
-
-    private async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
-    {
-        await using var context = fixture.CreateContext();
-        return await query(context);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
+        var episode = await AddEpisodeAsync(projectId);
+        var evt = await AddEventAsync(
+            episode.Id,
+            seq: 1,
+            salient ? EventType.Remember : EventType.UserPromptSubmit,
+            payload: """{"content":"remember this"}""",
+            salient: salient);
+        await AddProvenanceAsync(wisdomId, episode.Id, evt.Id);
     }
 }

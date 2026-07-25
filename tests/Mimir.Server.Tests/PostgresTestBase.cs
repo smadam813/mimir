@@ -1,0 +1,419 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using Mimir.Server.Configuration;
+using Mimir.Server.Distillation;
+using Mimir.Server.Recall;
+using Mimir.Server.Storage;
+using Mimir.Server.Storage.Entities;
+using Mimir.Server.Tests.Distillation;
+using Pgvector;
+
+namespace Mimir.Server.Tests;
+
+/// <summary>
+/// The one Postgres harness: every Postgres-backed test class inherits it and writes no plumbing.
+/// Before each test the whole database is emptied, so a test's assertions see its own rows and
+/// nothing else — the clean slate is a property of the harness, not a convention each class has to
+/// remember (the #20/#22 ordering failures). The class fixture still owns a throwaway database per
+/// class; xUnit builds the class once per test and runs a class's tests serially, so the reset
+/// races nothing.
+///
+/// Members are <c>private protected</c> throughout: several of the types handed out here
+/// (<see cref="MergeGate"/> and the fakes standing in for its collaborators) are internal to their
+/// module, and the whole suite is one assembly, so that is exactly the reach they need.
+/// </summary>
+public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
+    : IClassFixture<ThrowawayDatabaseFixture>, IAsyncLifetime
+{
+    /// <summary>
+    /// The suite's fixed clock reading. One value across every class: assertions that render a
+    /// timestamp (<c>"sealed 2026-07-22 10:00Z"</c>) are then reading the same "now" everywhere.
+    /// </summary>
+    private protected static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
+
+    private MimirDbContext? _context;
+
+    /// <summary>The deterministic stand-in for qwen3-embedding; see <see cref="TestVectors"/>.</summary>
+    private protected FakeEmbeddings Embeddings { get; } = new();
+
+    /// <summary>The scripted merge arbiter: Agreement-on-the-existing-text unless a test says otherwise.</summary>
+    private protected FakeArbiter Arbiter { get; } = new();
+
+    /// <summary>The scripted chat model the distiller and the real arbiter talk to.</summary>
+    private protected FakeChatClient Chat { get; } = new();
+
+    /// <summary>The clock every SUT built here reads, started at <see cref="Now"/>.</summary>
+    private protected FakeTimeProvider Clock { get; } = new(Now);
+
+    /// <summary>The ambient test cancellation token.</summary>
+    private protected static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// The test's own long-lived context on the throwaway database — the one a SUT taking a scoped
+    /// <see cref="MimirDbContext"/> is built over. Skips the test when no Postgres is reachable.
+    /// </summary>
+    private protected MimirDbContext Context
+    {
+        get
+        {
+            SkipIfUnavailable();
+            return _context ??= fixture.CreateContext();
+        }
+    }
+
+    /// <summary>The factory a SUT that opens its own contexts (the gate, the Ui browsers) takes.</summary>
+    private protected IDbContextFactory<MimirDbContext> Contexts { get; } = new FixtureContextFactory(fixture);
+
+    /// <summary>The throwaway database's connection string, for tests that build their own DI graph.</summary>
+    private protected string ConnectionString
+    {
+        get
+        {
+            SkipIfUnavailable();
+            return fixture.ConnectionString;
+        }
+    }
+
+    /// <summary>
+    /// Reads back through a separate context, so assertions see what Postgres persisted rather
+    /// than the entities a service still tracks.
+    /// </summary>
+    private protected async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
+    {
+        await using var context = Contexts.CreateDbContext();
+        return await query(context);
+    }
+
+    /// <summary>A fresh context on the throwaway database; the caller disposes it.</summary>
+    private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
+
+    /// <summary>
+    /// The real Merge Gate over the fixture's database and this class's fakes. Every harness-backed
+    /// caller composes it here, so its six-dependency graph is a one-file edit; the one gate built
+    /// by hand is <c>MergeGateGuardTests</c>, which needs a factory that never connects.
+    /// </summary>
+    private protected MergeGate CreateMergeGate(DistillationOptions? distillation = null)
+        => new(
+            Contexts,
+            Embeddings,
+            Options.Create(new SearchOptions()),
+            Arbiter,
+            Options.Create(distillation ?? new DistillationOptions()),
+            Clock);
+
+    /// <summary>
+    /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
+    /// the four consumers that replay a query through it all want the same graph.
+    /// </summary>
+    private protected QueryRanking CreateQueryRanking(
+        SearchOptions? search = null, RecallOptions? recall = null)
+        => new(
+            Context,
+            Embeddings,
+            new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
+            // Takes its own RecallOptions rather than always the defaults: the ranking reads the
+            // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
+            // overrides one for the service under test has to be able to hand the same instance
+            // here — otherwise the test pins a value the ranked rows were never scored with.
+            Options.Create(recall ?? new RecallOptions()),
+            Clock);
+
+    /// <summary>
+    /// Registers the throwaway database the way <c>AddMimirStorage</c> does — both the factory and
+    /// the scoped context, with Singleton options (#23) — for tests that boot a hosted service over
+    /// their own DI graph. The connection string is read here, on the test's thread: inside the
+    /// options callback it would be read on the service's thread, where the no-Postgres skip is an
+    /// unobserved exception and the test sits out its patience instead of skipping.
+    /// </summary>
+    private protected void AddThrowawayStorage(IServiceCollection services)
+    {
+        var connectionString = ConnectionString;
+        void Configure(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
+        services.AddDbContextFactory<MimirDbContext>(Configure);
+        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+    }
+
+    /// <summary>
+    /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
+    /// call so a test seeding two of them gets two rows rather than a unique-index violation.
+    /// Name them apart when a test filters by display name — nothing makes that column unique.
+    /// </summary>
+    private protected async Task<Project> AddProjectAsync(string name = "project")
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var project = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = $"github.com/test/{name}-{suffix}",
+            RootPaths = [$@"C:\git\{name}-{suffix}"],
+            DisplayName = name,
+        };
+        Context.Projects.Add(project);
+        await Context.SaveChangesAsync(Token);
+        return project;
+    }
+
+    private protected async Task<Episode> AddEpisodeAsync(
+        Guid projectId,
+        DateTimeOffset? startedAt = null,
+        DateTimeOffset? sealedAt = null,
+        string? sealReason = null,
+        DistillationState distillation = DistillationState.Pending,
+        DateTimeOffset? distillationStartedAt = null)
+    {
+        var episode = new Episode
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = $"sess-{Guid.NewGuid():N}",
+            ProjectId = projectId,
+            StartedAt = startedAt ?? (sealedAt ?? Now).AddHours(-1),
+            SealedAt = sealedAt,
+            SealReason = sealedAt is null ? null : sealReason ?? "clear",
+            Cwd = @"C:\git\mimir-tests",
+            Distillation = distillation,
+            DistillationStartedAt = distillationStartedAt,
+        };
+        Context.Episodes.Add(episode);
+        await Context.SaveChangesAsync(Token);
+        return episode;
+    }
+
+    private protected async Task<Event> AddEventAsync(
+        Guid episodeId,
+        int seq,
+        EventType type = EventType.UserPromptSubmit,
+        DateTimeOffset? at = null,
+        string? payload = null,
+        bool salient = false)
+    {
+        var body = payload ?? """{"prompt":"remember this"}""";
+        var evt = new Event
+        {
+            Id = Guid.CreateVersion7(),
+            EpisodeId = episodeId,
+            Seq = seq,
+            Type = type,
+            At = at ?? Now,
+            Payload = body,
+            PayloadFullSize = body.Length,
+            // Taken from the caller, never derived from the type: deriving it would restate
+            // CaptureService's salience rule in shared test infrastructure, and the day that rule
+            // changes every seeded row here would go on asserting the old one.
+            Salient = salient,
+        };
+        Context.Events.Add(evt);
+        await Context.SaveChangesAsync(Token);
+        return evt;
+    }
+
+    /// <summary>
+    /// A Wisdom and the version-1 row every Wisdom carries in production, so a chain assertion
+    /// counts from the same floor whether the row was seeded or admitted through the gate.
+    /// </summary>
+    private protected async Task<Wisdom> AddWisdomAsync(
+        Guid scopeProjectId,
+        string text,
+        double cosine = 1.0,
+        float[]? embedding = null,
+        WisdomKind kind = WisdomKind.Fact,
+        int reinforcement = 1,
+        DateTimeOffset? lastConfirmedAt = null,
+        DateTimeOffset? contestedAt = null,
+        DateTimeOffset? retiredAt = null)
+    {
+        var wisdom = new Wisdom
+        {
+            Id = Guid.CreateVersion7(),
+            Kind = kind,
+            ScopeProjectId = scopeProjectId,
+            Text = text,
+            Embedding = new Vector(embedding ?? TestVectors.WithCosine(cosine)),
+            Reinforcement = reinforcement,
+            LastConfirmedAt = lastConfirmedAt ?? Now,
+            ContestedAt = contestedAt,
+            RetiredAt = retiredAt,
+        };
+        Context.Wisdom.Add(wisdom);
+        Context.WisdomVersions.Add(new WisdomVersion
+        {
+            WisdomId = wisdom.Id,
+            Version = 1,
+            Text = wisdom.Text,
+            CreatedAt = wisdom.LastConfirmedAt,
+            Cause = WisdomVersionCause.Distilled,
+        });
+        await Context.SaveChangesAsync(Token);
+        return wisdom;
+    }
+
+    private protected async Task<HarvestedItem> AddHarvestedItemAsync(
+        Guid projectId,
+        string? path = null,
+        string content = "a memory",
+        DateTimeOffset? lastChanged = null)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var item = new HarvestedItem
+        {
+            Id = Guid.CreateVersion7(),
+            ProjectId = projectId,
+            Path = path ?? $"C--git-{suffix}/memory/MEMORY.md",
+            ContentHash = suffix,
+            Content = content,
+            FirstSeen = Now,
+            LastChanged = lastChanged ?? Now,
+        };
+        Context.HarvestedItems.Add(item);
+        await Context.SaveChangesAsync(Token);
+        return item;
+    }
+
+    private protected async Task<Provenance> AddProvenanceAsync(
+        Guid wisdomId, Guid? episodeId = null, Guid? eventId = null, Guid? harvestedItemId = null)
+    {
+        var provenance = new Provenance
+        {
+            Id = Guid.CreateVersion7(),
+            WisdomId = wisdomId,
+            EpisodeId = episodeId,
+            EventId = eventId,
+            HarvestedItemId = harvestedItemId,
+        };
+        Context.Provenance.Add(provenance);
+        await Context.SaveChangesAsync(Token);
+        return provenance;
+    }
+
+    /// <summary>
+    /// A Wisdom sourced from <paramref name="projectId"/>'s auto-memory and nothing else — the
+    /// shape §7's native-content exclusion turns on, and the one provenance helper two suites
+    /// wrote identically.
+    /// </summary>
+    private protected async Task<Provenance> AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
+    {
+        var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
+        return await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
+    }
+
+    /// <summary>
+    /// One logged injection (§3). <paramref name="items"/> are the injected Wisdom and the scores
+    /// that ordered them, in rank order.
+    /// </summary>
+    private protected async Task<Injection> AddInjectionAsync(
+        Guid projectId,
+        string sessionId = "sess-injection",
+        InjectionLane lane = InjectionLane.Prompt,
+        string? queryContext = "a prompt",
+        DateTimeOffset? at = null,
+        int chars = 240,
+        IReadOnlyList<(Guid WisdomId, double Score)>? items = null)
+    {
+        var injection = new Injection
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = sessionId,
+            ProjectId = projectId,
+            At = at ?? Now,
+            Lane = lane,
+            QueryContext = queryContext,
+            Chars = chars,
+            Items = [.. (items ?? []).Select(
+                i => new InjectionItem { WisdomId = i.WisdomId, Score = i.Score })],
+        };
+        Context.Injections.Add(injection);
+        await Context.SaveChangesAsync(Token);
+        return injection;
+    }
+
+    /// <summary>One golden-set regression case (§9); hand-inserted unless a promotion is named.</summary>
+    private protected async Task<GoldenCase> AddGoldenCaseAsync(
+        Guid projectId,
+        Guid expectedWisdomId,
+        string queryContext = "a prompt",
+        Guid? createdFromInjectionId = null,
+        string note = "test case")
+    {
+        var goldenCase = new GoldenCase
+        {
+            Id = Guid.CreateVersion7(),
+            QueryContext = queryContext,
+            ProjectId = projectId,
+            ExpectedWisdomId = expectedWisdomId,
+            CreatedFromInjectionId = createdFromInjectionId,
+            Note = note,
+        };
+        Context.GoldenCases.Add(goldenCase);
+        await Context.SaveChangesAsync(Token);
+        return goldenCase;
+    }
+
+    /// <summary>
+    /// Empties the database before each test. A derived override runs its own setup around
+    /// <c>base.InitializeAsync()</c>.
+    /// </summary>
+    public virtual async ValueTask InitializeAsync()
+    {
+        SkipIfUnavailable();
+        await using var context = fixture.CreateContext();
+        await ResetAsync(context, fixture.GlobalSeed);
+    }
+
+    public virtual async ValueTask DisposeAsync()
+    {
+        if (_context is not null)
+        {
+            await _context.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Truncates every mapped table — CASCADE, so it reaches unmapped tables referencing one — and
+    /// puts the §3 Global pseudo-project back from <see cref="ThrowawayDatabaseFixture.GlobalSeed"/>:
+    /// the pristine row, read once before any test ran, rather than whatever the outgoing test left
+    /// in that row. Restoring what was just read would carry a rename or an appended RootPath into
+    /// every later test in the class — the one row that could still reintroduce #20/#22 ordering.
+    /// It stays migration-sourced, so dropping the <c>HasData</c> seed leaves nothing to restore and
+    /// the harness's own pin fails, which a hand-built copy here would hide. A fresh instance each
+    /// time: re-adding the snapshot itself would hand every reset the same tracked object.
+    ///
+    /// The table list comes from the EF model rather than a hand-list, so a later entity is emptied
+    /// the day it is mapped — but by the same token a second <c>HasData</c> seed, in any table,
+    /// gets truncated and is not restored here. Adding one means extending this.
+    /// </summary>
+    private static async Task ResetAsync(MimirDbContext context, Project? globalSeed)
+    {
+        var tables = context.Model.GetEntityTypes()
+            .Select(entity => entity.GetTableName())
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Select(table => $"\"{table}\"");
+        // Raw, not interpolated: every name comes from the EF model, and TRUNCATE takes no
+        // parameters — a parameterized overload could not carry a table list at all.
+        var truncate = $"TRUNCATE TABLE {string.Join(", ", tables)} CASCADE";
+        await context.Database.ExecuteSqlRawAsync(truncate, Token);
+
+        if (globalSeed is not null)
+        {
+            context.Projects.Add(new Project
+            {
+                Id = globalSeed.Id,
+                Identity = globalSeed.Identity,
+                RootPaths = [.. globalSeed.RootPaths],
+                DisplayName = globalSeed.DisplayName,
+            });
+            await context.SaveChangesAsync(Token);
+        }
+    }
+
+    private void SkipIfUnavailable()
+    {
+        if (fixture.UnavailableReason is { } reason)
+        {
+            Assert.Skip(TestPostgres.SkipMessage(reason));
+        }
+    }
+}

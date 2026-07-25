@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
@@ -10,7 +9,6 @@ using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 using Mimir.Server.Tests.Distillation;
-using Pgvector;
 
 namespace Mimir.Server.Tests.Capture;
 
@@ -19,38 +17,22 @@ namespace Mimir.Server.Tests.Capture;
 /// answers with the Prompt-lane injection — and recall failing (a dead embedder) still leaves a
 /// successful capture answering with an empty injection, because everything fails open (§7).
 /// </summary>
-public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class UserPromptEndpointTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
-
     /// <summary>A prompt with no word overlap with the test Wisdom, so only the vector leg ranks.</summary>
     private const string Prompt = "how do I deploy the pipeline?";
 
-    private readonly FakeEmbeddings _embeddings = new();
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
-        _embeddings.Map(Prompt, TestVectors.Basis);
-        return ValueTask.CompletedTask;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
+        await base.InitializeAsync();
+        Embeddings.Map(Prompt, TestVectors.Basis);
     }
 
     [Fact]
     public async Task OnTopicPrompt_RecordsTheEventAndAnswersWithTheInjection()
     {
-        await Context.ResetWisdomAsync(Token);
         var request = Request(Prompt);
-        var wisdom = await AddWisdomAsync("unrelated filler one", cosine: 0.9);
+        var wisdom = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.9);
 
         var reply = await InvokeAsync(request);
 
@@ -61,10 +43,9 @@ public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task RecallFailure_StillCapturesTheEvent_AndAnswersEmpty()
     {
-        await Context.ResetWisdomAsync(Token);
         var request = Request(Prompt);
-        await AddWisdomAsync("unrelated filler one", cosine: 0.9);
-        _embeddings.Poison(Prompt);
+        await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.9);
+        Embeddings.Poison(Prompt);
 
         var reply = await InvokeAsync(request);
 
@@ -75,9 +56,8 @@ public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task PayloadWithoutAPrompt_CapturesTheEvent_AndAnswersEmpty()
     {
-        await Context.ResetWisdomAsync(Token);
         var request = Request(prompt: null);
-        await AddWisdomAsync("unrelated filler one", cosine: 0.9);
+        await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.9);
 
         var reply = await InvokeAsync(request);
 
@@ -87,24 +67,15 @@ public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
 
     private async Task<UserPromptReply> InvokeAsync(HookEventRequest request)
     {
-        var recallOptions = Options.Create(new RecallOptions());
-        var clock = new FakeTimeProvider(Now);
+        var recall = new RecallOptions();
         var capture = new CaptureService(
             Context,
             new ProjectResolver(Context),
             Options.Create(new CaptureOptions()),
-            clock,
+            Clock,
             new EpisodeFeed());
         var promptRecall = new PromptRecallService(
-            Context,
-            new QueryRanking(
-                Context,
-                _embeddings,
-                new WisdomSearch(Context, Options.Create(new SearchOptions())),
-                recallOptions,
-                clock),
-            recallOptions,
-            clock);
+            Context, CreateQueryRanking(recall: recall), Options.Create(recall), Clock);
         return await CaptureEndpoints.UserPromptAsync(
             request, capture, promptRecall, NullLoggerFactory.Instance, Token);
     }
@@ -125,44 +96,9 @@ public sealed class UserPromptEndpointTests(CaptureDatabaseFixture fixture)
         };
     }
 
-    private async Task<Wisdom> AddWisdomAsync(string text, double cosine)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = Project.GlobalId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
     private async Task<int> PromptEventCountAsync(string sessionId)
-    {
-        await using var context = fixture.CreateContext();
-        return await context.Events.CountAsync(
+        => await FromDb(db => db.Events.CountAsync(
             e => e.Type == EventType.UserPromptSubmit
-                && context.Episodes.Any(ep => ep.Id == e.EpisodeId && ep.SessionId == sessionId),
-            Token);
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
+                && db.Episodes.Any(ep => ep.Id == e.EpisodeId && ep.SessionId == sessionId),
+            Token));
 }

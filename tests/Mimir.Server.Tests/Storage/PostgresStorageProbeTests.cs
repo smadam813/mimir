@@ -7,32 +7,18 @@ namespace Mimir.Server.Tests.Storage;
 
 /// <summary>
 /// The traps in ADR-0006 are all about what Postgres <em>actually</em> reports, so they can only be
-/// pinned against a real one. Skips when no database is reachable, which keeps <c>dotnet test</c>
-/// useful on a machine with nothing running; <c>docker compose up postgres</c> turns them on.
+/// pinned against a real one. The scratch tables each test creates need no cleanup: the harness's
+/// database is thrown away with the class, which is also why these CREATEs no longer land in the
+/// development database.
+///
+/// They are the one thing the per-test reset does not reach — it truncates the EF-mapped tables,
+/// and these are unmapped with no FK for CASCADE to follow — so a test here sees its siblings'
+/// tables still standing. Harmless for what these assert, each naming its own table; an assertion
+/// counting the catalog, or claiming a table is the only one, would be order-dependent and belongs
+/// nowhere in this class.
 /// </summary>
-public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
-    : IClassFixture<PostgresFixture>, IAsyncLifetime
+public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private readonly List<string> _scratchTables = [];
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is null)
-        {
-            return;
-        }
-
-        foreach (var table in _scratchTables)
-        {
-            await ExecuteAsync($"DROP TABLE IF EXISTS \"{table}\" CASCADE;");
-        }
-
-        await _context.DisposeAsync();
-    }
-
     [Fact]
     public async Task AnalyzedWhileEmptyThenPopulated_ReportsPopulated()
     {
@@ -92,8 +78,6 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
         // (measured: 50,000 real rows reported as 100,000).
         var parent = Name("part");
         var child = $"{parent}_p1";
-        _scratchTables.Add(parent);
-        _scratchTables.Add(child);
 
         await ExecuteAsync($"CREATE TABLE \"{parent}\" (id int) PARTITION BY RANGE (id);");
         await ExecuteAsync($"CREATE TABLE \"{child}\" PARTITION OF \"{parent}\" FOR VALUES FROM (1) TO (100000);");
@@ -115,8 +99,20 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
         // A tuple cannot exist without a page, so this is an invariant across the two queries: if
         // it ever fails, size and occupancy are disagreeing and one of them is lying. Deliberately
         // an assertion and not a production shortcut — EXISTS stays the only source of occupancy.
+        // Both sides seeded here rather than left to whatever else the database holds: a mapped
+        // table the harness truncated still owns its index pages, so it never reads as zero-byte
+        // and the sweep below would run over nothing at all. The zero-byte side takes no text
+        // column either — that would bring a TOAST index, whose metapage alone is 8 KB.
+        var empty = Name("void");
+        await ExecuteAsync($"CREATE TABLE \"{empty}\" (id int);");
+        var written = await ScratchTable();
+        await ExecuteAsync($"INSERT INTO \"{written}\" SELECT g, repeat('x', 100) FROM generate_series(1, 20000) g;");
+
         var tile = await Probe();
 
+        tile.Tables.Single(t => t.Table == empty).TotalBytes.ShouldBe(
+            0, "an unindexed, unwritten table holds no pages — the case the invariant sweeps");
+        tile.Tables.Single(t => t.Table == written).Occupancy.ShouldBe(TableOccupancy.Populated);
         foreach (var table in tile.Tables.Where(t => t.TotalBytes == 0))
         {
             table.Occupancy.ShouldNotBe(TableOccupancy.Populated);
@@ -132,7 +128,7 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
     private async Task<StorageTile> Probe()
     {
         var probe = new PostgresStorageProbe(Context, NullLogger<PostgresStorageProbe>.Instance);
-        var tile = await probe.ProbeAsync(TestContext.Current.CancellationToken);
+        var tile = await probe.ProbeAsync(Token);
 
         tile.State.ShouldBe(HealthTileState.Ready, tile.Summary);
         return tile;
@@ -145,63 +141,15 @@ public sealed class PostgresStorageProbeTests(PostgresFixture fixture)
         return tile.Tables.Single(t => t.Table == table);
     }
 
-    /// <summary>Creates an empty scratch table and registers it for cleanup.</summary>
+    /// <summary>Creates an empty scratch table under a name no other test uses.</summary>
     private async Task<string> ScratchTable()
     {
         var table = Name("tbl");
-        _scratchTables.Add(table);
         await ExecuteAsync($"CREATE TABLE \"{table}\" (id int, payload text);");
         return table;
     }
 
     private static string Name(string kind) => $"wf_{kind}_{Guid.NewGuid():N}"[..24];
 
-    private Task ExecuteAsync(string sql)
-        => Context.Database.ExecuteSqlRawAsync(sql, TestContext.Current.CancellationToken);
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= new MimirDbContext(new DbContextOptionsBuilder<MimirDbContext>()
-                .UseNpgsql(fixture.ConnectionString, npgsql => npgsql.UseVector())
-                .Options);
-        }
-    }
-}
-
-/// <summary>
-/// Probes for a usable Postgres once per class rather than once per test, so the skip path stays
-/// cheap on a machine with nothing running.
-/// </summary>
-public sealed class PostgresFixture : IAsyncLifetime
-{
-    public string ConnectionString { get; } = TestPostgres.AdminConnectionString;
-
-    /// <summary>Why the database is unusable, or null when it is usable.</summary>
-    public string? UnavailableReason { get; private set; }
-
-    public async ValueTask InitializeAsync()
-    {
-        await using var context = new MimirDbContext(new DbContextOptionsBuilder<MimirDbContext>()
-            .UseNpgsql(ConnectionString, npgsql => npgsql.UseVector())
-            .Options);
-
-        try
-        {
-            await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
-            await context.Database.CloseConnectionAsync();
-        }
-        catch (Exception ex)
-        {
-            UnavailableReason = ex.Message;
-        }
-    }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    private Task ExecuteAsync(string sql) => Context.Database.ExecuteSqlRawAsync(sql, Token);
 }

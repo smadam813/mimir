@@ -1,9 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
-using Mimir.Server.Tests.Capture;
 using Mimir.Server.Tests.Distillation;
 using Pgvector;
 
@@ -14,33 +12,17 @@ namespace Mimir.Server.Tests.Storage;
 /// the vector leg's cosine riding along for thresholds, and the non-Retired filter. A tiny
 /// per-leg top-N (2) makes leg membership itself observable with a handful of rows.
 /// </summary>
-public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
-    : IClassFixture<CaptureDatabaseFixture>, IAsyncLifetime
+public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
-
     private const int RrfK = 60;
-
-    private MimirDbContext? _context;
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_context is not null)
-        {
-            await _context.DisposeAsync();
-        }
-    }
 
     [Fact]
     public async Task RrfFusion_RanksADualLegRowAboveEitherSingleLegRow()
     {
-        await Context.ResetWisdomAsync(Token);
-        var vectorOnly = await AddWisdomAsync(TestVectors.WithCosine(0.95), "unrelated filler one");
-        var dualLeg = await AddWisdomAsync(TestVectors.WithCosine(0.9), "zebra stripes pattern");
-        var outOfBothLegs = await AddWisdomAsync(TestVectors.WithCosine(0.5), "unrelated filler two");
-        var ftsOnly = await AddWisdomAsync(TestVectors.WithCosine(0.0), "zebra zebra zebra");
+        var vectorOnly = await AddGlobalWisdomAsync("unrelated filler one", cosine: 0.95);
+        var dualLeg = await AddGlobalWisdomAsync("zebra stripes pattern", cosine: 0.9);
+        var outOfBothLegs = await AddGlobalWisdomAsync("unrelated filler two", cosine: 0.5);
+        var ftsOnly = await AddGlobalWisdomAsync("zebra zebra zebra", cosine: 0.0);
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "zebra", Token);
 
@@ -57,8 +39,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task FusedScores_AreRankFusionValues_NeverACosineScale()
     {
-        await Context.ResetWisdomAsync(Token);
-        await AddWisdomAsync(TestVectors.WithCosine(0.99), "zebra herd zebra");
+        await AddGlobalWisdomAsync("zebra herd zebra", cosine: 0.99);
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "zebra", Token);
 
@@ -73,10 +54,9 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task Cosine_IsTheVectorLegsSimilarity_AndNullOffTheVectorLeg()
     {
-        await Context.ResetWisdomAsync(Token);
-        var near = await AddWisdomAsync(TestVectors.WithCosine(0.6), "quagga sighting");
-        var nearer = await AddWisdomAsync(TestVectors.WithCosine(0.8), "unrelated filler");
-        var offLeg = await AddWisdomAsync(TestVectors.WithCosine(-0.5), "quagga quagga quagga");
+        var near = await AddGlobalWisdomAsync("quagga sighting", cosine: 0.6);
+        var nearer = await AddGlobalWisdomAsync("unrelated filler", cosine: 0.8);
+        var offLeg = await AddGlobalWisdomAsync("quagga quagga quagga", cosine: -0.5);
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "quagga", Token);
 
@@ -89,9 +69,8 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     [Fact]
     public async Task RetiredWisdom_IsInvisibleToBothLegs()
     {
-        await Context.ResetWisdomAsync(Token);
-        var live = await AddWisdomAsync(TestVectors.WithCosine(0.7), "okapi facts");
-        await AddWisdomAsync(TestVectors.WithCosine(0.99), "okapi okapi okapi", retiredAt: Now);
+        var live = await AddGlobalWisdomAsync("okapi facts", cosine: 0.7);
+        await AddGlobalWisdomAsync("okapi okapi okapi", cosine: 0.99, retiredAt: Now);
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "okapi", Token);
 
@@ -101,37 +80,7 @@ public sealed class WisdomSearchTests(CaptureDatabaseFixture fixture)
     private WisdomSearch Search()
         => new(Context, Options.Create(new SearchOptions { RrfK = RrfK, PerLegTopN = 2 }));
 
-    private async Task<Wisdom> AddWisdomAsync(
-        float[] embedding, string text, DateTimeOffset? retiredAt = null)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = Guid.CreateVersion7(),
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = Project.GlobalId,
-            Text = text,
-            Embedding = new Vector(embedding),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-            RetiredAt = retiredAt,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
-
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private MimirDbContext Context
-    {
-        get
-        {
-            if (fixture.UnavailableReason is { } reason)
-            {
-                Assert.Skip(TestPostgres.SkipMessage(reason));
-            }
-
-            return _context ??= fixture.CreateContext();
-        }
-    }
+    private async Task<Wisdom> AddGlobalWisdomAsync(
+        string text, double cosine, DateTimeOffset? retiredAt = null)
+        => await AddWisdomAsync(Project.GlobalId, text, cosine, retiredAt: retiredAt);
 }
