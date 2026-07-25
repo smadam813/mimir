@@ -10,6 +10,8 @@ Service visibility follows the module, not the surface: taking an internal type 
 
 Doc comments carry normative rules, and the thin `Ui/` delegates restate their service's — `WisdomBrowser.EditAsync` restated the Merge Gate's no-op set and went stale the moment #71 named the full one. Change a rule stated in a comment and grep for the other statements of it.
 
+Raw string literals carry the file's line endings, and the checkout decides those: the index is LF (`core.autocrlf=true`, no `.gitattributes`), so a Windows working copy reads CRLF while a Linux one — CI, and the Docker image that ships — reads LF. Every prompt assembled in a `"""…"""` block therefore has platform-dependent separators, and no prompt pin can see it: they assert with `ShouldContain` and `TrimEnd().ShouldEndWith`. So don't extract a text builder that supplies its own newline for anything sent verbatim to a model — `"\n"` would pin LF on Windows too, and `Environment.NewLine` only agrees by accident. Keep the text in one literal: #77 kept `/no_think` a `const` interpolated into each caller's own prompt for that reason.
+
 ## Build & test
 
 - `dotnet test Mimir.slnx --filter "requires!=ollama"` — matches CI's filter (the golden suite needs Ollama, which CI deliberately lacks). Postgres-backed tests skip themselves when no Postgres is reachable (`docker compose up -d postgres`, or set `MIMIR_TEST_POSTGRES`). CI fails on any skip, so check the skip count locally before trusting green.
