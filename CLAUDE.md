@@ -12,6 +12,8 @@ Service visibility follows the module, not the surface: taking an internal type 
 
 Doc comments carry normative rules, and the thin `Ui/` delegates restate their service's — `WisdomBrowser.EditAsync` restated the Merge Gate's no-op set and went stale the moment #71 named the full one. Change a rule stated in a comment and grep for the other statements of it.
 
+The native Popover API's CSS has two traps, both hit in #89's review round on `HealthPill.razor.css`. First: `display` set on a `[popover]` element's own base rule is author-origin, and author-origin always beats the UA stylesheet's `[popover]:not(:popover-open) { display: none }` regardless of specificity — the popover paints on every page load unless `display` is gated behind a `:popover-open` rule instead of sitting on the base one. Second: `:popover-open` matches only the popover element itself, never its `popovertarget` invoker button, so `.some-button:popover-open` never matches; style the invoker's open state with `.some-button:has(+ .the-popover:popover-open)` — there is no `:has-popover-open` pseudo-class, it doesn't exist in the spec.
+
 Raw string literals carry the file's line endings, and the checkout decides those: the index is LF (`core.autocrlf=true`, no `.gitattributes`), so a Windows working copy reads CRLF while a Linux one — CI, and the Docker image that ships — reads LF. Every prompt assembled in a `"""…"""` block therefore has platform-dependent separators, and no prompt pin can see it: they assert with `ShouldContain` and `TrimEnd().ShouldEndWith`. So don't extract a text builder that supplies its own newline for anything sent verbatim to a model — `"\n"` would pin LF on Windows too, and `Environment.NewLine` only agrees by accident. Keep the text in one literal: #77 kept `/no_think` a `const` interpolated into each caller's own prompt for that reason.
 
 ## Build & test
@@ -33,6 +35,8 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 - `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` are on; only the NuGet-audit codes (NU1900–NU1904) are exempt (ADR-0007). A style warning fails the build.
 - A pure test that reads a shipped file directly (not through DI) needs it physically present in the test project's output — mirror `AppSettingsTests`' `<Content Include="..." CopyToOutputDirectory="PreserveNewest" />` in the `.csproj` rather than reaching across the repo with relative paths; globs work (`wwwroot\**\*.css`) and `LinkBase` preserves subfolders (`OfflineAssetsTests`, #88).
 - A `dotnet run --project src/Mimir.Server` left running from manual testing locks `Mimir.Contracts.dll`/`Mimir.Server.dll`; the next `dotnet build`/`dotnet test` fails with MSB3027 until that process is killed.
+- A `.OwnsMany(...).ToJson(...)` jsonb column isn't LINQ-inert: `db.Injections.Where(i => i.Items.Any(x => !db.Wisdom.Any(w => w.Id == x.WisdomId)))` translates to a real Postgres `NOT EXISTS`, verified against Postgres (#89's review round) — try LINQ before writing raw SQL against a jsonb owned collection.
+- `mcp__Claude_Browser__preview_start {name: ...}` reads `.claude/launch.json` from the session's *original* directory, not a worktree entered later via `EnterWorktree` — if you've switched worktrees mid-session, start the server manually (`dotnet run --project src/Mimir.Server`) and use `preview_start {url: "http://localhost:6464"}` instead.
 
 ### Mutation-checking a test
 
