@@ -1,11 +1,28 @@
 /* Mimir layer on top of Nocturne (styles.css, vendored verbatim). Every value here is written
    on Nocturne's own var(--color-*) / var(--space-*) / var(--radius-*) tokens, plus the one hue
    Mimir adds below — never a hard-coded hex the vendored file doesn't already carry. Keeping
-   Mimir's additions out of styles.css means a future Nocturne sync is a one-file swap. */
+   Mimir's additions out of styles.css means a future Nocturne sync is a one-file swap.
 
-/* Inter, vendored locally (ADR-0001: fully offline, so no Google Fonts @import). Latin subset,
-   weights 400 and 500 — the two Nocturne's --font-heading-weight and body text use. Licensed
-   under the SIL Open Font License 1.1; see fonts/OFL.txt. */
+   Provenance (so the next sync is a diff, not an audit):
+   - Source: the "Nocturne" design-system project (claude.ai/design, project id
+     1ccdbfeb-d364-4c4c-baf2-5d6e48651a60), pulled 2026-07-26. Project's own last-updated
+     timestamp at pull time: 2026-07-23T02:06:00Z.
+   - styles.css is that project's styles.css verbatim, minus exactly one line:
+     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+   - Inter woff2s below are the static latin-subset instances Google serves for that same
+     family/weight request, fetched directly from fonts.gstatic.com (version v20):
+     - 400 (Regular): https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiA.woff2
+     - 500 (Medium):  https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuI6fAZ9hiA.woff2
+     - 600 (SemiBold): https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuGKYAZ9hiA.woff2
+     - 700 (Bold):     https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuFuYAZ9hiA.woff2
+     These URLs rotate on upstream Inter revisions — if a byte mismatch ever shows up, re-fetch
+     the four from the css2 API (family=Inter:wght@400;500;600;700) rather than assuming drift. */
+
+/* Inter, vendored locally (ADR-0001: fully offline, so no Google Fonts fetch at render time).
+   Latin subset, all four weights Nocturne's own @import requested — styles.css leaves several
+   rules at the UA default bold (700) or an explicit 600 (see wwwroot/app.css and any <strong>),
+   so 400/500 alone left those synthesizing a faux bold instead of rendering Inter's real faces.
+   Licensed under the SIL Open Font License 1.1; see fonts/OFL.txt. */
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -21,6 +38,24 @@
   font-weight: 500;
   font-display: swap;
   src: url("fonts/Inter-Medium.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/Inter-SemiBold.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/Inter-Bold.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
