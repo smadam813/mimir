@@ -29,7 +29,13 @@ public static class EpisodeDisplay
 
     /// <summary>Unsealed means live (or crashed, §4); a Seal always shows its reason.</summary>
     public static string StateLabel(DateTimeOffset? sealedAt, string? sealReason)
-        => sealedAt is null ? "live" : $"sealed · {sealReason ?? "no reason"}";
+        => sealedAt is null ? "live" : $"sealed · {SealPhrase(sealReason)}";
+
+    /// <summary>
+    /// How a Seal reads, in the one place both §8.2 surfaces get it from: a Seal always carries a
+    /// reason, and a row missing one says so rather than reading unsealed.
+    /// </summary>
+    private static string SealPhrase(string? sealReason) => sealReason ?? "no reason";
 
     /// <summary>
     /// An unsealed Episode is live whatever its Distillation column says: Sealing is what enqueues
@@ -60,27 +66,30 @@ public static class EpisodeDisplay
     /// <summary>
     /// The row's second line: where the session ran, how it ended, and what it produced —
     /// <c>~/src/mimir · sealed · clear · 2 Wisdom</c>. A Failed Episode says the sweep will re-queue
-    /// it, because "failed" alone reads terminal when §6 makes it nothing of the kind.
+    /// it, because "failed" alone reads terminal when §6 makes it nothing of the kind. A distilled
+    /// Episode that produced nothing says <c>no Wisdom</c> in words: a quiet session and a session
+    /// whose figure is simply absent would otherwise read alike. Before <c>done</c> there is no
+    /// figure to state — a live or queued Episode has not been distilled yet.
     /// </summary>
     public static string MetaLine(EpisodeSummary episode)
     {
         var parts = new List<string>(4) { episode.Cwd };
-        if (episode.SealedAt is null)
+        parts.Add(episode.SealedAt is null ? "unsealed" : "sealed");
+        if (episode.SealedAt is not null)
         {
-            parts.Add("unsealed");
-        }
-        else
-        {
-            parts.Add("sealed");
-            parts.Add(episode.SealReason ?? "no reason");
+            parts.Add(SealPhrase(episode.SealReason));
         }
 
         if (episode.WisdomCount > 0)
         {
             parts.Add($"{episode.WisdomCount} Wisdom");
         }
+        else if (episode.State == EpisodeState.Done)
+        {
+            parts.Add("no Wisdom");
+        }
 
-        if (State(episode.SealedAt, episode.Distillation) == EpisodeState.Failed)
+        if (episode.State == EpisodeState.Failed)
         {
             parts.Add("re-queued next sweep");
         }

@@ -21,11 +21,11 @@
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
         </svg>
-        <input class="input" disabled="@(Search.Placeholder is null)"
+        <input class="input" disabled="@(!Search.IsClaimed)"
                placeholder="@(Search.Placeholder ?? "Search")"
-               title="@(Search.Placeholder is null
-                   ? "Nothing here claims search — it narrows whichever list is on screen."
-                   : null)"
+               title="@(Search.IsClaimed
+                   ? null
+                   : "Nothing here claims search — it narrows whichever list is on screen.")"
                value="@_searchText"
                @oninput="OnSearchInput" />
     </label>
@@ -102,6 +102,11 @@
 
     private void OnClaimChanged()
     {
+        // The pending keystroke belongs to the surface that just left: delivering it after the
+        // handover would narrow the incoming surface by a term the box no longer shows.
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
+        _searchDebounce = null;
         _searchText = string.Empty;
         _ = InvokeAsync(StateHasChanged);
     }

@@ -92,9 +92,10 @@ public sealed class SurfaceSearchTests
         _heard.ShouldBe(["dotnet"]);
     }
 
-    private Task Narrow(string term)
+    /// <summary>What a claimant does: re-read the term off the service, its one channel.</summary>
+    private Task Narrow()
     {
-        _heard.Add(term);
+        _heard.Add(_search.Term);
         return Task.CompletedTask;
     }
 }

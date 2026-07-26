@@ -183,7 +183,7 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
         evt.Seq.ShouldBe(1);
     }
 
-    // Spec §8.2's timeline is live because every committed capture write is announced on the
+    // Spec §8.2's Episode list is live because every committed capture write is announced on the
     // feed; a write that changed nothing stays quiet so circuits never re-query for no reason.
 
     [Fact]

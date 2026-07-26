@@ -6,7 +6,7 @@ using Mimir.Server.Ui;
 namespace Mimir.Server.Tests.Ui;
 
 /// <summary>
-/// Spec §8.2 against a real Postgres: the queries behind the Episode timeline, and the hard
+/// Spec §8.2 against a real Postgres: the queries behind the Episode list, and the hard
 /// deletes for sensitive content — an Event alone, or an Episode with everything it holds. The
 /// Project sidebar's own queries moved to <c>ChassisBrowserTests</c> with the methods (#89).
 /// </summary>

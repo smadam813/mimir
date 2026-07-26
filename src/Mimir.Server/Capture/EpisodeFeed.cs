@@ -4,7 +4,7 @@ namespace Mimir.Server.Capture;
 public readonly record struct EpisodeChange(Guid ProjectId, Guid EpisodeId);
 
 /// <summary>
-/// How spec §8.2's timeline is live: capture (and the UI's own hard deletes) publish here after
+/// How spec §8.2's Episode list is live: capture (and the UI's own hard deletes) publish here after
 /// each committed write, Blazor circuits subscribe and re-query. Carries only identities — the
 /// database stays the single source of truth for what actually changed.
 /// </summary>

@@ -40,7 +40,7 @@ public sealed class EpisodeDisplayTests
     }
 
     [Fact]
-    public void ALiveEpisode_SaysItIsUnsealed_AndClaimsNoWisdom()
+    public void ALiveEpisode_SaysItIsUnsealed_WithNoWisdomFigureYet()
     {
         var live = Summary(sealReason: null) with { SealedAt = null };
 
@@ -56,11 +56,32 @@ public sealed class EpisodeDisplayTests
     }
 
     [Fact]
+    public void ADistilledEpisodeThatProducedNothing_SaysSoInWords()
+    {
+        // A quiet session and a session whose figure is simply absent must not read alike.
+        var quiet = Summary(sealReason: "clear", wisdomCount: 0);
+
+        EpisodeDisplay.MetaLine(quiet).ShouldBe(@"C:\git\mimir · sealed · clear · no Wisdom");
+    }
+
+    [Fact]
+    public void AnEpisodeStillOwedDistillation_ClaimsNeither()
+    {
+        // Pending, running and failed have not been distilled, so there is no figure to state yet.
+        foreach (var distillation in new[]
+            { DistillationState.Pending, DistillationState.Running, DistillationState.Failed })
+        {
+            EpisodeDisplay.MetaLine(Summary(sealReason: "clear", distillation: distillation))
+                .ShouldNotContain("Wisdom");
+        }
+    }
+
+    [Fact]
     public void ACrashSweptEpisode_IsDistinguishableFromACleanExit()
     {
         var swept = Summary(sealReason: Episode.CrashSweptReason);
 
-        EpisodeDisplay.MetaLine(swept).ShouldBe(@"C:\git\mimir · sealed · crash-swept");
+        EpisodeDisplay.MetaLine(swept).ShouldBe(@"C:\git\mimir · sealed · crash-swept · no Wisdom");
     }
 
     [Fact]
@@ -68,7 +89,7 @@ public sealed class EpisodeDisplayTests
     {
         var summary = Summary(sealReason: null);
 
-        EpisodeDisplay.MetaLine(summary).ShouldBe(@"C:\git\mimir · sealed · no reason");
+        EpisodeDisplay.MetaLine(summary).ShouldBe(@"C:\git\mimir · sealed · no reason · no Wisdom");
     }
 
     [Fact]

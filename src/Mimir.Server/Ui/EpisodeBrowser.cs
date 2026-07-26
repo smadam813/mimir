@@ -20,7 +20,16 @@ public sealed record EpisodeSummary(
     string Cwd,
     int EventCount,
     DistillationState Distillation,
-    int WisdomCount);
+    int WisdomCount)
+{
+    /// <summary>
+    /// What the row marks. Derived here so the list's four readers — the chips' counts, the chip
+    /// filter, the row's own mark and <see cref="EpisodeDisplay.MetaLine"/> — ask one question
+    /// instead of passing the same two columns around; the rule itself stays
+    /// <see cref="EpisodeDisplay.State"/>'s.
+    /// </summary>
+    public EpisodeState State => EpisodeDisplay.State(SealedAt, Distillation);
+}
 
 /// <summary>The §8.2 drill-down: the Episode and its full Event stream in arrival order.</summary>
 public sealed record EpisodeDetail(Episode Episode, IReadOnlyList<Event> Events);

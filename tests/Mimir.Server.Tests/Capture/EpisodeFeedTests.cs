@@ -3,7 +3,7 @@ using Mimir.Server.Capture;
 namespace Mimir.Server.Tests.Capture;
 
 /// <summary>
-/// The feed is what makes spec §8.2's timeline live: capture publishes, UI circuits subscribe.
+/// The feed is what makes spec §8.2's Episode list live: capture publishes, UI circuits subscribe.
 /// Same contract as the health strip's state — one dead subscriber never silences the rest.
 /// </summary>
 public sealed class EpisodeFeedTests

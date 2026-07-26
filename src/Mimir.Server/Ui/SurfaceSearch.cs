@@ -13,6 +13,9 @@ public sealed class SurfaceSearch
 {
     private Claim? _claim;
 
+    /// <summary>Whether a surface is serving the box; the header renders it disabled when not.</summary>
+    public bool IsClaimed => _claim is not null;
+
     /// <summary>What the box invites the curator to type; null while nothing claims it.</summary>
     public string? Placeholder => _claim?.Placeholder;
 
@@ -28,8 +31,11 @@ public sealed class SurfaceSearch
     /// <summary>
     /// Claims the box for one surface. Dispose the result to release it — on the claimant's own
     /// <c>Dispose</c>, so navigating to an unported surface disables the box again.
+    /// <paramref name="narrow"/> takes no term: <see cref="Term"/> is the one channel it arrives
+    /// by, already set when the callback runs, and a surface re-reads it on every other refresh
+    /// (a captured Event, a Project change) anyway.
     /// </summary>
-    public IDisposable ClaimBy(string placeholder, Func<string, Task> narrow)
+    public IDisposable ClaimBy(string placeholder, Func<Task> narrow)
     {
         var claim = new Claim(this, placeholder, narrow);
         _claim = claim;
@@ -50,7 +56,7 @@ public sealed class SurfaceSearch
         }
 
         Term = term;
-        return claim.Narrow(term);
+        return claim.Narrow();
     }
 
     /// <summary>
@@ -70,12 +76,12 @@ public sealed class SurfaceSearch
         ClaimChanged?.Invoke();
     }
 
-    private sealed class Claim(SurfaceSearch search, string placeholder, Func<string, Task> narrow)
+    private sealed class Claim(SurfaceSearch search, string placeholder, Func<Task> narrow)
         : IDisposable
     {
         public string Placeholder { get; } = placeholder;
 
-        public Func<string, Task> Narrow { get; } = narrow;
+        public Func<Task> Narrow { get; } = narrow;
 
         public void Dispose() => search.Release(this);
     }

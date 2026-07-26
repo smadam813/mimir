@@ -62,17 +62,17 @@
         {
             @foreach (var episode in Visible)
             {
-                var state = EpisodeDisplay.State(episode.SealedAt, episode.Distillation);
+                var (dot, mark) = Classes(episode.State);
                 @* The session id keys the Episode (ADR-0003) but is a hash, so it rides as the
                    row's tooltip and the drill-down's heading rather than taking a line here. *@
                 <a class="episode-row" href="@($"projects/{ProjectId}/episodes/{episode.Id}")"
                    title="@($"session {episode.SessionId}")">
                     <div class="episode-row-head">
-                        <span class="state-dot @DotClass(state)"></span>
+                        <span class="state-dot @dot"></span>
                         <span class="episode-when">@EpisodeDisplay.Stamp(episode.StartedAt)</span>
-                        @if (EpisodeDisplay.StateWord(state) is { } word)
+                        @if (EpisodeDisplay.StateWord(episode.State) is { } word)
                         {
-                            <span class="@MarkClass(state)">@word</span>
+                            <span class="@mark">@word</span>
                         }
                         <span class="episode-events">@EpisodeDisplay.EventsLabel(episode.EventCount)</span>
                     </div>
@@ -101,17 +101,17 @@
 
     private IReadOnlyList<EpisodeSummary> _episodes = [];
     private EpisodeState? _filter;
+    private Guid _shownProjectId;
     private IDisposable? _subscription;
     private IDisposable? _claim;
     private CancellationTokenSource? _debounce;
     private int _generation;
 
     private IReadOnlyList<EpisodeSummary> Visible => _filter is { } state
-        ? [.. _episodes.Where(e => EpisodeDisplay.State(e.SealedAt, e.Distillation) == state)]
+        ? [.. _episodes.Where(e => e.State == state)]
         : _episodes;
 
-    private int Count(EpisodeState state)
-        => _episodes.Count(e => EpisodeDisplay.State(e.SealedAt, e.Distillation) == state);
+    private int Count(EpisodeState state) => _episodes.Count(e => e.State == state);
 
     protected override void OnInitialized()
         => _subscription = Feed.Subscribe(change =>
@@ -126,6 +126,14 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // A state chip narrows this Project's Episodes; carrying it to the next Project would say
+        // "No failed Episodes here" over a list that has some.
+        if (_shownProjectId != ProjectId)
+        {
+            _shownProjectId = ProjectId;
+            _filter = null;
+        }
+
         UpdateClaim();
         await RefreshAsync();
     }
@@ -143,8 +151,7 @@
             return;
         }
 
-        _claim ??= Search.ClaimBy(
-            "Search this Project's Events…", _ => InvokeAsync(RefreshAsync));
+        _claim ??= Search.ClaimBy("Search this Project's Events…", () => InvokeAsync(RefreshAsync));
     }
 
     private void Filter(EpisodeState? state) => _filter = state;
@@ -204,22 +211,16 @@
         _debounce?.Dispose();
     }
 
-    private static string DotClass(EpisodeState state) => state switch
-    {
-        EpisodeState.Live => "dot-live",
-        EpisodeState.Failed => "dot-failed",
-        _ => "dot-resting",
-    };
-
     /// <summary>
-    /// Live and failed are words in their own hue — the two states a curator is looking for; the
-    /// queue's two are pills, so a row's distillation reads as a stage rather than an alarm.
+    /// How a row wears its state, dot and word together in one answer. Live and failed are words in
+    /// their own hue — the two states a curator is looking for; the queue's two are pills, so a
+    /// row's distillation reads as a stage rather than an alarm.
     /// </summary>
-    private static string MarkClass(EpisodeState state) => state switch
+    private static (string Dot, string Mark) Classes(EpisodeState state) => state switch
     {
-        EpisodeState.Live => "state-word is-live",
-        EpisodeState.Failed => "state-word is-failed",
-        EpisodeState.Running => "state-pill is-running",
-        _ => "state-pill",
+        EpisodeState.Live => ("dot-live", "state-word is-live"),
+        EpisodeState.Failed => ("dot-failed", "state-word is-failed"),
+        EpisodeState.Running => ("dot-resting", "state-pill is-running"),
+        _ => ("dot-resting", "state-pill"),
     };
 }
