@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject ChassisBrowser Browser
 @inject IEpisodeFeed Feed
+@inject SurfaceSearch Search
 @inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
@@ -18,8 +19,20 @@
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
         </svg>
-        <input class="input" placeholder="Search all Wisdom and Episodes…" disabled
-               title="No surface has claimed search yet — it narrows the active tab once a surface is ported." />
+        @* One box, whichever surface owns it: the active surface claims it on mount with its own
+           wording and receives the term (#89, #96). Disabled until one does.
+
+           Keyed on the claim and carrying no `value`: the header must never write back into a box
+           the curator is typing in — with a value bound, the debounced round trip lands a render
+           mid-word and the caret jumps. The key is the one thing that should clear it, because a
+           term typed at one surface means nothing at the next. *@
+        <input class="input" @key="Search.Placeholder ?? UnclaimedPlaceholder"
+               disabled="@(!Search.IsClaimed)"
+               placeholder="@(Search.Placeholder ?? UnclaimedPlaceholder)"
+               title="@(Search.IsClaimed
+                   ? null
+                   : "No surface has claimed search yet — it narrows the active tab once a surface is ported.")"
+               @oninput="OnSearchInput" />
     </label>
 
     <span class="app-header-spacer"></span>
@@ -64,9 +77,20 @@
 @code {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>What the box says while no surface owns it — also its @key in that state.</summary>
+    private const string UnclaimedPlaceholder = "Search all Wisdom and Episodes…";
+
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
     private CancellationTokenSource? _debounce;
+    private CancellationTokenSource? _searchDebounce;
+
+    /// <summary>
+    /// Synchronous, and deliberately not folded into <see cref="OnInitializedAsync"/>: a surface
+    /// claims the box as it mounts, and the first <c>await</c> there yields long enough for the
+    /// claim to land before the subscription would exist to hear it.
+    /// </summary>
+    protected override void OnInitialized() => Search.Changed += OnSearchChanged;
 
     protected override async Task OnInitializedAsync()
     {
@@ -113,10 +137,46 @@
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Debounced on the way out only. <c>_term</c> follows every keystroke so the rendered value
+    /// never lags what was typed, while the surface behind it is spared a query per character.
+    /// </summary>
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
+        var cts = new CancellationTokenSource();
+        _searchDebounce = cts;
+        _ = DebouncedSearchAsync(e.Value?.ToString() ?? "", cts.Token);
+    }
+
+    private async Task DebouncedSearchAsync(string term, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(DebounceDelay, cancellationToken);
+            await InvokeAsync(() => Search.SetTermAsync(term));
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later keystroke before the debounce elapsed.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Surface search failed");
+        }
+    }
+
+    /// <summary>A claim, a release, or the term the surface actually received.</summary>
+    private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
+
     public void Dispose()
     {
         _subscription?.Dispose();
+        Search.Changed -= OnSearchChanged;
         _debounce?.Cancel();
         _debounce?.Dispose();
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
     }
 }

@@ -11,9 +11,11 @@ namespace Mimir.Server.Recall;
 /// without any database in the picture, and a pin that needs Postgres to run is a pin that skips
 /// on the machine where the mistake is being made.
 ///
-/// Not a lane-facing seam — <see cref="InjectionLog"/> is its only caller. A lane that built a
-/// wrapper here and recorded it itself would apply the wrong shape of the §7 empty-trace rule: the
-/// ambient one reads emptiness off <see cref="Build"/>'s included list, never off its text.
+/// Not a lane-facing seam — <see cref="InjectionLog"/> is its only caller on the write path, and
+/// <c>Ui.InjectionDisplay</c> its only other caller anywhere, rebuilding a logged entry's payload
+/// for the §8.3 surface. A lane that built a wrapper here and recorded it itself would apply the
+/// wrong shape of the §7 empty-trace rule: the ambient one reads emptiness off
+/// <see cref="Build"/>'s included list, never off its text.
 /// </summary>
 internal static class InjectionWrapper
 {

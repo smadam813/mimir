@@ -70,6 +70,22 @@
   --chassis-min-width: 1380px;
 }
 
+/* A surface ported to the four-pane shape (#96 onwards) draws its own panes and scrolls each of
+   them on its own, so MainLayout's padded, singly-scrolling .app-body would fight it. Global rather
+   than scoped, and deliberately: .app-body belongs to MainLayout and .surface-panes to whichever
+   page the router picked, and Blazor's CSS isolation would stamp both halves of this selector with
+   one component's scope — so it would match nothing. The unported surfaces keep the padded body
+   until their own PRs land (#91, #94).
+
+   The extra .app-frame is specificity, not decoration: .app-body:has(.surface-panes) alone ties
+   with MainLayout's scoped .app-body[b-…] and would be settled by stylesheet order. */
+.app-frame .app-body:has(.surface-panes) {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  padding: 0;
+}
+
 /* Keeps an element in the accessibility tree (e.g. FocusOnNavigate's h1 target) without giving it
    a visible presence in a design that draws its own heading in the chrome around it. */
 .sr-only {

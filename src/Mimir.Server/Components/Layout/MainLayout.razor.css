@@ -26,6 +26,9 @@
     overflow-y: auto;
     padding: var(--space-8);
 }
+/* A ported surface overrides all four of these — see .surface-panes' opt-out in
+   wwwroot/nocturne/mimir.css, which has to be global because the two classes belong to two
+   different components and scoped CSS cannot span them. */
 
 #blazor-error-ui {
     color-scheme: light only;

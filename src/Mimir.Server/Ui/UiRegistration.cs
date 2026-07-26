@@ -9,6 +9,9 @@ public static class UiRegistration
         services.AddSingleton<EpisodeBrowser>();
         services.AddSingleton<WisdomBrowser>();
         services.AddSingleton<InjectionBrowser>();
+        // Scoped, unlike the browsers: it carries one circuit's search claim and term, not shared
+        // read state.
+        services.AddScoped<SurfaceSearch>();
         return services;
     }
 }
