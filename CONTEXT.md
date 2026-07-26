@@ -35,8 +35,12 @@ The importance signal on an Event or Wisdom. Explicit salience comes from a deli
 _Avoid_: priority, importance score
 
 **Provenance**:
-The links from a Wisdom back to the Episodes, Events, and Harvested Items it derives from. Merges union provenance; it is never discarded.
+The links from a Wisdom back to the Episodes, Events, and Harvested Items it derives from. Merges union provenance; the Merge Gate never discards it. What does remove a link is the disappearance of the thing it points at — see Orphaned.
 _Avoid_: source, citation
+
+**Orphaned**:
+The standing of a Wisdom left with no Provenance at all: every Episode, Event and Harvested Item it derived from was deleted, and the cascade took the links with them. The words and the version chain survive; only the trail back is gone. Orphaned is a standing a Wisdom falls into, never an act performed on it, and nothing reverses it — the records it pointed at are gone.
+_Avoid_: dangling, unsourced, broken provenance
 
 **Retire**:
 The reversible exclusion of a Wisdom from all recall and default search, keeping its versions and Provenance. Superseded Wisdom is Retired automatically; deletion is a separate, explicit, permanent act. Retire changes standing, not words: a Retired Wisdom's text remains editable, and an edit never unretires it.
