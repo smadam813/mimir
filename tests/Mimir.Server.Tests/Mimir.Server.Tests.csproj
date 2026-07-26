@@ -16,6 +16,8 @@
   <ItemGroup>
     <!-- AppSettingsTests asserts the shipped config still matches the §11 defaults in code. -->
     <Content Include="..\..\src\Mimir.Server\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- OfflineAssetsTests scans every shipped stylesheet for a remote reference. -->
+    <Content Include="..\..\src\Mimir.Server\wwwroot\**\*.css" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
