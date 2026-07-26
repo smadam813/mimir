@@ -1,22 +1,101 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Components.FirstRun
+@using Mimir.Server.Ui
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject ChassisBrowser Browser
+@inject IEpisodeFeed Feed
+@inject ILogger<MainLayout> Logger
 
 @* Spec §8: the chassis every surface lives in — header, tab strip, sidebar, then whichever
    surface's body @Body renders. Fixed desktop frame: the whole shell fills the viewport and each
    pane scrolls on its own, with a 1380px floor below which the frame scrolls horizontally rather
-   than reflowing (#89). *@
-<div class="app-frame">
-    <AppHeader />
-    <SurfaceTabStrip />
-    <div class="app-row">
-        <ProjectSidebar />
-        <main class="app-body">
-            @Body
-        </main>
+   than reflowing (#89).
+
+   An install that has never been introduced to Claude Code is a state of this same shell, not a
+   separate screen (#90): the tab strip goes (there is no Project to count anything for), the body
+   explains the two registrations, and the header and sidebar read the cascade to say their own
+   part. Every region reads one flag from here rather than asking the database itself. *@
+<CascadingValue Value="_isFirstRun" Name="@FirstRunCascade">
+    <div class="app-frame">
+        <AppHeader />
+        @if (!_isFirstRun)
+        {
+            <SurfaceTabStrip />
+        }
+        <div class="app-row">
+            <ProjectSidebar />
+            <main class="app-body @(_isFirstRun ? "is-bare" : null)">
+                @if (_isFirstRun)
+                {
+                    <FirstRunPanel />
+                }
+                else
+                {
+                    @Body
+                }
+            </main>
+        </div>
     </div>
-</div>
+</CascadingValue>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    /// <summary>
+    /// The name the header's and the sidebar's <c>[CascadingParameter]</c> bind to. One constant
+    /// rather than the same string literal in three files.
+    /// </summary>
+    public const string FirstRunCascade = "IsFirstRun";
+
+    private bool _isFirstRun;
+    private IDisposable? _subscription;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+
+        if (_isFirstRun)
+        {
+            // A one-way latch: first run is "no non-Global Project exists", and a Project is only
+            // ever created — so the shell watches the Episode feed only while it is still showing
+            // the first-run state, and stops for good the moment the first hook lands. That is why
+            // there is no debounce here, unlike AppHeader's and ProjectSidebar's own refreshes: the
+            // very first Event to arrive is the one that ends the watch.
+            _subscription = Feed.Subscribe(change => _ = InvokeAsync(RecheckAsync));
+        }
+    }
+
+    private async Task RecheckAsync()
+    {
+        if (!_isFirstRun)
+        {
+            return;
+        }
+
+        try
+        {
+            _isFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
+            // here is a silently swallowed exception rather than a shell still showing onboarding.
+            Logger.LogWarning(ex, "First-run check failed");
+            return;
+        }
+
+        if (!_isFirstRun)
+        {
+            _subscription?.Dispose();
+            _subscription = null;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+}

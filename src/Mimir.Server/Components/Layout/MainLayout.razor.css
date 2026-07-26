@@ -27,6 +27,11 @@
     padding: var(--space-8);
 }
 
+/* The first-run body draws its own padding and its own accent wash to the pane's edges (#90). */
+.app-body.is-bare {
+    padding: 0;
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;

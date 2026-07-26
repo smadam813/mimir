@@ -7,7 +7,11 @@
 @inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
-   whole-install; the tab strip beneath it answers the selected-Project question instead (#89). *@
+   whole-install; the tab strip beneath it answers the selected-Project question instead (#89).
+
+   On first run the pipeline gives way to the model pull (#90). The two swap rather than sit side
+   by side for two reasons: four zeros state nothing an empty install does not already know, and
+   the header has a 1380px floor that the pipeline and the chip together overrun. *@
 <header class="app-header">
     <a class="app-brand" href="/">
         <span class="brand-mark" aria-hidden="true"></span>
@@ -24,7 +28,11 @@
 
     <span class="app-header-spacer"></span>
 
-    @if (_pipeline is { } pipeline)
+    @if (IsFirstRun)
+    {
+        <ModelPullChip />
+    }
+    else if (_pipeline is { } pipeline)
     {
         <div class="pipeline"
              title="The pipeline, live: Episodes captured → Sealed Episodes still owed distillation, failed included → Wisdom admitted → Injections recalled today">
@@ -63,6 +71,10 @@
 
 @code {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>MainLayout's one first-run flag; the header trades the pipeline for the pull (#90).</summary>
+    [CascadingParameter(Name = MainLayout.FirstRunCascade)]
+    public bool IsFirstRun { get; set; }
 
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
