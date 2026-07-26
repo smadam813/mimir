@@ -42,12 +42,26 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(RefreshAsync);
 
+    private int _generation;
+
     private async Task RefreshAsync()
     {
+        var generation = ++_generation;
+
         var route = ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri));
-        _projectId = route?.ProjectId;
+        var projectId = route?.ProjectId;
+        var counts = projectId is { } id ? await Browser.GetSurfaceCountsAsync(id, CancellationToken.None) : null;
+
+        // A newer refresh may have already landed while this one was awaiting its query — drop
+        // this one rather than overwrite a fresher Project's counts with a stale one's.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _projectId = projectId;
         _activeTab = route?.Tab ?? ProjectRoute.DefaultTab;
-        _counts = _projectId is { } id ? await Browser.GetSurfaceCountsAsync(id, CancellationToken.None) : null;
+        _counts = counts;
         StateHasChanged();
     }
 

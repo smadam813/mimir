@@ -21,7 +21,10 @@ internal static class ProjectRoute
     /// </summary>
     public static (Guid ProjectId, string Tab)? Parse(string relativePath)
     {
-        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // ToBaseRelativePath keeps the query string and fragment; strip them before segmenting so
+        // a pasted "?highlight=…" or "#anchor" doesn't get parsed as (or corrupt) the tab segment.
+        var path = relativePath.Split(['?', '#'], 2)[0];
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length < 2
             || !string.Equals(segments[0], "projects", StringComparison.OrdinalIgnoreCase)
             || !Guid.TryParse(segments[1], out var projectId))

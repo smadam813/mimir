@@ -14,7 +14,7 @@
 }
 
 .health-pill:hover,
-.health-pill:popover-open {
+.health-pill:has(+ .health-popover:popover-open) {
     background: color-mix(in srgb, var(--color-text) 6%, transparent);
     color: var(--color-text);
 }
@@ -55,7 +55,11 @@
     }
 }
 
-/* — the popover — native top-layer, positioned under the pill in the fixed-frame header. — */
+/* — the popover — native top-layer, positioned under the pill in the fixed-frame header.
+   `display` must not be set here: an author-origin `display` beats the UA stylesheet's
+   `[popover]:not(:popover-open) { display: none }` regardless of specificity, so setting it on
+   the base rule would keep the popover visible even when closed. It is gated on `:popover-open`
+   below instead. — */
 .health-popover {
     position: fixed;
     top: 56px;
@@ -65,14 +69,17 @@
     margin: 0;
     width: 380px;
     max-height: calc(100vh - 72px);
-    display: flex;
-    flex-direction: column;
     padding: 0;
     border: none;
     border-radius: var(--radius-lg);
     background: var(--color-surface);
     box-shadow: var(--shadow-lg);
     color: var(--color-text);
+}
+
+.health-popover:popover-open {
+    display: flex;
+    flex-direction: column;
 }
 
 .health-popover-head {

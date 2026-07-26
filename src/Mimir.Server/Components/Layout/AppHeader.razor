@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject ChassisBrowser Browser
 @inject IEpisodeFeed Feed
+@inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
    whole-install; the tab strip beneath it answers the selected-Project question instead (#89). *@
@@ -61,16 +62,49 @@
 </header>
 
 @code {
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
+    private CancellationTokenSource? _debounce;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
 
         // The Episode feed is the only signal that already exists for these figures (#89); it
-        // fires on capture (session start, Seal), which is exactly when Episodes/Queued move.
-        _subscription = Feed.Subscribe(change => _ = InvokeAsync(RefreshAsync));
+        // fires on every captured Event, not only session start and Seal, so a burst (a tool use
+        // with the header mounted on several tabs) is coalesced into one refresh instead of one
+        // five-query round trip per Event.
+        _subscription = Feed.Subscribe(change => ScheduleRefresh());
+    }
+
+    private void ScheduleRefresh()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        var cts = new CancellationTokenSource();
+        _debounce = cts;
+        _ = DebouncedRefreshAsync(cts.Token);
+    }
+
+    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(DebounceDelay, cancellationToken);
+            await InvokeAsync(RefreshAsync);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later Event before the debounce elapsed.
+        }
+        catch (Exception ex)
+        {
+            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
+            // here is a silently swallowed exception rather than a stale-but-visible header.
+            Logger.LogWarning(ex, "Header pipeline refresh failed");
+        }
     }
 
     private async Task RefreshAsync()
@@ -79,5 +113,10 @@
         StateHasChanged();
     }
 
-    public void Dispose() => _subscription?.Dispose();
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
 }

@@ -71,4 +71,28 @@ public class ProjectRouteTests
     [Fact]
     public void AMalformedProjectId_MatchesNothing()
         => ProjectRoute.Parse("projects/not-a-guid/wisdom").ShouldBeNull();
+
+    [Fact]
+    public void AQueryString_DoesNotCorruptTheTabSegment()
+    {
+        var id = Guid.NewGuid();
+
+        var route = ProjectRoute.Parse($"projects/{id}/wisdom?highlight=abc");
+
+        route.ShouldNotBeNull();
+        route.Value.ProjectId.ShouldBe(id);
+        route.Value.Tab.ShouldBe("wisdom");
+    }
+
+    [Fact]
+    public void AQueryStringOnTheBareProjectPath_StillMatches()
+    {
+        var id = Guid.NewGuid();
+
+        var route = ProjectRoute.Parse($"projects/{id}?x=1");
+
+        route.ShouldNotBeNull();
+        route.Value.ProjectId.ShouldBe(id);
+        route.Value.Tab.ShouldBe("episodes");
+    }
 }

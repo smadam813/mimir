@@ -26,7 +26,13 @@ public sealed record SurfaceCounts(int Wisdom, int Episodes, int Injections);
 /// <summary>The sidebar's "Needs attention" group, scoped to one Project's Wisdom.</summary>
 public sealed record WisdomAttention(int Contested, int Orphaned, int Retired);
 
-/// <summary>The sidebar's "Capture" group, scoped to one Project's Episodes.</summary>
+/// <summary>
+/// The sidebar's "Capture" group, scoped to one Project's Episodes. <see cref="QueueDepth"/> is
+/// narrower than <see cref="HeaderPipeline.Queued"/> — Sealed and still <c>Pending</c>, Failed
+/// broken out separately into <see cref="Failed"/> instead of counted in — so a Sealed Episode
+/// stuck Failed shows up here, not in the queue depth, even though the header's Queued still
+/// counts it.
+/// </summary>
 public sealed record CaptureAttention(int Running, int Failed, int QueueDepth);
 
 /// <summary>The sidebar's "Recall" group, scoped to one Project's Injections.</summary>
@@ -135,19 +141,13 @@ public sealed class ChassisBrowser(IDbContextFactory<MimirDbContext> contexts, T
         var noise = await db.Injections.CountAsync(
             i => i.ProjectId == projectId && i.Verdict == InjectionVerdict.Noise, cancellationToken);
 
-        // Cross-referencing which injected Wisdom ids still exist is done in memory, the same
-        // pattern InjectionBrowser.ListAsync uses to hydrate injected Wisdom from an entry's jsonb.
-        var rows = await db.Injections.AsNoTracking()
-            .Where(i => i.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        var referencedIds = rows.SelectMany(i => i.Items.Select(x => x.WisdomId)).Distinct().ToList();
-        var existingIds = (await db.Wisdom
-            .Where(w => referencedIds.Contains(w.Id))
-            .Select(w => w.Id)
-            .ToListAsync(cancellationToken))
-            .ToHashSet();
-        var sinceDeleted = rows.Count(i => i.Items.Count > 0
-            && i.Items.Any(x => !existingIds.Contains(x.WisdomId)));
+        // A server-side EXISTS/NOT EXISTS over the jsonb, the same shape InjectionBrowser.ListAsync
+        // uses for its own reads — no full-table materialization, unlike a prior version of this
+        // method that pulled every row (plus its jsonb Items) into memory for one integer.
+        var sinceDeleted = await db.Injections
+            .Where(i => i.ProjectId == projectId && i.Items.Count > 0
+                && i.Items.Any(x => !db.Wisdom.Any(w => w.Id == x.WisdomId)))
+            .CountAsync(cancellationToken);
 
         return new RecallAttention(useful, noise, sinceDeleted);
     }
