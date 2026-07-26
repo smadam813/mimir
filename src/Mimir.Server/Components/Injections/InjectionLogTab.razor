@@ -46,13 +46,11 @@
 
                     @foreach (var entry in session.Entries)
                     {
-                        var gone = entry.Items.Count(i => i.Wisdom is null);
-
                         <button class="entry-row @(_selected?.Id == entry.Id ? "is-selected" : null)"
                                 @key="entry.Id"
                                 @onclick="() => Select(entry)">
                             <span class="entry-head">
-                                <span class="entry-time">@Clock(entry.At)</span>
+                                <span class="entry-time">@InjectionDisplay.TimeOfDay(entry.At)</span>
                                 <span class="entry-lane">@InjectionDisplay.Name(entry.Lane)</span>
                                 @if (entry.Verdict is { } verdict)
                                 {
@@ -60,11 +58,11 @@
                                         @verdict.ToString().ToLowerInvariant()
                                     </span>
                                 }
-                                @if (gone > 0)
+                                @if (entry.WisdomSinceDeleted is > 0)
                                 {
                                     <span class="entry-mark mark-gone"
                                           title="Carried Wisdom hard-deleted since (§10)">
-                                        @gone since deleted
+                                        @entry.WisdomSinceDeleted since deleted
                                     </span>
                                 }
                                 <span class="entry-size">
@@ -211,17 +209,19 @@
     private IDisposable? _searchClaim;
     private Guid _loadedProject;
 
-    protected override void OnInitialized()
-        => _searchClaim = Search.Claim("Search this Project's injections…", OnSearchAsync);
-
     protected override async Task OnParametersSetAsync()
     {
         // A different Project is a different log: the lane chip and the term were chosen against
-        // the old one's counts, and the selected entry is not in the new one at all.
+        // the old one's counts, and the selected entry is not in the new one at all. The router
+        // reuses this instance across the switch — same route template, different parameter — so
+        // this is the only place that runs, and claiming in OnInitialized would leave the header
+        // still showing the term the previous Project's list was narrowed by.
         if (_loadedProject != ProjectId)
         {
             _loadedProject = ProjectId;
             (_lane, _search, _selected) = (null, null, null);
+            _searchClaim?.Dispose();
+            _searchClaim = Search.Claim("Search this Project's injections…", OnSearchAsync);
         }
 
         await RefreshAsync();
@@ -272,9 +272,6 @@
             ? _view.Sessions.SelectMany(s => s.Entries).FirstOrDefault(e => e.Id == previous.Id)
             : null;
     }
-
-    /// <summary>The list's own stamp: the time alone, since the session groups the day.</summary>
-    private static string Clock(DateTimeOffset at) => at.UtcDateTime.ToString("HH:mm");
 
     public void Dispose() => _searchClaim?.Dispose();
 }

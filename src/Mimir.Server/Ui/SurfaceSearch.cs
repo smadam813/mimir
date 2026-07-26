@@ -23,6 +23,15 @@ public sealed class SurfaceSearch
 
     public bool IsClaimed => _handler is not null;
 
+    /// <summary>
+    /// Counts claims and releases, and nothing else — never a term. It is what the header keys its
+    /// input on: the box carries no bound value (a debounced round trip would otherwise land
+    /// mid-word and move the caret), so a new claim can only empty it by making it a new element.
+    /// Two surfaces wording their box identically — the same tab on a second Project — would not
+    /// be told apart by the placeholder alone.
+    /// </summary>
+    public int Generation { get; private set; }
+
     /// <summary>Raised whenever the claim or the term changes, for the header to re-render on.</summary>
     public event Action? Changed;
 
@@ -37,6 +46,7 @@ public sealed class SurfaceSearch
         _handler = onTerm;
         Placeholder = placeholder;
         Term = "";
+        Generation++;
         Changed?.Invoke();
         return new Release(this, onTerm);
     }
@@ -72,6 +82,7 @@ public sealed class SurfaceSearch
             search._handler = null;
             search.Placeholder = null;
             search.Term = "";
+            search.Generation++;
             search.Changed?.Invoke();
         }
     }

@@ -94,6 +94,28 @@ public class SurfaceSearchTests
     }
 
     [Fact]
+    public async Task TheGeneration_MovesOnEveryClaimAndRelease_AndNeverOnATerm()
+    {
+        // It is the header input's @key, and the input carries no bound value — so this moving is
+        // the only thing that can empty the box, and its moving while a curator types would empty
+        // it mid-word. Two surfaces wording their box identically (the same tab on a second
+        // Project) are told apart by this and nothing else.
+        var search = new SurfaceSearch();
+        var atRest = search.Generation;
+
+        var first = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
+        var claimed = search.Generation;
+        await search.SetTermAsync("migrations");
+        var typed = search.Generation;
+        first.Dispose();
+        using var second = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
+
+        claimed.ShouldNotBe(atRest);
+        typed.ShouldBe(claimed);
+        search.Generation.ShouldNotBe(claimed);
+    }
+
+    [Fact]
     public async Task EveryClaimReleaseAndTerm_RaisesChangedForTheHeaderToRenderOn()
     {
         var search = new SurfaceSearch();

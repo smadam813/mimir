@@ -23,6 +23,13 @@ internal sealed record ScoringFormula(string Expression, string Factors);
 /// </summary>
 internal static class InjectionDisplay
 {
+    /// <summary>
+    /// A log row's stamp: the time alone, because the row's session header already carries the day
+    /// and <see cref="EpisodeDisplay.Stamp"/>'s full form would repeat it on every line.
+    /// </summary>
+    public static string TimeOfDay(DateTimeOffset at)
+        => at.UtcDateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
+
     /// <summary>The lane's own name, as §3 writes it — <c>Mcp</c> is an initialism, not a word.</summary>
     public static string Name(InjectionLane lane) => lane switch
     {
@@ -63,6 +70,13 @@ internal static class InjectionDisplay
     /// The §7 score this lane ranked by. The Brief has no query at session start, so it ranks on
     /// each Wisdom's own record; the two query lanes fuse a ranked search instead and damp
     /// reinforcement far more gently. Two expressions, because there really are two.
+    ///
+    /// The expressions restate <see cref="RecallScoring.BriefScore"/> and
+    /// <see cref="RecallScoring.QueryScore"/>, and deliberately: one is arithmetic a lane runs, the
+    /// other is prose a curator reads, and rendering a curator-facing formula out of the live
+    /// computation is not a thing C# can do. What is *not* restated is the numbers in them — every
+    /// factor below is read off <see cref="RecallOptions"/>, so a §11 retune cannot leave this
+    /// explaining the old one. Change either scoring method's shape and change these too.
     /// </summary>
     public static ScoringFormula Formula(InjectionLane lane, RecallOptions options)
     {

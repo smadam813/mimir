@@ -37,9 +37,9 @@
             else if (Payload.Length == 0)
             {
                 <p class="detail-note">
-                    Every Wisdom this entry carried has since been hard-deleted (§10), so there is
-                    nothing left to render the payload's lines from. The injection still happened —
-                    it was @Entry.Chars.ToString("N0") chars.
+                    All @Entry.WisdomSinceDeleted of the Wisdom this entry carried have since been
+                    hard-deleted (§10), so there is nothing left to render the payload's lines from.
+                    The injection still happened — it was @Entry.Chars.ToString("N0") chars.
                 </p>
             }
             else
@@ -97,6 +97,9 @@
                 </div>
                 <p class="detail-note">
                     <code class="detail-formula">@Formula.Expression</code> — @Formula.Factors
+                    Reinforcement, salience and scope are each read now rather than as of the
+                    injection: §3 records the score a lane arrived at, never the factors it got
+                    there by. They explain a rank; they do not reproduce one.
                 </p>
             }
 

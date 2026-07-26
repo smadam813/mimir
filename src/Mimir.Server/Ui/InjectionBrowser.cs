@@ -9,12 +9,16 @@ namespace Mimir.Server.Ui;
 
 /// <summary>
 /// One injected Wisdom on a log entry (§8.3): the score that ranked it, whether it took §7's
-/// salience boost, and the same row the Wisdom surface renders — curation follows Wisdom wherever
-/// it appears (§8). <see cref="Wisdom"/> is null when it was hard-deleted after the injection; the
-/// entry still shows that something was injected.
+/// salience boost, and the row it links into the Wisdom surface by. <see cref="Wisdom"/> is null
+/// when it was hard-deleted after the injection; the entry still shows that something was injected.
 ///
-/// <see cref="Salient"/> is read now, not as of the injection — nothing records the boost a lane
-/// applied — so it explains a score rather than reproducing one.
+/// The surface links rather than curating in place: this screen is about how a line ranked, and a
+/// retire button inside a score table would offer to change that ranking's inputs from the screen
+/// judging them. Curation stays §8.1's.
+///
+/// <see cref="Salient"/>, like the hydrated row itself, is read now rather than as of the injection
+/// — nothing records the factors a lane applied — so it explains a score rather than reproducing
+/// one, and the surface says so.
 /// </summary>
 public sealed record InjectedWisdom(Guid WisdomId, double Score, bool Salient, WisdomListEntry? Wisdom);
 
@@ -38,6 +42,13 @@ public sealed record InjectionLogEntry(
     /// </summary>
     public bool CanPromote => QueryContext is not null
         && Items.Any(i => i.Wisdom is { RetiredAt: null });
+
+    /// <summary>
+    /// How many of the lines this entry carried have since been hard-deleted (§10). Here rather
+    /// than counted in the markup, because it is also what decides whether the payload can be
+    /// rebuilt at all — two readings of one rule is how they come apart.
+    /// </summary>
+    public int WisdomSinceDeleted => Items.Count(i => i.Wisdom is null);
 }
 
 /// <summary>One session's entries, newest first (§8.3).</summary>

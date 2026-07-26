@@ -1,8 +1,10 @@
 @using Mimir.Server.Ui
 
-@* One Wisdom anywhere it renders (§8): kind and state badges, the text linking to its detail,
-   and the inline curation affordance. Browser rows use it today; injection-log items and other
-   Provenance drill-downs drop the same card in when their tickets land. *@
+@* One Wisdom in the §8.1 browser's list: kind and state badges, the text linking to its detail,
+   and the inline curation affordance. The browser's rows are its only caller — the injection log
+   used to drop it in too, and #96 took it back out: on the ported §8.3 surface a carried line is
+   one row of a score table, and a card with its own curation buttons inside that table would
+   invite retiring a Wisdom from a screen about how it ranked. *@
 <article class="wisdom-card">
     <header class="wisdom-head">
         <KindBadge Kind="Entry.Kind" />

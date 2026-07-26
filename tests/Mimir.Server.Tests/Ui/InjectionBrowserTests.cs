@@ -263,9 +263,29 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         view.Truncated.ShouldBeTrue();
         view.Sessions.Sum(s => s.Entries.Count).ShouldBe(InjectionBrowser.RecentEntryLimit);
         view.Sessions.SelectMany(s => s.Entries).ShouldAllBe(e => e.Id != oldest.Id);
-        // The cut entry's mark still feeds the §9 precision inputs.
+        // The cut entry's mark still feeds the §9 precision inputs — and the figure itself, not
+        // only the two counts it divides, is what the bound must not be able to move.
         view.Useful.ShouldBe(1);
         view.Marked.ShouldBe(1);
+        view.Precision.ShouldNotBeNull().ShouldBe(1.0);
+    }
+
+    [Fact]
+    public async Task AnEntry_CountsTheWisdomHardDeletedSinceItCarriedThem()
+    {
+        var project = await AddProjectAsync("injection");
+        var survivor = await AddWisdomAsync(project.Id, "still here");
+        var deleted = await AddWisdomAsync(project.Id, "soon deleted");
+        await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
+            items: [(survivor.Id, 0.03), (deleted.Id, 0.02)]);
+        await Context.Wisdom.Where(w => w.Id == deleted.Id).ExecuteDeleteAsync(Token);
+
+        var entry = (await Browser().ListAsync(new InjectionQuery(project.Id), Token))
+            .Sessions.ShouldHaveSingleItem().Entries.ShouldHaveSingleItem();
+
+        entry.Items.Count.ShouldBe(2);
+        entry.WisdomSinceDeleted.ShouldBe(1);
     }
 
     [Fact]

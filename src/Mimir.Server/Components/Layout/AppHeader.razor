@@ -22,11 +22,13 @@
         @* One box, whichever surface owns it: the active surface claims it on mount with its own
            wording and receives the term (#89, #96). Disabled until one does.
 
-           Keyed on the claim and carrying no `value`: the header must never write back into a box
-           the curator is typing in — with a value bound, the debounced round trip lands a render
-           mid-word and the caret jumps. The key is the one thing that should clear it, because a
-           term typed at one surface means nothing at the next. *@
-        <input class="input" @key="Search.Placeholder ?? UnclaimedPlaceholder"
+           Keyed on the claim's generation and carrying no `value`: the header must never write back
+           into a box the curator is typing in — with a value bound, the debounced round trip lands
+           a render mid-word and the caret jumps. A new element is therefore the only way to empty
+           it, and a new claim is the only thing that should, because a term typed at one surface
+           means nothing at the next. Keyed on the generation rather than the wording, since the
+           same tab on a second Project claims it under the same words. *@
+        <input class="input" @key="Search.Generation"
                disabled="@(!Search.IsClaimed)"
                placeholder="@(Search.Placeholder ?? UnclaimedPlaceholder)"
                title="@(Search.IsClaimed

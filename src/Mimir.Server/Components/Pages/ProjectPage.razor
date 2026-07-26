@@ -21,17 +21,19 @@ else
 
     @* Injections draws the four-pane shape and owns its own scrolling (#96); the two unported
        surfaces still render into the layout's padded body until #91 and #94 land. *@
-    @if (ActiveTab == "injections")
+    @switch (ActiveTab)
     {
-        <InjectionLogTab ProjectId="ProjectId" />
-    }
-    else if (ActiveTab == "wisdom")
-    {
-        <WisdomBrowserTab ProjectId="ProjectId" />
-    }
-    else
-    {
-        <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+        case "wisdom":
+            <WisdomBrowserTab ProjectId="ProjectId" />
+            break;
+
+        case "injections":
+            <InjectionLogTab ProjectId="ProjectId" />
+            break;
+
+        default:
+            <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+            break;
     }
 }
 
