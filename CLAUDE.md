@@ -31,6 +31,8 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 - Bumping `global.json`'s SDK version is a dependency bump: SDK-delivered packages are pinned in every `packages.lock.json`. Local restores are unlocked so it passes quietly; CI restores locked and fails. Regenerate all five lock files in the same commit.
 - `appsettings.json` restates the §11 defaults baked into the `Configuration/` options classes, and `AppSettingsTests` fails on drift — change a default in both places.
 - `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` are on; only the NuGet-audit codes (NU1900–NU1904) are exempt (ADR-0007). A style warning fails the build.
+- A pure test that reads a shipped file directly (not through DI) needs it physically present in the test project's output — mirror `AppSettingsTests`' `<Content Include="..." CopyToOutputDirectory="PreserveNewest" />` in the `.csproj` rather than reaching across the repo with relative paths; globs work (`wwwroot\**\*.css`) and `LinkBase` preserves subfolders (`OfflineAssetsTests`, #88).
+- A `dotnet run --project src/Mimir.Server` left running from manual testing locks `Mimir.Contracts.dll`/`Mimir.Server.dll`; the next `dotnet build`/`dotnet test` fails with MSB3027 until that process is killed.
 
 ### Mutation-checking a test
 
@@ -56,3 +58,7 @@ A follow-up filed out of a review round is `needs-triage` until its fix has been
 ### Domain docs
 
 Single-context layout — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Design source
+
+The Mimir Mono UI design (#86) and the Nocturne design system it's built on live in claude.ai/design projects. Read them with the `DesignSync` tool (`list_projects` → `get_file`) — WebFetch 403s on them (no claude.ai auth session) and browser automation works but is much slower for pulling file contents.
