@@ -4,8 +4,10 @@
 @using Mimir.Server.Components.Injections
 @using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
-@inject EpisodeBrowser Browser
+@inject ChassisBrowser Browser
 
+@* The full tab strip — with this Project's counts — is the layout's SurfaceTabStrip, above
+   @Body; this page renders only the selected tab's body (#89). *@
 <PageTitle>@(_project?.DisplayName ?? "Project") · Mimir</PageTitle>
 
 @if (_project is null)
@@ -15,14 +17,7 @@
 }
 else
 {
-    <h1>@_project.DisplayName</h1>
-
-    @* Spec §8: the three tabs, in spec order. Episodes remains the default landing. *@
-    <nav class="tab-strip" aria-label="Project surfaces">
-        <a class="tab @(ActiveTab == "wisdom" ? "active" : null)" href="@Href("wisdom")">Wisdom</a>
-        <a class="tab @(ActiveTab == "episodes" ? "active" : null)" href="@Href("episodes")">Episodes</a>
-        <a class="tab @(ActiveTab == "injections" ? "active" : null)" href="@Href("injections")">Injections</a>
-    </nav>
+    <h1 class="sr-only">@_project.DisplayName</h1>
 
     @switch (ActiveTab)
     {
@@ -55,8 +50,6 @@ else
         "injections" => "injections",
         _ => "episodes",
     };
-
-    private string Href(string tab) => $"projects/{ProjectId}/{tab}";
 
     protected override async Task OnParametersSetAsync()
         => _project = await Browser.GetProjectAsync(ProjectId, CancellationToken.None);

@@ -5,9 +5,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Ui;
 
-/// <summary>One sidebar entry (spec §8): a real Project, or the reserved Global pseudo-project.</summary>
-public sealed record ProjectListItem(Guid Id, string DisplayName, bool IsGlobal);
-
 /// <summary>One timeline row (spec §8.2). Unsealed means the session is live (or crashed, §4).</summary>
 public sealed record EpisodeSummary(
     Guid Id,
@@ -22,33 +19,14 @@ public sealed record EpisodeSummary(
 public sealed record EpisodeDetail(Episode Episode, IReadOnlyList<Event> Events);
 
 /// <summary>
-/// The read-and-delete surface behind the project sidebar and the Episode timeline (spec §8.2).
-/// Every method opens its own short-lived context — a Blazor circuit outlives any sensible
-/// DbContext lifetime. The hard deletes exist for sensitive content and are announced on the
-/// feed so every open timeline drops the deleted rows without a refresh.
+/// The read-and-delete surface behind the Episode timeline (spec §8.2). Every method opens its
+/// own short-lived context — a Blazor circuit outlives any sensible DbContext lifetime. The hard
+/// deletes exist for sensitive content and are announced on the feed so every open timeline drops
+/// the deleted rows without a refresh. The Project sidebar and lookup moved to
+/// <see cref="ChassisBrowser"/> — the sidebar and the Project page are their only callers.
 /// </summary>
 public sealed class EpisodeBrowser(IDbContextFactory<MimirDbContext> contexts, IEpisodeFeed feed)
 {
-    public async Task<IReadOnlyList<ProjectListItem>> ListProjectsAsync(CancellationToken cancellationToken)
-    {
-        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var projects = await db.Projects
-            .OrderBy(p => p.Id != Project.GlobalId)
-            .ThenBy(p => p.DisplayName)
-            .Select(p => new ProjectListItem(p.Id, p.DisplayName, p.Id == Project.GlobalId))
-            .ToListAsync(cancellationToken);
-        return projects;
-    }
-
-    public async Task<ProjectListItem?> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
-    {
-        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        return await db.Projects
-            .Where(p => p.Id == projectId)
-            .Select(p => new ProjectListItem(p.Id, p.DisplayName, p.Id == Project.GlobalId))
-            .FirstOrDefaultAsync(cancellationToken);
-    }
-
     public async Task<IReadOnlyList<EpisodeSummary>> ListEpisodesAsync(
         Guid projectId, CancellationToken cancellationToken)
     {

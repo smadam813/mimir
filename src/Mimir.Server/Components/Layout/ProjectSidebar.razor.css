@@ -1,0 +1,108 @@
+.project-sidebar {
+    flex: none;
+    width: 196px;
+    padding: var(--space-6) 0 var(--space-6) var(--space-6);
+    box-shadow: inset -1px 0 0 var(--color-divider);
+    overflow-y: auto;
+}
+
+.sidebar-heading {
+    margin: 0 0 var(--space-3) var(--space-3);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.sidebar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-bottom: var(--space-8);
+}
+
+.sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 5.6px var(--space-3);
+    border-radius: var(--radius-sm);
+    color: color-mix(in srgb, var(--color-text) 72%, transparent);
+    font-size: 13px;
+    text-decoration: none;
+}
+
+a.sidebar-item:hover {
+    background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.sidebar-item.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    box-shadow: inset 2px 0 0 var(--color-accent);
+    color: var(--color-text);
+}
+
+.sidebar-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.is-selected .sidebar-item-name {
+    font-weight: var(--font-heading-weight);
+}
+
+.sidebar-item-count {
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.is-selected .sidebar-item-count {
+    color: var(--color-accent-400);
+}
+
+.count-accent {
+    color: var(--color-accent);
+}
+
+.count-danger {
+    color: var(--color-danger);
+}
+
+.attention-dot {
+    width: 5px;
+    height: 5px;
+    flex: none;
+    border-radius: 50%;
+}
+
+.dot-neutral {
+    background: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
+.dot-accent {
+    background: var(--color-accent);
+}
+
+.dot-danger {
+    background: var(--color-danger);
+}
+
+.attention-dot.is-pulsing {
+    animation: attention-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes attention-pulse {
+    50% {
+        opacity: 0.3;
+    }
+}
+
+.sidebar-note {
+    margin: var(--space-4) var(--space-3) 0;
+    font-size: 11px;
+    line-height: 1.55;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}

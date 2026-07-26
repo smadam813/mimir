@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mimir-server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/Mimir.Server"],
+      "port": 6464
+    }
+  ]
+}

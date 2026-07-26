@@ -1,0 +1,73 @@
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject ChassisBrowser Browser
+@inject NavigationManager Nav
+
+@* Spec §8: the three-tab surface strip, in spec order, carrying this Project's own counts —
+   the tab strip answers a different question from the header's whole-install pipeline (#89).
+   Reads the current Project and tab from the URL (ProjectRoute), the same trick ProjectSidebar
+   uses, so it needs no cascading parameter from the page it sits above. Renders nothing off the
+   projects/{id} route entirely — the home page, say. *@
+@if (_projectId is { } projectId)
+{
+    <nav class="tab-strip" aria-label="Project surfaces">
+        <a class="tab @(IsActive("wisdom") ? "is-active" : null)"
+           aria-current="@(IsActive("wisdom") ? "page" : null)"
+           href="@Href(projectId, "wisdom")">
+            Wisdom<span class="tab-count">@(_counts?.Wisdom ?? 0)</span>
+        </a>
+        <a class="tab @(IsActive("episodes") ? "is-active" : null)"
+           aria-current="@(IsActive("episodes") ? "page" : null)"
+           href="@Href(projectId, "episodes")">
+            Episodes<span class="tab-count">@(_counts?.Episodes ?? 0)</span>
+        </a>
+        <a class="tab @(IsActive("injections") ? "is-active" : null)"
+           aria-current="@(IsActive("injections") ? "page" : null)"
+           href="@Href(projectId, "injections")">
+            Injections<span class="tab-count">@(_counts?.Injections ?? 0)</span>
+        </a>
+    </nav>
+}
+
+@code {
+    private Guid? _projectId;
+    private string _activeTab = ProjectRoute.DefaultTab;
+    private SurfaceCounts? _counts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(RefreshAsync);
+
+    private int _generation;
+
+    private async Task RefreshAsync()
+    {
+        var generation = ++_generation;
+
+        var route = ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri));
+        var projectId = route?.ProjectId;
+        var counts = projectId is { } id ? await Browser.GetSurfaceCountsAsync(id, CancellationToken.None) : null;
+
+        // A newer refresh may have already landed while this one was awaiting its query — drop
+        // this one rather than overwrite a fresher Project's counts with a stale one's.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _projectId = projectId;
+        _activeTab = route?.Tab ?? ProjectRoute.DefaultTab;
+        _counts = counts;
+        StateHasChanged();
+    }
+
+    private bool IsActive(string tab) => _activeTab == tab;
+
+    private static string Href(Guid projectId, string tab) => $"projects/{projectId}/{tab}";
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

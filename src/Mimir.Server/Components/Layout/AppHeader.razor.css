@@ -1,0 +1,135 @@
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    flex: none;
+    min-width: var(--chassis-min-width);
+    padding: var(--space-3) var(--space-8);
+    box-shadow: inset 0 -1px 0 var(--color-divider);
+    background: radial-gradient(90% 220% at 62% 50%, color-mix(in srgb, var(--color-accent) 9%, transparent), transparent 70%);
+}
+
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex: none;
+    color: var(--color-text);
+    text-decoration: none;
+}
+
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+}
+
+.brand-mark::after {
+    content: "";
+    width: 8px;
+    height: 1.5px;
+    background: var(--color-accent);
+}
+
+.brand-word {
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    font-size: 15px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.app-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 0 1 340px;
+    margin-left: var(--space-4);
+}
+
+.app-search svg {
+    position: absolute;
+    left: 10px;
+    pointer-events: none;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.app-search input {
+    padding-left: 30px;
+    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.app-search input:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.app-header-spacer {
+    flex: 1;
+}
+
+.pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex: none;
+    cursor: default;
+}
+
+.pipeline-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    width: 82px;
+    padding: 3px 0;
+}
+
+.pipeline-value,
+.pipeline-value-row {
+    font-size: 18px;
+    font-weight: var(--font-heading-weight);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.pipeline-value-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pipeline-value.is-active {
+    color: var(--color-accent);
+}
+
+.pipeline-label {
+    font-size: 8.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.pipeline-rule {
+    width: 56px;
+    height: 1px;
+    background: var(--color-divider);
+}
+
+.pipeline-pulse {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: pipeline-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pipeline-pulse {
+    50% {
+        opacity: 0.3;
+    }
+}
