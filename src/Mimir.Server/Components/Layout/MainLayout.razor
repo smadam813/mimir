@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject NavigationManager Nav
 
 @* Spec §8: the chassis every surface lives in — header, tab strip, sidebar, then whichever
    surface's body @Body renders. Fixed desktop frame: the whole shell fills the viewport and each
@@ -9,7 +10,7 @@
     <SurfaceTabStrip />
     <div class="app-row">
         <ProjectSidebar />
-        <main class="app-body">
+        <main class="app-body @(IsPortedSurface ? "is-flush" : null)">
             @Body
         </main>
     </div>
@@ -20,3 +21,15 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    /// <summary>
+    /// A ported surface fills the body and scrolls its own panes; every surface still on the old
+    /// stylesheet keeps the padded, single-scroll body the frame used to give all of them. Read
+    /// from the URL, the same way the sidebar and tab strip read it (#89), and the layout re-renders
+    /// on every navigation because the router hands it a fresh <c>Body</c>. Each of #94–#96 adds its
+    /// own surface here; the branch goes with the old stylesheet (#97).
+    /// </summary>
+    private bool IsPortedSurface
+        => ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri))?.Tab == "wisdom";
+}

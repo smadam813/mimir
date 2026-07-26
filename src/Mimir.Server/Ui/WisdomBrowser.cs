@@ -5,36 +5,51 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Ui;
 
-/// <summary>The §8.1 scope filter: everything, Global only, or Project-scoped only.</summary>
-public enum WisdomScopeFilter
-{
-    Any,
-    Global,
-    ProjectScoped,
-}
-
 /// <summary>
-/// The §8.1 retired filter. <see cref="Active"/> is the default-search rule (§10: Retired Wisdom
-/// is excluded from default search); the other values are how the browser reaches it anyway.
+/// Which slice of the universe the listing is asking for — the sidebar's "Needs attention" group
+/// is these four, one link each. <see cref="Active"/> is the default-listing rule (§10: Retired
+/// Wisdom is out of default search, and the browser agrees); <see cref="Contested"/> is the
+/// adjudication review surface (§8.4); <see cref="Orphaned"/> is the §3 state where every record a
+/// Wisdom derived from was hard-deleted; <see cref="Retired"/> is how they are reached anyway.
 /// </summary>
-public enum WisdomRetirementFilter
+public enum WisdomLens
 {
     Active,
+    Contested,
+    Orphaned,
     Retired,
-    All,
 }
 
 /// <summary>
-/// One §8.1 browser query: free-text search plus the five filters. The contested filter is the
-/// adjudication review surface (§8.4); defaults mean "everything active, newest first".
+/// One §8.1 browser query. <paramref name="ProjectId"/> names a universe rather than narrowing one
+/// (ADR-0009): the list is that Project's Ambient Candidate Universe — its own Wisdom plus Global —
+/// which is what a session in that repository actually recalls. There is no scope filter, because
+/// the sidebar selection has already said which universe this is and there is nothing left for a
+/// second control to narrow.
 /// </summary>
 public sealed record WisdomQuery(
+    Guid ProjectId,
     string? Search = null,
     WisdomKind? Kind = null,
-    WisdomScopeFilter Scope = WisdomScopeFilter.Any,
-    Guid? ProjectId = null,
-    bool ContestedOnly = false,
-    WisdomRetirementFilter Retirement = WisdomRetirementFilter.Active);
+    WisdomLens Lens = WisdomLens.Active);
+
+/// <summary>One Kind chip: the Kind, and how much of the listed universe carries it.</summary>
+public sealed record WisdomKindCount(WisdomKind Kind, int Count);
+
+/// <summary>
+/// One listing of the Ambient Candidate Universe. <see cref="ProjectOwned"/> and
+/// <see cref="Global"/> partition <see cref="Entries"/> exactly, so the header can state the
+/// arithmetic the sidebar's Project-owned counts otherwise leave as an inference (ADR-0009) —
+/// selecting Global leaves <see cref="ProjectOwned"/> at zero, since Global's ambient universe is
+/// itself. <see cref="Kinds"/> counts the same set <em>before</em> the Kind filter, so clicking a
+/// chip never rewrites the other chips' numbers, and carries every Kind in the enum's own order —
+/// a chip row that neither reshuffles nor drops the chip the curator has just clicked.
+/// </summary>
+public sealed record WisdomListing(
+    IReadOnlyList<WisdomListEntry> Entries,
+    int ProjectOwned,
+    int Global,
+    IReadOnlyList<WisdomKindCount> Kinds);
 
 /// <summary>
 /// One browser row (§8.1), self-describing enough for the reusable curation affordance: kind and
@@ -77,7 +92,8 @@ public sealed record WisdomDetail(
     IReadOnlyList<ProvenanceEntry> Provenance);
 
 /// <summary>
-/// The read-and-curate surface behind the Wisdom browser (§8.1). Every read opens its own
+/// The read-and-curate surface behind the Wisdom browser (§8.1), listing one Project's
+/// <see cref="AmbientUniverse"/> (ADR-0009). Every read opens its own
 /// short-lived context, like <see cref="EpisodeBrowser"/>. Retire and delete are this class's own
 /// writes — they change a row's standing, never its words. Edit does change the words, so it goes
 /// through the Merge Gate (ADR-0004): the gate owns re-embedding, the version chain, and the lock
@@ -90,54 +106,51 @@ internal sealed class WisdomBrowser(
     MergeGate gate,
     TimeProvider clock)
 {
-    public async Task<IReadOnlyList<WisdomListEntry>> ListAsync(
-        WisdomQuery query, CancellationToken cancellationToken)
+    public async Task<WisdomListing> ListAsync(WisdomQuery query, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var wisdom = db.Wisdom.AsQueryable();
 
-        wisdom = query.Retirement switch
-        {
-            WisdomRetirementFilter.Active => wisdom.Where(w => w.RetiredAt == null),
-            WisdomRetirementFilter.Retired => wisdom.Where(w => w.RetiredAt != null),
-            _ => wisdom,
-        };
-        if (query.Kind is { } kind)
-        {
-            wisdom = wisdom.Where(w => w.Kind == kind);
-        }
+        // Search before the Kind filter, so the chips count the set a Kind click would narrow.
+        var chipped = Search(AmbientUniverse.For(db, query.ProjectId, query.Lens), query.Search);
+        var listed = query.Kind is { } kind ? chipped.Where(w => w.Kind == kind) : chipped;
 
-        wisdom = query.Scope switch
-        {
-            WisdomScopeFilter.Global => wisdom.Where(w => w.ScopeProjectId == Project.GlobalId),
-            WisdomScopeFilter.ProjectScoped => wisdom.Where(w => w.ScopeProjectId != Project.GlobalId),
-            _ => wisdom,
-        };
-        if (query.ProjectId is { } projectId)
-        {
-            wisdom = wisdom.Where(w => w.ScopeProjectId == projectId);
-        }
-
-        if (query.ContestedOnly)
-        {
-            wisdom = wisdom.Where(w => w.ContestedAt != null);
-        }
-
-        if (query.Search?.Trim() is { Length: > 0 } term)
-        {
-            // Word-aware FTS over the generated tsv, with a substring fallback so partial words
-            // still find their Wisdom — a browser search, not the §3 ranked hybrid search.
-            var pattern = "%" + term
-                .Replace(@"\", @"\\")
-                .Replace("%", @"\%")
-                .Replace("_", @"\_") + "%";
-            wisdom = wisdom.Where(w =>
-                w.Tsv!.Matches(EF.Functions.PlainToTsQuery("english", term))
-                || EF.Functions.ILike(w.Text, pattern, @"\"));
-        }
-
-        return await ToEntries(db, wisdom.OrderByDescending(w => w.LastConfirmedAt).ThenBy(w => w.Id))
+        var entries = await ToEntries(
+                db, listed.OrderByDescending(w => w.LastConfirmedAt).ThenBy(w => w.Id))
             .ToListAsync(cancellationToken);
+        var counted = await chipped
+            .GroupBy(w => w.Kind)
+            .Select(g => new { Kind = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.Kind, g => g.Count, cancellationToken);
+
+        // Both figures off the rows already in hand, not a second pair of counting queries: the
+        // header's arithmetic has to hold against the list beside it, and two round trips can
+        // straddle an Admission and stop adding up.
+        var global = entries.Count(w => w.ScopeProjectId == Project.GlobalId);
+
+        return new WisdomListing(
+            entries,
+            entries.Count - global,
+            global,
+            [.. Enum.GetValues<WisdomKind>().Select(
+                kind => new WisdomKindCount(kind, counted.GetValueOrDefault(kind)))]);
+    }
+
+    private static IQueryable<Wisdom> Search(IQueryable<Wisdom> wisdom, string? search)
+    {
+        if (search?.Trim() is not { Length: > 0 } term)
+        {
+            return wisdom;
+        }
+
+        // Word-aware FTS over the generated tsv, with a substring fallback so partial words
+        // still find their Wisdom — a browser search, not the §3 ranked hybrid search.
+        var pattern = "%" + term
+            .Replace(@"\", @"\\")
+            .Replace("%", @"\%")
+            .Replace("_", @"\_") + "%";
+        return wisdom.Where(w =>
+            w.Tsv!.Matches(EF.Functions.PlainToTsQuery("english", term))
+            || EF.Functions.ILike(w.Text, pattern, @"\"));
     }
 
     public async Task<WisdomDetail?> GetAsync(Guid wisdomId, CancellationToken cancellationToken)

@@ -1,4 +1,5 @@
 @using Mimir.Server.Capture
+@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @implements IDisposable
 @inject ChassisBrowser Browser
@@ -22,31 +23,34 @@
         }
     </div>
 
-    @if (_activeTab is { } tab)
+    @if (_activeTab is { } tab && _activeProject is { } projectId)
     {
         <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
         <div class="sidebar-group">
-            @* Stat rows, not links: none of these three tab bodies (still their pre-#89 markup)
-               reads a filter back off the URL yet, so a row promising "Retired" or "Failed" would
-               land on the tab's own unfiltered — or, for Wisdom, Active-defaulted — default view. *@
+            @* Stat rows, not links, wherever the tab body still cannot read a filter back off the
+               URL — a row promising "Failed" would land on the tab's own unfiltered default view.
+               Wisdom's three are real links: its surface reads the lens from the query (#91). *@
             @switch (tab)
             {
                 case "wisdom":
-                    <div class="sidebar-item">
+                    <a class="sidebar-item @(IsLens(WisdomLens.Contested) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Contested)">
                         <span class="attention-dot dot-accent"></span>
                         <span class="sidebar-item-name">Contested</span>
                         <span class="sidebar-item-count count-accent">@(_wisdomAttention?.Contested ?? 0)</span>
-                    </div>
-                    <div class="sidebar-item">
+                    </a>
+                    <a class="sidebar-item @(IsLens(WisdomLens.Orphaned) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Orphaned)">
                         <span class="attention-dot dot-danger"></span>
                         <span class="sidebar-item-name">Orphaned</span>
                         <span class="sidebar-item-count count-danger">@(_wisdomAttention?.Orphaned ?? 0)</span>
-                    </div>
-                    <div class="sidebar-item">
+                    </a>
+                    <a class="sidebar-item @(IsLens(WisdomLens.Retired) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Retired)">
                         <span class="attention-dot dot-neutral"></span>
                         <span class="sidebar-item-name">Retired</span>
                         <span class="sidebar-item-count">@(_wisdomAttention?.Retired ?? 0)</span>
-                    </div>
+                    </a>
                     break;
 
                 case "injections":
@@ -96,6 +100,8 @@
 @code {
     private IReadOnlyList<ProjectListItem> _projects = [];
     private string? _activeTab;
+    private Guid? _activeProject;
+    private WisdomLens _activeLens;
     private WisdomAttention? _wisdomAttention;
     private CaptureAttention? _captureAttention;
     private RecallAttention? _recallAttention;
@@ -183,6 +189,8 @@
 
         _projects = projects;
         _activeTab = activeTab;
+        _activeProject = route?.ProjectId;
+        _activeLens = WisdomRoute.LensOf(Nav.ToAbsoluteUri(Nav.Uri));
         _wisdomAttention = wisdomAttention;
         _captureAttention = captureAttention;
         _recallAttention = recallAttention;
@@ -194,6 +202,15 @@
 
     private bool IsSelectedProject(Guid id)
         => Nav.ToBaseRelativePath(Nav.Uri).StartsWith($"projects/{id}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Each "Needs attention" row is the Wisdom listing under one lens — the same screen the tab
+    /// already shows, narrowed — so the link is the Wisdom route carrying that lens (#91).
+    /// </summary>
+    private static string LensHref(Guid projectId, WisdomLens lens)
+        => WisdomRoute.Listing(projectId, lens);
+
+    private bool IsLens(WisdomLens lens) => _activeLens == lens;
 
     private static string GroupTitle(string tab) => tab switch
     {

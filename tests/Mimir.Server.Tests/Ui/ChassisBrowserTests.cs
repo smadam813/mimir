@@ -152,7 +152,7 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     }
 
     [Fact]
-    public async Task WisdomAttention_SeparatesContestedFromRetired_ScopedToThisProject()
+    public async Task WisdomAttention_SeparatesContestedFromRetired_AcrossTheAmbientUniverse()
     {
         var project = await AddProjectAsync("attention");
         var other = await AddProjectAsync("other");
@@ -165,6 +165,26 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
 
         attention.Contested.ShouldBe(1);
         attention.Retired.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// Each of these three is the label on a link into the Wisdom surface's matching lens, so the
+    /// count has to be the length of the list that link opens — Global included (#91). Only the
+    /// Global arm of the shared universe keeper can redden this one: nothing of the Project's own
+    /// is seeded.
+    /// </summary>
+    [Fact]
+    public async Task WisdomAttention_CountsGlobalToo_SoEachFigureIsItsOwnLinksList()
+    {
+        var project = await AddProjectAsync("attention");
+        await AddWisdomAsync(Project.GlobalId, "contested everywhere", contestedAt: Now);
+        await AddWisdomAsync(Project.GlobalId, "retired everywhere", retiredAt: Now);
+
+        var attention = await Browser().GetWisdomAttentionAsync(project.Id, Token);
+
+        attention.Contested.ShouldBe(1);
+        attention.Retired.ShouldBe(1);
+        attention.Orphaned.ShouldBe(1, "the contested Global row has no Provenance either");
     }
 
     [Fact]

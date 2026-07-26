@@ -6,13 +6,76 @@ using Mimir.Server.Ui;
 namespace Mimir.Server.Tests.Ui;
 
 /// <summary>
-/// Spec §8.1 against a real Postgres: the queries behind the Wisdom browser — search plus the
-/// five filters (kind/scope/project/contested/retired), the orphaned-provenance flag, the detail
-/// with its version chain and Provenance drill-down — and the curation actions: edit (new
-/// version, <c>cause=edited</c>, re-embed), Retire/unretire, and the confirmed Delete.
+/// Spec §8.1 against a real Postgres: the queries behind the Wisdom browser — the Ambient
+/// Candidate Universe the listing is (ADR-0009), the four lenses, the Kind chips' counts, search,
+/// the orphaned-provenance flag, the detail with its version chain and Provenance drill-down — and
+/// the curation actions: edit (new version, <c>cause=edited</c>, re-embed), Retire/unretire, and
+/// the confirmed Delete.
 /// </summary>
 public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
+    /// <summary>
+    /// The Project arm of the universe, alone: no Global row is seeded, so only dropping
+    /// <c>scope_project_id = @project</c> can redden this one.
+    /// </summary>
+    [Fact]
+    public async Task SelectingAProject_ListsItsOwnWisdom_AndNoOtherProjects()
+    {
+        var mine = await AddProjectAsync("mine");
+        var other = await AddProjectAsync("other");
+        var kept = await AddWisdomAsync(mine.Id, "mine");
+        await AddWisdomAsync(other.Id, "theirs");
+
+        var listing = await Browser().ListAsync(new WisdomQuery(mine.Id), Token);
+
+        listing.Entries.Select(w => w.Id).ShouldBe([kept.Id]);
+        listing.Entries[0].ScopeName.ShouldBe(mine.DisplayName);
+    }
+
+    /// <summary>
+    /// The Global arm, alone: the Project's own Wisdom is deliberately absent from the fixture, so
+    /// only dropping <c>scope_project_id = Global</c> can redden this one (ADR-0009).
+    /// </summary>
+    [Fact]
+    public async Task SelectingAProject_AlsoListsGlobal_TheSetASessionThereRecalls()
+    {
+        var mine = await AddProjectAsync("mine");
+        var global = await AddWisdomAsync(Project.GlobalId, "everyone's");
+
+        var listing = await Browser().ListAsync(new WisdomQuery(mine.Id), Token);
+
+        listing.Entries.Select(w => w.Id).ShouldBe([global.Id]);
+        listing.Entries[0].ScopeName.ShouldBe("Global");
+    }
+
+    /// <summary>Global's own ambient universe is itself; nothing special is coded for it.</summary>
+    [Fact]
+    public async Task SelectingGlobal_ListsGlobalAlone()
+    {
+        var project = await AddProjectAsync("scoped");
+        var global = await AddWisdomAsync(Project.GlobalId, "a global fact");
+        await AddWisdomAsync(project.Id, "a scoped fact");
+
+        var listing = await Browser().ListAsync(new WisdomQuery(Project.GlobalId), Token);
+
+        listing.Entries.Select(w => w.Id).ShouldBe([global.Id]);
+    }
+
+    [Fact]
+    public async Task TheHeaderCounts_PartitionTheListIntoProjectOwnedAndGlobal()
+    {
+        var mine = await AddProjectAsync("mine");
+        await AddWisdomAsync(mine.Id, "mine, one");
+        await AddWisdomAsync(mine.Id, "mine, two");
+        await AddWisdomAsync(Project.GlobalId, "everyone's");
+
+        var listing = await Browser().ListAsync(new WisdomQuery(mine.Id), Token);
+
+        listing.ProjectOwned.ShouldBe(2);
+        listing.Global.ShouldBe(1);
+        (listing.ProjectOwned + listing.Global).ShouldBe(listing.Entries.Count);
+    }
+
     [Fact]
     public async Task TheDefaultListing_ShowsActiveWisdomNewestFirst_AndExcludesRetired()
     {
@@ -20,81 +83,92 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         var fresh = await AddWisdomAsync(Project.GlobalId, "fresh fact");
         await AddWisdomAsync(Project.GlobalId, "retired fact", retiredAt: Now);
 
-        var listing = await Browser().ListAsync(new WisdomQuery(), Token);
+        var listing = await Browser().ListAsync(new WisdomQuery(Project.GlobalId), Token);
 
-        listing.Select(w => w.Id).ShouldBe([fresh.Id, old.Id]);
+        listing.Entries.Select(w => w.Id).ShouldBe([fresh.Id, old.Id]);
     }
 
     [Fact]
-    public async Task TheKindFilter_NarrowsToTheKind()
+    public async Task TheKindFilter_NarrowsTheList_ButLeavesEveryChipCounting()
     {
         var lesson = await AddWisdomAsync(Project.GlobalId, "a lesson", kind: WisdomKind.Lesson);
         await AddWisdomAsync(Project.GlobalId, "a fact");
 
-        var listing = await Browser().ListAsync(new WisdomQuery(Kind: WisdomKind.Lesson), Token);
+        var listing = await Browser().ListAsync(
+            new WisdomQuery(Project.GlobalId, Kind: WisdomKind.Lesson), Token);
 
-        listing.Select(w => w.Id).ShouldBe([lesson.Id]);
-        listing[0].Kind.ShouldBe(WisdomKind.Lesson);
+        listing.Entries.Select(w => w.Id).ShouldBe([lesson.Id]);
+        listing.Entries[0].Kind.ShouldBe(WisdomKind.Lesson);
+        listing.Kinds.Single(k => k.Kind == WisdomKind.Lesson).Count.ShouldBe(1);
+        listing.Kinds.Single(k => k.Kind == WisdomKind.Fact).Count.ShouldBe(
+            1, "the chips count what a click would narrow, not what the current click left");
     }
 
     [Fact]
-    public async Task TheScopeFilter_SeparatesGlobalFromProjectScoped()
+    public async Task TheKindChips_CountTheWholeUniverse_EveryKindInEnumOrder()
     {
-        var project = await AddProjectAsync("scope");
-        var global = await AddWisdomAsync(Project.GlobalId, "a global fact");
-        var scoped = await AddWisdomAsync(project.Id, "a scoped fact");
+        var mine = await AddProjectAsync("chips");
+        await AddWisdomAsync(mine.Id, "a scoped lesson", kind: WisdomKind.Lesson);
+        await AddWisdomAsync(Project.GlobalId, "a global lesson", kind: WisdomKind.Lesson);
+        await AddWisdomAsync(Project.GlobalId, "a global fact");
+        await AddWisdomAsync(Project.GlobalId, "a retired lesson", kind: WisdomKind.Lesson, retiredAt: Now);
 
-        var globals = await Browser().ListAsync(new WisdomQuery(Scope: WisdomScopeFilter.Global), Token);
-        var projectScoped = await Browser().ListAsync(
-            new WisdomQuery(Scope: WisdomScopeFilter.ProjectScoped), Token);
+        var listing = await Browser().ListAsync(new WisdomQuery(mine.Id), Token);
 
-        globals.Select(w => w.Id).ShouldBe([global.Id]);
-        globals[0].ScopeName.ShouldBe("Global");
-        projectScoped.Select(w => w.Id).ShouldBe([scoped.Id]);
-        projectScoped[0].ScopeName.ShouldBe(project.DisplayName);
+        listing.Kinds.Select(k => k.Kind).ShouldBe(Enum.GetValues<WisdomKind>());
+        listing.Kinds.Select(k => (k.Kind, k.Count)).ShouldBe(
+            [
+                (WisdomKind.Fact, 1),
+                (WisdomKind.Preference, 0),
+                (WisdomKind.Lesson, 2),
+                (WisdomKind.Procedure, 0),
+            ]);
     }
 
     [Fact]
-    public async Task TheProjectFilter_NarrowsToOneProjectsScope()
-    {
-        var mine = await AddProjectAsync("mine");
-        var other = await AddProjectAsync("other");
-        var kept = await AddWisdomAsync(mine.Id, "mine");
-        await AddWisdomAsync(other.Id, "theirs");
-        await AddWisdomAsync(Project.GlobalId, "everyone's");
-
-        var listing = await Browser().ListAsync(new WisdomQuery(ProjectId: mine.Id), Token);
-
-        listing.Select(w => w.Id).ShouldBe([kept.Id]);
-    }
-
-    [Fact]
-    public async Task TheContestedFilter_SurfacesOnlyAdjudicationSurvivors()
+    public async Task TheContestedLens_SurfacesAdjudicationSurvivors_ButNeverRetiredOnes()
     {
         var contested = await AddWisdomAsync(
             Project.GlobalId, "a disputed fact", contestedAt: Now.AddDays(-1));
         await AddWisdomAsync(Project.GlobalId, "a settled fact");
+        await AddWisdomAsync(
+            Project.GlobalId, "a disputed, retired fact", contestedAt: Now.AddDays(-1), retiredAt: Now);
 
-        var listing = await Browser().ListAsync(new WisdomQuery(ContestedOnly: true), Token);
+        var listing = await Browser().ListAsync(
+            new WisdomQuery(Project.GlobalId, Lens: WisdomLens.Contested), Token);
 
-        listing.Select(w => w.Id).ShouldBe([contested.Id]);
-        listing[0].ContestedAt.ShouldNotBeNull();
+        listing.Entries.Select(w => w.Id).ShouldBe([contested.Id]);
+        listing.Entries[0].ContestedAt.ShouldNotBeNull();
     }
 
     [Fact]
-    public async Task TheRetirementFilter_ShowsRetiredAlone_OrEverything()
+    public async Task TheOrphanedLens_SurfacesWisdomWithNoProvenanceLeft_ButNeverRetiredOnes()
     {
-        var active = await AddWisdomAsync(Project.GlobalId, "an active fact");
+        var project = await AddProjectAsync("orphan lens");
+        var episode = await AddEpisodeAsync(project.Id);
+        var orphan = await AddWisdomAsync(project.Id, "nothing points here");
+        var sourced = await AddWisdomAsync(project.Id, "still sourced");
+        await AddProvenanceAsync(sourced.Id, episode.Id);
+        await AddWisdomAsync(project.Id, "orphaned and retired", retiredAt: Now);
+
+        var listing = await Browser().ListAsync(
+            new WisdomQuery(project.Id, Lens: WisdomLens.Orphaned), Token);
+
+        listing.Entries.Select(w => w.Id).ShouldBe([orphan.Id]);
+    }
+
+    [Fact]
+    public async Task TheRetiredLens_ShowsRetiredAlone()
+    {
+        await AddWisdomAsync(Project.GlobalId, "an active fact");
         var retired = await AddWisdomAsync(
             Project.GlobalId, "a retired fact", retiredAt: Now, lastConfirmedAt: Now.AddDays(-1));
 
-        var retiredOnly = await Browser().ListAsync(
-            new WisdomQuery(Retirement: WisdomRetirementFilter.Retired), Token);
-        var all = await Browser().ListAsync(
-            new WisdomQuery(Retirement: WisdomRetirementFilter.All), Token);
+        var listing = await Browser().ListAsync(
+            new WisdomQuery(Project.GlobalId, Lens: WisdomLens.Retired), Token);
 
-        retiredOnly.Select(w => w.Id).ShouldBe([retired.Id]);
-        all.Select(w => w.Id).ShouldBe([active.Id, retired.Id]);
+        listing.Entries.Select(w => w.Id).ShouldBe([retired.Id]);
+        listing.Entries[0].RetiredAt.ShouldNotBeNull();
     }
 
     [Fact]
@@ -105,9 +179,10 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         await AddWisdomAsync(Project.GlobalId, "unrelated filler");
         await AddWisdomAsync(Project.GlobalId, "retired zebra lore", retiredAt: Now);
 
-        var listing = await Browser().ListAsync(new WisdomQuery(Search: "zebra"), Token);
+        var listing = await Browser().ListAsync(
+            new WisdomQuery(Project.GlobalId, Search: "zebra"), Token);
 
-        listing.Select(w => w.Id).ShouldBe([worded.Id, substring.Id], ignoreOrder: true);
+        listing.Entries.Select(w => w.Id).ShouldBe([worded.Id, substring.Id], ignoreOrder: true);
     }
 
     [Fact]
@@ -124,9 +199,9 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
             sourced.Id, harvestedItemId: (await AddHarvestedItemAsync(project.Id)).Id);
 
         await Context.Episodes.Where(e => e.Id == episode.Id).ExecuteDeleteAsync(Token);
-        var listing = await Browser().ListAsync(new WisdomQuery(), Token);
+        var listing = await Browser().ListAsync(new WisdomQuery(Project.GlobalId), Token);
 
-        listing.Select(w => (w.Id, w.OrphanedProvenance))
+        listing.Entries.Select(w => (w.Id, w.OrphanedProvenance))
             .ShouldBe([(orphan.Id, true), (sourced.Id, false)]);
     }
 

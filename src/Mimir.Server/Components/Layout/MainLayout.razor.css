@@ -27,6 +27,14 @@
     padding: var(--space-8);
 }
 
+/* A ported surface fills the body flush and scrolls its own panes instead (#91). */
+.app-body.is-flush {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;

@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject ChassisBrowser Browser
 @inject IEpisodeFeed Feed
+@inject SurfaceSearch Search
 @inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
@@ -14,12 +15,18 @@
         <span class="brand-word">Mimir</span>
     </a>
 
+    @* One box, whichever surface is on screen: it narrows that surface's list rather than opening a
+       results screen of its own (§8). A surface claims it on mount and releases on leaving, so an
+       unclaimed box says so instead of pretending to search (#91). *@
     <label class="app-search">
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
         </svg>
-        <input class="input" placeholder="Search all Wisdom and Episodes…" disabled
-               title="No surface has claimed search yet — it narrows the active tab once a surface is ported." />
+        <input class="input" aria-label="Search"
+               placeholder="@(Search.Placeholder ?? "Search…")"
+               disabled="@(!Search.IsClaimed)"
+               title="@(Search.IsClaimed ? null : "This surface has not claimed search yet — it narrows the active tab once that surface is ported.")"
+               value="@Search.Term" @oninput="OnSearchInput" />
     </label>
 
     <span class="app-header-spacer"></span>
@@ -72,6 +79,10 @@
     {
         await RefreshAsync();
 
+        // A surface claiming or releasing the box changes what this input says and whether it is
+        // enabled at all, and neither is this component's own state.
+        Search.Changed += OnSearchChanged;
+
         // The Episode feed is the only signal that already exists for these figures (#89); it
         // fires on every captured Event, not only session start and Seal, so a burst (a tool use
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
@@ -113,9 +124,14 @@
         StateHasChanged();
     }
 
+    private void OnSearchInput(ChangeEventArgs args) => Search.Set(args.Value as string);
+
+    private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
+
     public void Dispose()
     {
         _subscription?.Dispose();
+        Search.Changed -= OnSearchChanged;
         _debounce?.Cancel();
         _debounce?.Dispose();
     }
