@@ -1,30 +1,106 @@
 @using Mimir.Server.Capture
 @using Mimir.Server.Ui
 @implements IDisposable
-@inject EpisodeBrowser Browser
+@inject ChassisBrowser Browser
 @inject IEpisodeFeed Feed
 @inject NavigationManager Nav
 
 @* Spec §8: the project-centric chassis — every surface is scoped by the Project chosen here.
-   Global is pinned on top by the query's ordering. *@
+   Global is pinned on top by the query's ordering. The second group swaps to match whichever
+   surface is active, read from the URL the same way the tab strip does (#89). *@
 <nav class="project-sidebar" aria-label="Projects">
-    <h2 class="sidebar-title">Projects</h2>
-    @foreach (var project in _projects)
+    <h6 class="sidebar-heading">Projects</h6>
+    <div class="sidebar-group">
+        @foreach (var project in _projects)
+        {
+            <a class="sidebar-item @(IsSelectedProject(project.Id) ? "is-selected" : null)"
+               href="@($"projects/{project.Id}/episodes")">
+                <span class="sidebar-item-name">@project.DisplayName</span>
+                <span class="sidebar-item-count">@project.WisdomCount</span>
+            </a>
+        }
+    </div>
+
+    @if (_activeTab is { } tab)
     {
-        <a class="sidebar-item @(IsSelected(project.Id) ? "selected" : null)"
-           href="@($"projects/{project.Id}/episodes")">
-            @project.DisplayName
-        </a>
+        <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
+        <div class="sidebar-group">
+            @switch (tab)
+            {
+                case "wisdom":
+                    <a class="sidebar-item" href="@TabHref("wisdom")">
+                        <span class="attention-dot dot-accent"></span>
+                        <span class="sidebar-item-name">Contested</span>
+                        <span class="sidebar-item-count count-accent">@(_wisdomAttention?.Contested ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("wisdom")">
+                        <span class="attention-dot dot-danger"></span>
+                        <span class="sidebar-item-name">Orphaned</span>
+                        <span class="sidebar-item-count count-danger">@(_wisdomAttention?.Orphaned ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("wisdom")">
+                        <span class="attention-dot dot-neutral"></span>
+                        <span class="sidebar-item-name">Retired</span>
+                        <span class="sidebar-item-count">@(_wisdomAttention?.Retired ?? 0)</span>
+                    </a>
+                    break;
+
+                case "injections":
+                    <a class="sidebar-item" href="@TabHref("injections")">
+                        <span class="attention-dot dot-accent"></span>
+                        <span class="sidebar-item-name">Marked useful</span>
+                        <span class="sidebar-item-count count-accent">@(_recallAttention?.MarkedUseful ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("injections")">
+                        <span class="attention-dot dot-neutral"></span>
+                        <span class="sidebar-item-name">Marked noise</span>
+                        <span class="sidebar-item-count">@(_recallAttention?.MarkedNoise ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("injections")">
+                        <span class="attention-dot dot-danger"></span>
+                        <span class="sidebar-item-name">Wisdom since deleted</span>
+                        <span class="sidebar-item-count count-danger">@(_recallAttention?.WisdomSinceDeleted ?? 0)</span>
+                    </a>
+                    <p class="sidebar-note">
+                        The log is this project's. Global Wisdom answers in any session, labelled
+                        Global where it landed.
+                    </p>
+                    break;
+
+                default:
+                    <a class="sidebar-item" href="@TabHref("episodes")">
+                        <span class="attention-dot dot-accent @(_captureAttention?.Running > 0 ? "is-pulsing" : null)"></span>
+                        <span class="sidebar-item-name">Running</span>
+                        <span class="sidebar-item-count count-accent">@(_captureAttention?.Running ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("episodes")">
+                        <span class="attention-dot dot-danger"></span>
+                        <span class="sidebar-item-name">Failed</span>
+                        <span class="sidebar-item-count count-danger">@(_captureAttention?.Failed ?? 0)</span>
+                    </a>
+                    <a class="sidebar-item" href="@TabHref("episodes")">
+                        <span class="attention-dot dot-neutral"></span>
+                        <span class="sidebar-item-name">Queue depth</span>
+                        <span class="sidebar-item-count">@(_captureAttention?.QueueDepth ?? 0)</span>
+                    </a>
+                    break;
+            }
+        </div>
     }
 </nav>
 
 @code {
     private IReadOnlyList<ProjectListItem> _projects = [];
+    private string? _activeTab;
+    private Guid _activeProjectId;
+    private WisdomAttention? _wisdomAttention;
+    private CaptureAttention? _captureAttention;
+    private RecallAttention? _recallAttention;
     private IDisposable? _subscription;
 
     protected override async Task OnInitializedAsync()
     {
-        _projects = await Browser.ListProjectsAsync(CancellationToken.None);
+        await RefreshAsync();
 
         // The first hook from a new repo creates its Project mid-session; any capture change may
         // be that first hook, so re-query the (tiny) list and let the sidebar grow live.
@@ -35,14 +111,42 @@
     private async Task RefreshAsync()
     {
         _projects = await Browser.ListProjectsAsync(CancellationToken.None);
+
+        var route = ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri));
+        _activeTab = route?.Tab;
+        if (route is { ProjectId: var projectId, Tab: var tab })
+        {
+            _activeProjectId = projectId;
+            switch (tab)
+            {
+                case "wisdom":
+                    _wisdomAttention = await Browser.GetWisdomAttentionAsync(projectId, CancellationToken.None);
+                    break;
+                case "injections":
+                    _recallAttention = await Browser.GetRecallAttentionAsync(projectId, CancellationToken.None);
+                    break;
+                default:
+                    _captureAttention = await Browser.GetCaptureAttentionAsync(projectId, CancellationToken.None);
+                    break;
+            }
+        }
+
         StateHasChanged();
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-        => StateHasChanged();
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(RefreshAsync);
 
-    private bool IsSelected(Guid id)
+    private bool IsSelectedProject(Guid id)
         => Nav.ToBaseRelativePath(Nav.Uri).StartsWith($"projects/{id}", StringComparison.OrdinalIgnoreCase);
+
+    private string TabHref(string tab) => $"projects/{_activeProjectId}/{tab}";
+
+    private static string GroupTitle(string tab) => tab switch
+    {
+        "wisdom" => "Needs attention",
+        "injections" => "Recall",
+        _ => "Capture",
+    };
 
     public void Dispose()
     {

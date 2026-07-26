@@ -1,3 +1,32 @@
+/* Fixed desktop frame (#89): fills the viewport, no responsive breakpoint. The frame itself has
+   no min-width — it is what scrolls — while AppHeader, SurfaceTabStrip and .app-row each re-state
+   --chassis-min-width (wwwroot/nocturne/mimir.css), so below it their overflow (not the body's)
+   drives the horizontal scrollbar and the three rows track one another exactly. */
+.app-frame {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-y: hidden;
+    overflow-x: auto;
+    background: var(--color-bg);
+}
+
+.app-row {
+    flex: 1;
+    min-height: 0;
+    min-width: var(--chassis-min-width);
+    display: flex;
+    align-items: stretch;
+}
+
+.app-body {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: var(--space-8);
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;

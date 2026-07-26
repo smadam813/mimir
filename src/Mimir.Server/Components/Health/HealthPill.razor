@@ -1,0 +1,192 @@
+@using Mimir.Contracts.Health
+@using Mimir.Server.Health
+@using Mimir.Server.Storage
+@implements IDisposable
+@inject IHealthState HealthState
+
+@* Spec §8: one Health pill in the header, opening a popover with all four probes. Built on the
+   native Popover API (popover="auto" is the default for a bare `popover` attribute) — light
+   dismiss and Escape come from the platform, and toggling never touches the Blazor circuit. *@
+<button type="button" class="health-pill" popovertarget="health-popover" aria-haspopup="true">
+    <span class="health-dot @DotClass()"></span>
+    <span>@Headline()</span>
+    <span class="health-sep">·</span>
+    <span class="health-bytes">@BytesLabel()</span>
+    <svg width="11" height="11" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+        <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
+    </svg>
+</button>
+
+<section id="health-popover" popover class="health-popover" aria-label="Health">
+    <div class="health-popover-head">
+        <h6>Health</h6>
+        <span class="health-popover-note">live over the circuit — no refresh</span>
+        <button type="button" class="health-popover-close" popovertarget="health-popover"
+                popovertargetaction="hide" aria-label="Close">
+            <svg width="11" height="11" viewBox="0 0 256 256" fill="currentColor">
+                <path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="health-popover-body">
+        <section class="health-probe">
+            <div class="health-probe-head">
+                <span class="health-dot @StateDotClass(_snapshot.Ollama.State)"></span>
+                <span class="health-probe-title">Ollama</span>
+                <span class="health-probe-summary">@_snapshot.Ollama.Summary</span>
+            </div>
+            @foreach (var model in _snapshot.Ollama.Models)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">@model.Name</span>
+                    <span class="health-detail-value">@DescribeModel(model)</span>
+                </div>
+            }
+        </section>
+
+        <section class="health-probe">
+            <div class="health-probe-head">
+                <span class="health-dot @StateDotClass(_snapshot.Distillation.State)"></span>
+                <span class="health-probe-title">Distillation</span>
+                <span class="health-probe-summary">@_snapshot.Distillation.Summary</span>
+            </div>
+            @if (_snapshot.Distillation.QueueDepth is { } queueDepth)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">queue</span>
+                    <span class="health-detail-value">@queueDepth</span>
+                </div>
+            }
+            @if (_snapshot.Distillation.LastRunAt is { } lastRun)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">last run</span>
+                    <span class="health-detail-value">@lastRun.LocalDateTime.ToString("HH:mm:ss")</span>
+                </div>
+            }
+        </section>
+
+        <section class="health-probe">
+            <div class="health-probe-head">
+                <span class="health-dot @StateDotClass(_snapshot.Harvester.State)"></span>
+                <span class="health-probe-title">Harvester</span>
+                <span class="health-probe-summary">@_snapshot.Harvester.Summary</span>
+            </div>
+            @if (_snapshot.Harvester.LastScanAt is { } lastScan)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">last scan</span>
+                    <span class="health-detail-value">@lastScan.LocalDateTime.ToString("HH:mm:ss")</span>
+                </div>
+            }
+            @if (_snapshot.Harvester.Items is { } harvestedItems)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">items</span>
+                    <span class="health-detail-value">@harvestedItems</span>
+                </div>
+            }
+            @if (_snapshot.Harvester.Changed is { } harvestedChanged)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">changed</span>
+                    <span class="health-detail-value">@harvestedChanged</span>
+                </div>
+            }
+        </section>
+
+        <section class="health-probe">
+            <div class="health-probe-head">
+                <span class="health-dot @StateDotClass(_snapshot.Storage.State)"></span>
+                <span class="health-probe-title">Storage</span>
+                <span class="health-probe-summary">@_snapshot.Storage.Summary</span>
+            </div>
+            @foreach (var table in _snapshot.Storage.Tables)
+            {
+                <div class="health-detail-row">
+                    <span class="health-detail-name">@table.Table</span>
+                    <span class="health-detail-value">@DescribeTable(table)</span>
+                </div>
+            }
+        </section>
+    </div>
+
+    <div class="health-popover-foot">
+        <span>Emptiness is stated, never inferred from bytes.</span>
+    </div>
+</section>
+
+@code {
+    private HealthSnapshot _snapshot = HealthSnapshot.Pending;
+    private IDisposable? _subscription;
+
+    protected override void OnInitialized()
+    {
+        _snapshot = HealthState.Current;
+
+        // Probes push from background threads; hop onto the circuit's dispatcher to re-render.
+        _subscription = HealthState.Subscribe(snapshot => InvokeAsync(() =>
+        {
+            _snapshot = snapshot;
+            StateHasChanged();
+        }));
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+
+    private string Headline() => _snapshot switch
+    {
+        { Ollama.State: HealthTileState.Degraded } or
+        { Distillation.State: HealthTileState.Degraded } or
+        { Harvester.State: HealthTileState.Degraded } or
+        { Storage.State: HealthTileState.Degraded } => "Needs attention",
+        { Ollama.State: HealthTileState.Working } or
+        { Distillation.State: HealthTileState.Working } or
+        { Harvester.State: HealthTileState.Working } or
+        { Storage.State: HealthTileState.Working } => "Working",
+        { Ollama.State: HealthTileState.Pending } or
+        { Distillation.State: HealthTileState.Pending } or
+        { Harvester.State: HealthTileState.Pending } or
+        { Storage.State: HealthTileState.Pending } => "Starting up",
+        _ => "All ready",
+    };
+
+    // The pill's own dot mirrors Headline()'s three buckets — never the danger hue, which the
+    // Mimir layer reserves for Delete and orphaned Provenance (see wwwroot/nocturne/mimir.css).
+    // Only a live claim pulses; a Degraded probe is still, since nothing is in flight to animate.
+    private string DotClass() => Headline() switch
+    {
+        "Working" => "dot-working",
+        "Needs attention" => "dot-degraded",
+        _ => "dot-neutral",
+    };
+
+    private static string StateDotClass(HealthTileState state) => state switch
+    {
+        HealthTileState.Working => "dot-working",
+        HealthTileState.Degraded => "dot-degraded",
+        _ => "dot-neutral",
+    };
+
+    private string BytesLabel()
+        => _snapshot.Storage.DatabaseSizeBytes is { } bytes ? ByteSize.Format(bytes) : "—";
+
+    // Emptiness is carried in words, never inferred from the byte figure — a 28 MB heap can hold
+    // zero live rows. Only the two states we can prove get to say anything.
+    private static string DescribeTable(TableFootprint table) => table.Occupancy switch
+    {
+        TableOccupancy.Populated => ByteSize.Format(table.TotalBytes),
+        TableOccupancy.Empty => $"{ByteSize.Format(table.TotalBytes)} · empty",
+        _ => $"{ByteSize.Format(table.TotalBytes)} · occupancy unknown",
+    };
+
+    private static string DescribeModel(ModelStatus model) => model.State switch
+    {
+        ModelProvisioningState.Pulling when model.PercentComplete is { } percent => $"pulling {percent}%",
+        ModelProvisioningState.Pulling => "pulling",
+        ModelProvisioningState.Ready => "ready",
+        ModelProvisioningState.Failed => model.Error ?? "failed",
+        _ => "pending",
+    };
+}

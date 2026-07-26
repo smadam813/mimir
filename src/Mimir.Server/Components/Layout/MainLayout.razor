@@ -1,17 +1,18 @@
 @inherits LayoutComponentBase
 
-@* Spec §8: the health strip is pinned on top of every surface; below it, the project sidebar
-   scopes the Wisdom / Episodes / Injections tabs. *@
-<header class="app-header">
-    <a class="app-brand" href="/">Mimir</a>
-    <HealthStrip />
-</header>
-
-<div class="app-shell">
-    <ProjectSidebar />
-    <main class="app-body">
-        @Body
-    </main>
+@* Spec §8: the chassis every surface lives in — header, tab strip, sidebar, then whichever
+   surface's body @Body renders. Fixed desktop frame: the whole shell fills the viewport and each
+   pane scrolls on its own, with a 1380px floor below which the frame scrolls horizontally rather
+   than reflowing (#89). *@
+<div class="app-frame">
+    <AppHeader />
+    <SurfaceTabStrip />
+    <div class="app-row">
+        <ProjectSidebar />
+        <main class="app-body">
+            @Body
+        </main>
+    </div>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>

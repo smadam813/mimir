@@ -63,4 +63,23 @@
   /* Destructive and data-integrity only — Delete and Orphaned. The one hue Mimir adds to the
      system; every other color comes from Nocturne's own ramps. */
   --color-danger: #d67878;
+
+  /* The fixed desktop frame's floor (#89): AppHeader, SurfaceTabStrip and MainLayout's .app-row
+     each re-state this on their own min-width, since they must track one another exactly for the
+     frame to scroll as one below it — one token, not three copies of the same literal. */
+  --chassis-min-width: 1380px;
+}
+
+/* Keeps an element in the accessibility tree (e.g. FocusOnNavigate's h1 target) without giving it
+   a visible presence in a design that draws its own heading in the chrome around it. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

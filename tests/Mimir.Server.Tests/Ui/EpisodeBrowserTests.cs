@@ -6,9 +6,9 @@ using Mimir.Server.Ui;
 namespace Mimir.Server.Tests.Ui;
 
 /// <summary>
-/// Spec §8.2 against a real Postgres: the queries behind the project sidebar and the Episode
-/// timeline, and the hard deletes for sensitive content — an Event alone, or an Episode with
-/// everything it holds.
+/// Spec §8.2 against a real Postgres: the queries behind the Episode timeline, and the hard
+/// deletes for sensitive content — an Event alone, or an Episode with everything it holds. The
+/// Project sidebar's own queries moved to <c>ChassisBrowserTests</c> with the methods (#89).
 /// </summary>
 public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
@@ -20,34 +20,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     {
         await base.InitializeAsync();
         _feed.Subscribe(_announced.Add);
-    }
-
-    [Fact]
-    public async Task TheSidebar_ListsGlobalFirst_ThenProjectsByName()
-    {
-        var beta = await AddProjectAsync("beta");
-        var alpha = await AddProjectAsync("alpha");
-
-        var projects = await Browser().ListProjectsAsync(Token);
-
-        projects[0].Id.ShouldBe(Project.GlobalId);
-        projects[0].IsGlobal.ShouldBeTrue();
-        var index = projects.Select(p => p.Id).ToList();
-        index.IndexOf(alpha.Id).ShouldBeLessThan(index.IndexOf(beta.Id));
-    }
-
-    [Fact]
-    public async Task ASingleProject_IsFetchedByItsId_OrNotAtAll()
-    {
-        var project = await AddProjectAsync("lookup");
-
-        var found = await Browser().GetProjectAsync(project.Id, Token);
-        var missing = await Browser().GetProjectAsync(Guid.NewGuid(), Token);
-
-        found.ShouldNotBeNull();
-        found.DisplayName.ShouldBe("lookup");
-        found.IsGlobal.ShouldBeFalse();
-        missing.ShouldBeNull();
     }
 
     [Fact]

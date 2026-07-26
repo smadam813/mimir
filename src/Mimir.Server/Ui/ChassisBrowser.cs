@@ -1,0 +1,165 @@
+using Microsoft.EntityFrameworkCore;
+using Mimir.Server.Storage;
+using Mimir.Server.Storage.Entities;
+
+namespace Mimir.Server.Ui;
+
+/// <summary>
+/// One sidebar entry (spec §8): a real Project, or the reserved Global pseudo-project, with how
+/// much active Wisdom it scopes.
+/// </summary>
+public sealed record ProjectListItem(Guid Id, string DisplayName, bool IsGlobal, int WisdomCount);
+
+/// <summary>
+/// The header's whole-install pipeline readout: Episodes captured, Sealed Episodes still owed
+/// distillation (failed included — same predicate as <c>DistillationQueue.QueueDepthAsync</c>),
+/// active Wisdom admitted, and Injections recalled today (UTC). <see cref="Distilling"/> is a
+/// narrower question than <c>Queued > 0</c>: it is true only while a claim is actually held
+/// (<see cref="DistillationState.Running"/>), not merely while work is backlogged — the Distilling
+/// counter pulses on this, not on backlog, so a stuck Failed Episode does not read as "in flight".
+/// </summary>
+public sealed record HeaderPipeline(int Episodes, int Queued, int Wisdom, int RecalledToday, bool Distilling);
+
+/// <summary>The tab strip's per-Project counts — a different question from <see cref="HeaderPipeline"/>'s whole-install one.</summary>
+public sealed record SurfaceCounts(int Wisdom, int Episodes, int Injections);
+
+/// <summary>The sidebar's "Needs attention" group, scoped to one Project's Wisdom.</summary>
+public sealed record WisdomAttention(int Contested, int Orphaned, int Retired);
+
+/// <summary>The sidebar's "Capture" group, scoped to one Project's Episodes.</summary>
+public sealed record CaptureAttention(int Running, int Failed, int QueueDepth);
+
+/// <summary>The sidebar's "Recall" group, scoped to one Project's Injections.</summary>
+public sealed record RecallAttention(int MarkedUseful, int MarkedNoise, int WisdomSinceDeleted);
+
+/// <summary>
+/// The read-only surface behind the chassis (spec §8): the Project sidebar, the header's
+/// whole-install pipeline readout, the tab strip's per-Project counts, and the sidebar's
+/// per-surface second group. Every method opens its own short-lived context, like the other UI
+/// browsers. Reads Wisdom, Episode and Injection counts but never writes any of them, so unlike
+/// <see cref="WisdomBrowser"/> nothing here forces this class internal — keeping it public keeps
+/// its Blazor consumers public too.
+/// </summary>
+public sealed class ChassisBrowser(IDbContextFactory<MimirDbContext> contexts, TimeProvider clock)
+{
+    public async Task<IReadOnlyList<ProjectListItem>> ListProjectsAsync(CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var ordered = db.Projects.OrderBy(p => p.Id != Project.GlobalId).ThenBy(p => p.DisplayName);
+        return await ToProjectItems(db, ordered).ToListAsync(cancellationToken);
+    }
+
+    public async Task<ProjectListItem?> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        return await ToProjectItems(db, db.Projects.Where(p => p.Id == projectId))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>The one projection <see cref="ListProjectsAsync"/> and <see cref="GetProjectAsync"/> share.</summary>
+    private static IQueryable<ProjectListItem> ToProjectItems(MimirDbContext db, IQueryable<Project> projects)
+        => projects.Select(p => new ProjectListItem(
+            p.Id,
+            p.DisplayName,
+            p.Id == Project.GlobalId,
+            db.Wisdom.Count(w => w.ScopeProjectId == p.Id && w.RetiredAt == null)));
+
+    /// <summary>
+    /// The header's live readout, across every Project. <c>Queued</c> restates
+    /// <c>DistillationQueue.QueueDepthAsync</c>'s predicate verbatim rather than calling it: that
+    /// class is scoped to a request's own <c>MimirDbContext</c>, while every UI browser opens its
+    /// own short-lived one from a Singleton.
+    /// </summary>
+    public async Task<HeaderPipeline> GetHeaderPipelineAsync(CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var today = clock.GetUtcNow().UtcDateTime.Date;
+
+        var episodes = await db.Episodes.CountAsync(cancellationToken);
+        var queued = await db.Episodes.CountAsync(
+            e => e.SealedAt != null && e.Distillation != DistillationState.Done, cancellationToken);
+        var wisdom = await db.Wisdom.CountAsync(w => w.RetiredAt == null, cancellationToken);
+        var recalledToday = await db.Injections.CountAsync(i => i.At >= today, cancellationToken);
+        var distilling = await db.Episodes.AnyAsync(e => e.Distillation == DistillationState.Running, cancellationToken);
+
+        return new HeaderPipeline(episodes, queued, wisdom, recalledToday, distilling);
+    }
+
+    public async Task<SurfaceCounts> GetSurfaceCountsAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var wisdom = await db.Wisdom.CountAsync(
+            w => w.ScopeProjectId == projectId && w.RetiredAt == null, cancellationToken);
+        var episodes = await db.Episodes.CountAsync(e => e.ProjectId == projectId, cancellationToken);
+        var injections = await db.Injections.CountAsync(i => i.ProjectId == projectId, cancellationToken);
+
+        return new SurfaceCounts(wisdom, episodes, injections);
+    }
+
+    public async Task<WisdomAttention> GetWisdomAttentionAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var contested = await db.Wisdom.CountAsync(
+            w => w.ScopeProjectId == projectId && w.RetiredAt == null && w.ContestedAt != null,
+            cancellationToken);
+        var retired = await db.Wisdom.CountAsync(
+            w => w.ScopeProjectId == projectId && w.RetiredAt != null, cancellationToken);
+        // Same rule WisdomBrowser.ToEntries uses for OrphanedProvenance: no Provenance row at all.
+        var orphaned = await db.Wisdom.CountAsync(
+            w => w.ScopeProjectId == projectId && w.RetiredAt == null
+                && !db.Provenance.Any(p => p.WisdomId == w.Id),
+            cancellationToken);
+
+        return new WisdomAttention(contested, orphaned, retired);
+    }
+
+    public async Task<CaptureAttention> GetCaptureAttentionAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var running = await db.Episodes.CountAsync(
+            e => e.ProjectId == projectId && e.Distillation == DistillationState.Running, cancellationToken);
+        var failed = await db.Episodes.CountAsync(
+            e => e.ProjectId == projectId && e.Distillation == DistillationState.Failed, cancellationToken);
+        var queueDepth = await db.Episodes.CountAsync(
+            e => e.ProjectId == projectId && e.SealedAt != null && e.Distillation == DistillationState.Pending,
+            cancellationToken);
+
+        return new CaptureAttention(running, failed, queueDepth);
+    }
+
+    public async Task<RecallAttention> GetRecallAttentionAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var useful = await db.Injections.CountAsync(
+            i => i.ProjectId == projectId && i.Verdict == InjectionVerdict.Useful, cancellationToken);
+        var noise = await db.Injections.CountAsync(
+            i => i.ProjectId == projectId && i.Verdict == InjectionVerdict.Noise, cancellationToken);
+
+        // Cross-referencing which injected Wisdom ids still exist is done in memory, the same
+        // pattern InjectionBrowser.ListAsync uses to hydrate injected Wisdom from an entry's jsonb.
+        var rows = await db.Injections.AsNoTracking()
+            .Where(i => i.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+        var referencedIds = rows.SelectMany(i => i.Items.Select(x => x.WisdomId)).Distinct().ToList();
+        var existingIds = (await db.Wisdom
+            .Where(w => referencedIds.Contains(w.Id))
+            .Select(w => w.Id)
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var sinceDeleted = rows.Count(i => i.Items.Count > 0
+            && i.Items.Any(x => !existingIds.Contains(x.WisdomId)));
+
+        return new RecallAttention(useful, noise, sinceDeleted);
+    }
+
+    /// <summary>
+    /// First run is "no non-Global Project exists" (not "no Episodes") — a Project is created by a
+    /// session's first hook, so its existence proves Mimir has been introduced, and §8.2 permits
+    /// deleting every Episode without the install becoming first-run again.
+    /// </summary>
+    public async Task<bool> IsFirstRunAsync(CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        return !await db.Projects.AnyAsync(p => p.Id != Project.GlobalId, cancellationToken);
+    }
+}

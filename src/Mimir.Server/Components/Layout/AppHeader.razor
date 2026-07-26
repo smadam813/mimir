@@ -1,0 +1,83 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Components.Health
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject ChassisBrowser Browser
+@inject IEpisodeFeed Feed
+
+@* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
+   whole-install; the tab strip beneath it answers the selected-Project question instead (#89). *@
+<header class="app-header">
+    <a class="app-brand" href="/">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-word">Mimir</span>
+    </a>
+
+    <label class="app-search">
+        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+            <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
+        </svg>
+        <input class="input" placeholder="Search all Wisdom and Episodes…" disabled
+               title="No surface has claimed search yet — it narrows the active tab once a surface is ported." />
+    </label>
+
+    <span class="app-header-spacer"></span>
+
+    @if (_pipeline is { } pipeline)
+    {
+        <div class="pipeline"
+             title="The pipeline, live: Episodes captured → Sealed Episodes still owed distillation, failed included → Wisdom admitted → Injections recalled today">
+            <span class="pipeline-stat">
+                <span class="pipeline-value">@pipeline.Episodes.ToString("N0")</span>
+                <span class="pipeline-label">Episodes</span>
+            </span>
+            <span class="pipeline-rule" aria-hidden="true"></span>
+            <span class="pipeline-stat">
+                <span class="pipeline-value-row">
+                    <span class="pipeline-value @(pipeline.Distilling ? "is-active" : null)">
+                        @pipeline.Queued.ToString("N0")
+                    </span>
+                    @if (pipeline.Distilling)
+                    {
+                        <span class="pipeline-pulse" aria-hidden="true"></span>
+                    }
+                </span>
+                <span class="pipeline-label">Queued</span>
+            </span>
+            <span class="pipeline-rule" aria-hidden="true"></span>
+            <span class="pipeline-stat">
+                <span class="pipeline-value">@pipeline.Wisdom.ToString("N0")</span>
+                <span class="pipeline-label">Wisdom</span>
+            </span>
+            <span class="pipeline-rule" aria-hidden="true"></span>
+            <span class="pipeline-stat">
+                <span class="pipeline-value">@pipeline.RecalledToday.ToString("N0")</span>
+                <span class="pipeline-label">Recalled</span>
+            </span>
+        </div>
+    }
+
+    <HealthPill />
+</header>
+
+@code {
+    private HeaderPipeline? _pipeline;
+    private IDisposable? _subscription;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+
+        // The Episode feed is the only signal that already exists for these figures (#89); it
+        // fires on capture (session start, Seal), which is exactly when Episodes/Queued move.
+        _subscription = Feed.Subscribe(change => _ = InvokeAsync(RefreshAsync));
+    }
+
+    private async Task RefreshAsync()
+    {
+        _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+        StateHasChanged();
+    }
+
+    public void Dispose() => _subscription?.Dispose();
+}
