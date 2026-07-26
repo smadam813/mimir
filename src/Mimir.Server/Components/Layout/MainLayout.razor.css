@@ -20,11 +20,13 @@
     align-items: stretch;
 }
 
+/* No padding of its own: a ported surface fills this with panes that carry their own edges and
+   scroll internally (#94). The surfaces still on the old stylesheet wrap themselves in
+   .legacy-surface (wwwroot/app.css) for the padded page they were written as. */
 .app-body {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
-    padding: var(--space-8);
 }
 
 #blazor-error-ui {

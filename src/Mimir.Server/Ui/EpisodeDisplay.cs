@@ -1,8 +1,26 @@
+using Mimir.Server.Storage.Entities;
+
 namespace Mimir.Server.Ui;
 
 /// <summary>
-/// The §8.2 surfaces' shared presentation: timeline rows and the drill-down must describe the
-/// same Episode the same way, so the words live in one place.
+/// What one row of the Episode list marks (§8.2, #94): where the session itself is, and — once it
+/// has Sealed and joined the queue — where its distillation is. <see cref="Done"/> is the resting
+/// state the list marks with nothing, so the four that want a curator's eye are the four the state
+/// chips filter by.
+/// </summary>
+public enum EpisodeState
+{
+    Live,
+    Pending,
+    Running,
+    Done,
+    Failed,
+}
+
+/// <summary>
+/// The §8.2 surfaces' shared presentation: list rows and the drill-down must describe the
+/// same Episode the same way, so the words live in one place. Pure by construction — no database
+/// reaches this far, so its pins run on a machine with no Postgres.
 /// </summary>
 public static class EpisodeDisplay
 {
@@ -12,4 +30,63 @@ public static class EpisodeDisplay
     /// <summary>Unsealed means live (or crashed, §4); a Seal always shows its reason.</summary>
     public static string StateLabel(DateTimeOffset? sealedAt, string? sealReason)
         => sealedAt is null ? "live" : $"sealed · {sealReason ?? "no reason"}";
+
+    /// <summary>
+    /// An unsealed Episode is live whatever its Distillation column says: Sealing is what enqueues
+    /// (§6), while the column reads <see cref="DistillationState.Pending"/> from the moment capture
+    /// creates the row — so reading the column first would mark every live session "pending".
+    /// </summary>
+    public static EpisodeState State(DateTimeOffset? sealedAt, DistillationState distillation)
+        => sealedAt is null
+            ? EpisodeState.Live
+            : distillation switch
+            {
+                DistillationState.Running => EpisodeState.Running,
+                DistillationState.Done => EpisodeState.Done,
+                DistillationState.Failed => EpisodeState.Failed,
+                _ => EpisodeState.Pending,
+            };
+
+    /// <summary>The word the row and the chips both carry; <see cref="EpisodeState.Done"/> has none.</summary>
+    public static string? StateWord(EpisodeState state) => state switch
+    {
+        EpisodeState.Live => "live",
+        EpisodeState.Pending => "pending",
+        EpisodeState.Running => "running",
+        EpisodeState.Failed => "failed",
+        _ => null,
+    };
+
+    /// <summary>
+    /// The row's second line: where the session ran, how it ended, and what it produced —
+    /// <c>~/src/mimir · sealed · clear · 2 Wisdom</c>. A Failed Episode says the sweep will re-queue
+    /// it, because "failed" alone reads terminal when §6 makes it nothing of the kind.
+    /// </summary>
+    public static string MetaLine(EpisodeSummary episode)
+    {
+        var parts = new List<string>(4) { episode.Cwd };
+        if (episode.SealedAt is null)
+        {
+            parts.Add("unsealed");
+        }
+        else
+        {
+            parts.Add("sealed");
+            parts.Add(episode.SealReason ?? "no reason");
+        }
+
+        if (episode.WisdomCount > 0)
+        {
+            parts.Add($"{episode.WisdomCount} Wisdom");
+        }
+
+        if (State(episode.SealedAt, episode.Distillation) == EpisodeState.Failed)
+        {
+            parts.Add("re-queued next sweep");
+        }
+
+        return string.Join(" · ", parts);
+    }
+
+    public static string EventsLabel(int count) => count == 1 ? "1 Event" : $"{count} Events";
 }

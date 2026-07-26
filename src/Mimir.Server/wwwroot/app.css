@@ -18,6 +18,13 @@
     box-sizing: border-box;
 }
 
+/* The padded page every surface used to be. A ported surface fills MainLayout's .app-body with
+   panes instead, so it wraps nothing in this — and when the last consumer of this file goes (#97),
+   this rule goes with it. */
+.legacy-surface {
+    padding: var(--space-8);
+}
+
 h1:focus {
     outline: none;
 }
@@ -32,67 +39,15 @@ h1:focus {
     max-width: 44rem;
 }
 
-@keyframes pulse {
-    50% { opacity: 0.35; }
-}
+/* Episode detail (spec §8.2). The list's own rules left with it — the ported list pane is on
+   Nocturne, in EpisodeList.razor.css (#94). */
 
-/* Episode timeline + detail (spec §8.2) */
-
-.episode-timeline,
 .event-stream {
     list-style: none;
     margin: 1rem 0 0;
     padding: 0;
     display: grid;
     gap: 0.6rem;
-}
-
-.episode-row {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 0.75rem;
-    row-gap: 0.1rem;
-    padding: 0.6rem 0.8rem;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    text-decoration: none;
-}
-
-.episode-row:hover {
-    border-color: var(--text-dim);
-}
-
-.episode-state {
-    font-size: 0.75rem;
-    font-weight: 600;
-    align-self: center;
-    white-space: nowrap;
-}
-
-.episode-state.live {
-    color: var(--ready);
-    animation: pulse 1.4s ease-in-out infinite;
-}
-
-.episode-state.sealed {
-    color: var(--text-dim);
-}
-
-.episode-session {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.episode-meta {
-    grid-column: 2;
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .crumbs {

@@ -1,0 +1,225 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject EpisodeBrowser Browser
+@inject IEpisodeFeed Feed
+@inject SurfaceSearch Search
+@inject ILogger<EpisodeList> Logger
+
+@* Spec §8.2 on the four-pane shape (#94): this Project's Sealed and live Episodes, newest first,
+   each row marking where its session and its distillation are. The list grows over the circuit as
+   capture announces changes — no refresh, no polling — and the header's search box narrows it
+   while this component is mounted. *@
+<div class="episode-pane">
+    <div class="pane-head">
+        <div class="pane-title-row">
+            <h4 class="pane-title">Episodes</h4>
+            <span class="pane-count">@_episodes.Count.ToString("N0") · @ProjectName</span>
+        </div>
+
+        @* The drawn chips are All / Live / Pending / Failed; Running joins them so every state a
+           row can mark is also a state the curator can filter to. Done is the resting majority —
+           it is what "All" is mostly made of, and marks nothing on its row. *@
+        @if (_episodes.Count > 0)
+        {
+            <div class="state-chips">
+                <button type="button" class="btn btn-secondary chip @(_filter is null ? "is-active" : null)"
+                        @onclick="() => Filter(null)">
+                    All
+                </button>
+                @foreach (var state in Chips)
+                {
+                    <button type="button" class="btn btn-secondary chip @(_filter == state ? "is-active" : null)"
+                            @onclick="() => Filter(state)">
+                        @EpisodeDisplay.StateWord(state)<span class="chip-count">@Count(state)</span>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="pane-rows">
+        @if (IsGlobal)
+        {
+            <p class="pane-note">
+                Global holds Wisdom only — Episodes always belong to the Project their session ran
+                in (§3).
+            </p>
+        }
+        else if (_episodes.Count == 0 && Search.Term.Trim() is { Length: > 0 } term)
+        {
+            <p class="pane-note">No Episode of this Project has an Event mentioning “@term”.</p>
+        }
+        else if (_episodes.Count == 0)
+        {
+            <p class="pane-note">No sessions captured for this Project yet.</p>
+        }
+        else if (Visible.Count == 0)
+        {
+            <p class="pane-note">No @EpisodeDisplay.StateWord(_filter!.Value) Episodes here.</p>
+        }
+        else
+        {
+            @foreach (var episode in Visible)
+            {
+                var state = EpisodeDisplay.State(episode.SealedAt, episode.Distillation);
+                @* The session id keys the Episode (ADR-0003) but is a hash, so it rides as the
+                   row's tooltip and the drill-down's heading rather than taking a line here. *@
+                <a class="episode-row" href="@($"projects/{ProjectId}/episodes/{episode.Id}")"
+                   title="@($"session {episode.SessionId}")">
+                    <div class="episode-row-head">
+                        <span class="state-dot @DotClass(state)"></span>
+                        <span class="episode-when">@EpisodeDisplay.Stamp(episode.StartedAt)</span>
+                        @if (EpisodeDisplay.StateWord(state) is { } word)
+                        {
+                            <span class="@MarkClass(state)">@word</span>
+                        }
+                        <span class="episode-events">@EpisodeDisplay.EventsLabel(episode.EventCount)</span>
+                    </div>
+                    <p class="episode-meta">@EpisodeDisplay.MetaLine(episode)</p>
+                </a>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The four states a row marks, in the order the chips carry them.</summary>
+    private static readonly EpisodeState[] Chips =
+        [EpisodeState.Live, EpisodeState.Pending, EpisodeState.Running, EpisodeState.Failed];
+
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    [Parameter, EditorRequired]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsGlobal { get; set; }
+
+    private IReadOnlyList<EpisodeSummary> _episodes = [];
+    private EpisodeState? _filter;
+    private IDisposable? _subscription;
+    private IDisposable? _claim;
+    private CancellationTokenSource? _debounce;
+    private int _generation;
+
+    private IReadOnlyList<EpisodeSummary> Visible => _filter is { } state
+        ? [.. _episodes.Where(e => EpisodeDisplay.State(e.SealedAt, e.Distillation) == state)]
+        : _episodes;
+
+    private int Count(EpisodeState state)
+        => _episodes.Count(e => EpisodeDisplay.State(e.SealedAt, e.Distillation) == state);
+
+    protected override void OnInitialized()
+        => _subscription = Feed.Subscribe(change =>
+        {
+            if (change.ProjectId == ProjectId)
+            {
+                // Coalesced: the feed fires on every captured Event, and this list's query counts
+                // Events and Provenance per row — one refresh per burst, not one per Event.
+                ScheduleRefresh();
+            }
+        });
+
+    protected override async Task OnParametersSetAsync()
+    {
+        UpdateClaim();
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Claims the header's search box while there is something here to narrow. Global's tab has no
+    /// Episodes at all, so it hands the box back rather than offering a search over nothing.
+    /// </summary>
+    private void UpdateClaim()
+    {
+        if (IsGlobal)
+        {
+            _claim?.Dispose();
+            _claim = null;
+            return;
+        }
+
+        _claim ??= Search.ClaimBy(
+            "Search this Project's Events…", _ => InvokeAsync(RefreshAsync));
+    }
+
+    private void Filter(EpisodeState? state) => _filter = state;
+
+    private void ScheduleRefresh()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        var cts = new CancellationTokenSource();
+        _debounce = cts;
+        _ = DebouncedRefreshAsync(cts.Token);
+    }
+
+    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(DebounceDelay, cancellationToken);
+            await InvokeAsync(RefreshAsync);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later Event before the debounce elapsed.
+        }
+        catch (Exception ex)
+        {
+            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
+            // here is a silently swallowed exception rather than a stale-but-visible list.
+            Logger.LogWarning(ex, "Episode list refresh failed");
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var generation = ++_generation;
+
+        IReadOnlyList<EpisodeSummary> episodes = IsGlobal
+            ? []
+            : await Browser.ListEpisodesAsync(ProjectId, Search.Term, CancellationToken.None);
+
+        // A newer refresh — a later Event, another keystroke, a different Project — may have landed
+        // while this one was awaiting its query; drop this one rather than overwrite fresher rows.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _episodes = episodes;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+        _claim?.Dispose();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+    }
+
+    private static string DotClass(EpisodeState state) => state switch
+    {
+        EpisodeState.Live => "dot-live",
+        EpisodeState.Failed => "dot-failed",
+        _ => "dot-resting",
+    };
+
+    /// <summary>
+    /// Live and failed are words in their own hue — the two states a curator is looking for; the
+    /// queue's two are pills, so a row's distillation reads as a stage rather than an alarm.
+    /// </summary>
+    private static string MarkClass(EpisodeState state) => state switch
+    {
+        EpisodeState.Live => "state-word is-live",
+        EpisodeState.Failed => "state-word is-failed",
+        EpisodeState.Running => "state-pill is-running",
+        _ => "state-pill",
+    };
+}

@@ -12,25 +12,35 @@
 
 @if (_project is null)
 {
-    <h1>Unknown Project</h1>
-    <p class="lede">Nothing lives at this id — the Project may have been deleted.</p>
+    <div class="legacy-surface">
+        <h1>Unknown Project</h1>
+        <p class="lede">Nothing lives at this id — the Project may have been deleted.</p>
+    </div>
 }
 else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
+    @* A ported surface fills the body with its own panes; the two still on the old stylesheet keep
+       the padded page they were written as, until #97 retires it with them. *@
     @switch (ActiveTab)
     {
         case "wisdom":
-            <WisdomBrowserTab ProjectId="ProjectId" />
+            <div class="legacy-surface">
+                <WisdomBrowserTab ProjectId="ProjectId" />
+            </div>
             break;
 
         case "injections":
-            <InjectionLogTab ProjectId="ProjectId" />
+            <div class="legacy-surface">
+                <InjectionLogTab ProjectId="ProjectId" />
+            </div>
             break;
 
         default:
-            <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+            <EpisodeList ProjectId="ProjectId"
+                         ProjectName="@_project.DisplayName"
+                         IsGlobal="_project.IsGlobal" />
             break;
     }
 }

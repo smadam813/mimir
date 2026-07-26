@@ -26,9 +26,10 @@
     {
         <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
         <div class="sidebar-group">
-            @* Stat rows, not links: none of these three tab bodies (still their pre-#89 markup)
-               reads a filter back off the URL yet, so a row promising "Retired" or "Failed" would
-               land on the tab's own unfiltered — or, for Wisdom, Active-defaulted — default view. *@
+            @* Stat rows, not links: no tab body reads a filter back off the URL, so a row promising
+               "Retired" or "Failed" would land on the tab's own unfiltered — or, for Wisdom,
+               Active-defaulted — default view. The ported Episode list does filter by state, but
+               from its own chips (#94); a linkable filter wants the URL to carry it. *@
             @switch (tab)
             {
                 case "wisdom":

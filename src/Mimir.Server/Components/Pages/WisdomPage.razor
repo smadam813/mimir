@@ -7,6 +7,9 @@
 
 <PageTitle>Wisdom · Mimir</PageTitle>
 
+@* Still the pre-port detail on the old stylesheet — #92 puts it on the four-pane shape — so it
+   wraps itself in the padded page the frame used to apply (#94). *@
+<div class="legacy-surface">
 @if (_detail is null)
 {
     <h1>Wisdom not found</h1>
@@ -108,6 +111,7 @@ else
         </ul>
     }
 }
+</div>
 
 @code {
     [Parameter]

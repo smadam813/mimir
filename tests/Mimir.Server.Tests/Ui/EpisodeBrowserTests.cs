@@ -23,17 +23,18 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     }
 
     [Fact]
-    public async Task TheTimeline_ShowsOnlyTheProjectsEpisodes_NewestFirst()
+    public async Task TheList_ShowsOnlyTheProjectsEpisodes_NewestFirst()
     {
         var project = await AddProjectAsync("timeline");
         var other = await AddProjectAsync("other");
+        // Seeded out of the order asserted, so a dropped ORDER BY cannot pass on insertion order.
         var old = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2));
         var fresh = await AddEpisodeAsync(project.Id, startedAt: Now);
         await AddEpisodeAsync(other.Id, startedAt: Now);
 
-        var timeline = await Browser().ListEpisodesAsync(project.Id, Token);
+        var list = await Browser().ListEpisodesAsync(project.Id, null, Token);
 
-        timeline.Select(e => e.Id).ShouldBe([fresh.Id, old.Id]);
+        list.Select(e => e.Id).ShouldBe([fresh.Id, old.Id]);
     }
 
     [Fact]
@@ -45,13 +46,120 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
         await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
 
-        var summary = (await Browser().ListEpisodesAsync(project.Id, Token)).Single();
+        var summary = (await Browser().ListEpisodesAsync(project.Id, null, Token)).Single();
 
         summary.SealedAt.ShouldNotBeNull();
         summary.SealReason.ShouldBe("exit");
         summary.EventCount.ShouldBe(2);
         summary.SessionId.ShouldBe(episode.SessionId);
         summary.Cwd.ShouldBe(episode.Cwd);
+    }
+
+    [Fact]
+    public async Task ASummary_CarriesWhereItsDistillationIs()
+    {
+        var project = await AddProjectAsync("distillation");
+        await AddEpisodeAsync(
+            project.Id, sealedAt: Now, distillation: DistillationState.Failed);
+
+        var summary = (await Browser().ListEpisodesAsync(project.Id, null, Token)).Single();
+
+        summary.Distillation.ShouldBe(DistillationState.Failed);
+    }
+
+    [Fact]
+    public async Task ASummary_CountsTheWisdomTheEpisodeProduced()
+    {
+        var project = await AddProjectAsync("produced");
+        var fruitful = await AddEpisodeAsync(project.Id, startedAt: Now);
+        var quiet = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
+        var admitted = await AddWisdomAsync(project.Id, "one lesson");
+        var confirmed = await AddWisdomAsync(project.Id, "another lesson");
+        await AddProvenanceAsync(admitted.Id, episodeId: fruitful.Id);
+        await AddProvenanceAsync(confirmed.Id, episodeId: fruitful.Id);
+        // Another Episode's Wisdom must not count towards this one.
+        var elsewhere = await AddWisdomAsync(project.Id, "a third lesson");
+        await AddProvenanceAsync(elsewhere.Id, episodeId: quiet.Id);
+
+        var list = await Browser().ListEpisodesAsync(project.Id, null, Token);
+
+        list.Single(e => e.Id == fruitful.Id).WisdomCount.ShouldBe(2);
+        list.Single(e => e.Id == quiet.Id).WisdomCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task WisdomDrawnFromSeveralOfOneEpisodesEvents_CountsOnce()
+    {
+        // The gate writes one Provenance row per provenance Event (§6), so the count is over
+        // distinct Wisdom — otherwise a Lesson drawn from three Events reads as three Wisdom.
+        var project = await AddProjectAsync("distinct");
+        var episode = await AddEpisodeAsync(project.Id);
+        var first = await AddEventAsync(episode.Id, seq: 1);
+        var second = await AddEventAsync(episode.Id, seq: 2);
+        var wisdom = await AddWisdomAsync(project.Id, "one lesson, two Events");
+        await AddProvenanceAsync(wisdom.Id, episodeId: episode.Id, eventId: first.Id);
+        await AddProvenanceAsync(wisdom.Id, episodeId: episode.Id, eventId: second.Id);
+
+        var summary = (await Browser().ListEpisodesAsync(project.Id, null, Token)).Single();
+
+        summary.WisdomCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Searching_KeepsOnlyTheEpisodesWhoseEventsMatch()
+    {
+        var project = await AddProjectAsync("search");
+        var matching = await AddEpisodeAsync(project.Id, startedAt: Now);
+        await AddEventAsync(
+            matching.Id, seq: 1, payload: """{"prompt":"the interceptor never fires"}""");
+        var other = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
+        await AddEventAsync(other.Id, seq: 1, payload: """{"prompt":"bring the stack up"}""");
+
+        var list = await Browser().ListEpisodesAsync(project.Id, "interceptor", Token);
+
+        list.Select(e => e.Id).ShouldBe([matching.Id]);
+    }
+
+    [Fact]
+    public async Task Searching_IsWordAware_NotSubstring()
+    {
+        // The GIN index over Event.tsv is an FTS index: it stems, so "fires" finds "firing" — and
+        // a mid-word fragment finds nothing, which is the trade the index buys.
+        var project = await AddProjectAsync("stemming");
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddEventAsync(episode.Id, seq: 1, payload: """{"prompt":"the interceptor is firing"}""");
+
+        var stemmed = await Browser().ListEpisodesAsync(project.Id, "fires", Token);
+        var fragment = await Browser().ListEpisodesAsync(project.Id, "ercept", Token);
+
+        stemmed.Select(e => e.Id).ShouldBe([episode.Id]);
+        fragment.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task AnEpisodeWithNoEvents_IsSearchedAway_ButListedWhenNothingIsTyped()
+    {
+        var project = await AddProjectAsync("eventless");
+        var episode = await AddEpisodeAsync(project.Id);
+
+        (await Browser().ListEpisodesAsync(project.Id, "interceptor", Token)).ShouldBeEmpty();
+        (await Browser().ListEpisodesAsync(project.Id, "   ", Token))
+            .Select(e => e.Id).ShouldBe([episode.Id]);
+    }
+
+    [Fact]
+    public async Task Searching_StaysInsideTheProject()
+    {
+        var project = await AddProjectAsync("scoped");
+        var other = await AddProjectAsync("elsewhere");
+        var mine = await AddEpisodeAsync(project.Id);
+        await AddEventAsync(mine.Id, seq: 1, payload: """{"prompt":"the interceptor never fires"}""");
+        var theirs = await AddEpisodeAsync(other.Id);
+        await AddEventAsync(theirs.Id, seq: 1, payload: """{"prompt":"the interceptor never fires"}""");
+
+        var list = await Browser().ListEpisodesAsync(project.Id, "interceptor", Token);
+
+        list.Select(e => e.Id).ShouldBe([mine.Id]);
     }
 
     [Fact]
