@@ -24,13 +24,13 @@
                        longer match this list's length. Stating the arithmetic beats leaving it as
                        an inference (ADR-0009). *@
                     <span class="list-counts" title="This Project's own Wisdom plus Global — the set a session here recalls (§7)">
-                        @if (_isGlobal)
+                        @if (IsGlobal)
                         {
                             <span>@counts.Global · Global</span>
                         }
                         else
                         {
-                            <span>@counts.ProjectOwned · @_projectName</span>
+                            <span>@counts.ProjectOwned · @ProjectName</span>
                             <span class="counts-join">+</span>
                             <span>@counts.Global · Global</span>
                         }
@@ -143,13 +143,14 @@
                 </p>
             }
 
-            @if (_editing)
+            @if (_mode is DetailMode.Editing)
             {
                 <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
                           aria-label="Edited Wisdom text"></textarea>
                 <div class="detail-actions">
                     <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">Save edit</button>
-                    <button class="btn btn-secondary" disabled="@_saving" @onclick="() => _editing = false">Cancel</button>
+                    <button class="btn btn-secondary" disabled="@_saving"
+                            @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
                 </div>
             }
             else
@@ -230,25 +231,31 @@
             }
 
             @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
-               which is not (§10). *@
-            <div class="detail-danger">
-                @if (_armed)
-                {
-                    <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
-                        <span class="confirm-prompt">
-                            Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+               which is not (§10). Absent entirely while the editor is open, so "Delete forever"
+               can never be the click that throws away a draft the curator is still typing. *@
+            @if (_mode is not DetailMode.Editing)
+            {
+                <div class="detail-danger">
+                    @if (_mode is DetailMode.ConfirmingDelete)
+                    {
+                        <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
+                            <span class="confirm-prompt">
+                                Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+                            </span>
+                            <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
+                            <button class="btn btn-secondary"
+                                    @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
                         </span>
-                        <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
-                        <button class="btn btn-secondary" @onclick="() => _armed = false">Cancel</button>
-                    </span>
-                }
-                else
-                {
-                    <button class="btn btn-secondary danger-outline" @onclick="() => _armed = true">
-                        Delete Wisdom…
-                    </button>
-                }
-            </div>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary danger-outline"
+                                @onclick="() => _mode = DetailMode.ConfirmingDelete">
+                            Delete Wisdom…
+                        </button>
+                    }
+                </div>
+            }
         }
     </main>
 </div>
@@ -268,21 +275,32 @@
 
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>
+    /// The detail pane's three states, one field rather than two flags because two of them must
+    /// never coexist: a "Delete forever" reachable over an open editor throws the draft away with
+    /// the row, and its prompt names a version count. An enum leaves that pair unrepresentable.
+    /// </summary>
+    private enum DetailMode { Viewing, Editing, ConfirmingDelete }
+
     private WisdomListing? _listing;
     private WisdomDetail? _detail;
     private Guid? _boundSelection;
+    private Guid _boundProject;
     private WisdomKind? _kind;
-    private string _projectName = "";
-    private bool _isGlobal;
+    private ProjectListItem? _project;
 
-    private bool _editing;
+    private DetailMode _mode;
     private bool _saving;
-    private bool _armed;
     private string _draft = "";
     private string? _error;
 
     private IDisposable? _claim;
     private CancellationTokenSource? _debounce;
+    private int _generation;
+
+    private string ProjectName => _project?.DisplayName ?? "this Project";
+
+    private bool IsGlobal => _project?.IsGlobal ?? false;
 
     private string ListHref => WisdomRoute.Listing(ProjectId, Lens);
 
@@ -325,9 +343,18 @@
         if (_boundSelection != SelectedId)
         {
             _boundSelection = SelectedId;
-            _editing = false;
-            _armed = false;
+            _mode = DetailMode.Viewing;
             _error = null;
+        }
+
+        // Landing in another Project re-anchors the list on its universe, the way the tab this
+        // replaced re-anchored its project filter — so a Kind chip picked in the outgoing one
+        // does not silently keep narrowing the incoming one, and the header re-reads its name.
+        if (_boundProject != ProjectId)
+        {
+            _boundProject = ProjectId;
+            _kind = null;
+            _project = null;
         }
 
         await RefreshAsync();
@@ -374,15 +401,29 @@
 
     private async Task RefreshAsync()
     {
-        var project = await Chassis.GetProjectAsync(ProjectId, CancellationToken.None);
-        _projectName = project?.DisplayName ?? "this Project";
-        _isGlobal = project?.IsGlobal ?? false;
+        var generation = ++_generation;
 
-        _listing = await Browser.ListAsync(
+        // The Project row only answers the header's name and Global-ness, neither of which a
+        // keystroke or a chip click can change — so it is read once per universe, not once per
+        // refresh. OnParametersSetAsync drops it when the Project does change.
+        var project = _project ?? await Chassis.GetProjectAsync(ProjectId, CancellationToken.None);
+        var listing = await Browser.ListAsync(
             new WisdomQuery(ProjectId, Search.Term, _kind, Lens), CancellationToken.None);
-        _detail = SelectedId is { } selected
+        var detail = SelectedId is { } selected
             ? await Browser.GetAsync(selected, CancellationToken.None)
             : null;
+
+        // A newer refresh — a later keystroke, a chip, a row click — may have landed while this
+        // one was awaiting its queries; drop this one rather than overwrite fresher state with
+        // stale. The same guard the sidebar carries, and this surface has more triggers than it.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _project = project;
+        _listing = listing;
+        _detail = detail;
 
         StateHasChanged();
     }
@@ -397,7 +438,7 @@
     {
         _draft = entry.Text;
         _error = null;
-        _editing = true;
+        _mode = DetailMode.Editing;
     }
 
     private async Task SaveAsync()
@@ -409,11 +450,12 @@
             // The edit re-embeds the new text (§8.1), so this is the one curation action that
             // needs Ollama up; the failure stays inline and the draft stays editable.
             await Browser.EditAsync(SelectedId!.Value, _draft, CancellationToken.None);
-            _editing = false;
+            _mode = DetailMode.Viewing;
             await RefreshAsync();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Wisdom edit failed");
             _error = "The edit did not save: the new text must re-embed and persist. "
                 + "Check the Health pill — Ollama and Postgres both have to be reachable.";
         }
@@ -423,22 +465,52 @@
         }
     }
 
-    private async Task RetireAsync()
-    {
-        await Browser.RetireAsync(SelectedId!.Value, CancellationToken.None);
-        await RefreshAsync();
-    }
+    private Task RetireAsync() => CurateAsync(
+        () => Browser.RetireAsync(SelectedId!.Value, CancellationToken.None),
+        "The retire did not land — Postgres has to be reachable. Check the Health pill.");
 
-    private async Task UnretireAsync()
+    private Task UnretireAsync() => CurateAsync(
+        () => Browser.UnretireAsync(SelectedId!.Value, CancellationToken.None),
+        "The unretire did not land — Postgres has to be reachable. Check the Health pill.");
+
+    /// <summary>
+    /// The standing changes share the shape the edit already had: do it, re-read, and keep a
+    /// transient failure inline. Unhandled, an exception out of a Blazor event handler takes the
+    /// circuit down with it — the whole page reloads and the curator loses their place, over a
+    /// blipped connection that a banner above a stale row would have ridden out.
+    /// </summary>
+    private async Task CurateAsync(Func<Task> curate, string failure)
     {
-        await Browser.UnretireAsync(SelectedId!.Value, CancellationToken.None);
-        await RefreshAsync();
+        _error = null;
+        try
+        {
+            await curate();
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Wisdom curation failed");
+            _error = failure;
+        }
     }
 
     private async Task DeleteAsync()
     {
-        _armed = false;
-        await Browser.DeleteAsync(SelectedId!.Value, CancellationToken.None);
+        _mode = DetailMode.Viewing;
+        _error = null;
+        try
+        {
+            await Browser.DeleteAsync(SelectedId!.Value, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Nothing was deleted, so the row is still there to try again on — say so and stay.
+            Logger.LogWarning(ex, "Wisdom delete failed");
+            _error = "The delete did not land — Postgres has to be reachable. "
+                + "Check the Health pill; this Wisdom is untouched.";
+            return;
+        }
+
         Nav.NavigateTo(ListHref);
     }
 

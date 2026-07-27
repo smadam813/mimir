@@ -110,21 +110,21 @@ internal sealed class WisdomBrowser(
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
 
-        // Search before the Kind filter, so the chips count the set a Kind click would narrow.
-        var chipped = Search(AmbientUniverse.For(db, query.ProjectId, query.Lens), query.Search);
-        var listed = query.Kind is { } kind ? chipped.Where(w => w.Kind == kind) : chipped;
-
-        var entries = await ToEntries(
-                db, listed.OrderByDescending(w => w.LastConfirmedAt).ThenBy(w => w.Id))
+        // One read of the universe, and every figure the header renders taken off the rows it
+        // returned. Separate counting queries would each see their own snapshot, so an Admission
+        // landing between them leaves the chips and the header disagreeing with the list beside
+        // them; a curator reading "Rule 4" over three rows has no way to tell which number lied.
+        // That costs the Kind chips their narrower SQL — the "All" chip already reads this whole
+        // set, so it is the price the default listing pays anyway.
+        var chipped = await ToEntries(
+                db,
+                Search(AmbientUniverse.For(db, query.ProjectId, query.Lens), query.Search)
+                    .OrderByDescending(w => w.LastConfirmedAt).ThenBy(w => w.Id))
             .ToListAsync(cancellationToken);
-        var counted = await chipped
-            .GroupBy(w => w.Kind)
-            .Select(g => new { Kind = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(g => g.Kind, g => g.Count, cancellationToken);
 
-        // Both figures off the rows already in hand, not a second pair of counting queries: the
-        // header's arithmetic has to hold against the list beside it, and two round trips can
-        // straddle an Admission and stop adding up.
+        // The chips count before the Kind filter, so clicking one never rewrites the others.
+        var counted = chipped.CountBy(w => w.Kind).ToDictionary(c => c.Key, c => c.Value);
+        var entries = query.Kind is { } kind ? chipped.Where(w => w.Kind == kind).ToList() : chipped;
         var global = entries.Count(w => w.ScopeProjectId == Project.GlobalId);
 
         return new WisdomListing(
