@@ -9,7 +9,11 @@
 
 @* Spec §8: the project-centric chassis — every surface is scoped by the Project chosen here.
    Global is pinned on top by the query's ordering. The second group swaps to match whichever
-   surface is active, read from the URL the same way the tab strip does (#89). *@
+   surface is active, read from the URL the same way the tab strip does (#89).
+
+   On first run the list is Global alone at zero, and the second group gives way to the one thing
+   there is to say about it: Projects are not something to add, they appear on their session's
+   first hook (#90). *@
 <nav class="project-sidebar" aria-label="Projects">
     <h6 class="sidebar-heading">Projects</h6>
     <div class="sidebar-group">
@@ -23,7 +27,18 @@
         }
     </div>
 
-    @if (_activeTab is { } tab && _activeProject is { } projectId)
+    @if (IsFirstRun is true)
+    {
+        <p class="sidebar-note">
+            Projects appear here on their session's first hook — nothing to configure.
+        </p>
+        <div class="sidebar-waiting" aria-hidden="true">
+            <span class="sidebar-waiting-bar"></span>
+            <span class="sidebar-waiting-bar"></span>
+            <span class="sidebar-waiting-bar"></span>
+        </div>
+    }
+    else if (_activeTab is { } tab && _activeProject is { } projectId)
     {
         <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
         <div class="sidebar-group">
@@ -98,6 +113,14 @@
 </nav>
 
 @code {
+    /// <summary>
+    /// MainLayout's one first-run flag; the second group has nothing to count yet (#90). Null
+    /// until the answer lands, which reads as "not first run" here — the group it would replace is
+    /// the one this sidebar renders for every other state anyway.
+    /// </summary>
+    [CascadingParameter(Name = MainLayout.FirstRunCascade)]
+    public bool? IsFirstRun { get; set; }
+
     private IReadOnlyList<ProjectListItem> _projects = [];
     private string? _activeTab;
     private Guid? _activeProject;

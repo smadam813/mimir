@@ -265,6 +265,21 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         (await Browser().IsFirstRunAsync(Token)).ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task FirstRun_StaysFalse_OnceIntroduced_EvenWithEveryEpisodeDeleted()
+    {
+        // §8.2 permits deleting every Episode, so "no Episodes" would send an established curator
+        // back to a screen telling them to register hooks they already have. The Project is what
+        // proves the introduction happened, and nothing deletes it here.
+        var project = await AddProjectAsync("introduced");
+        await AddEpisodeAsync(project.Id);
+
+        await Context.Episodes.ExecuteDeleteAsync(Token);
+
+        (await FromDb(db => db.Episodes.CountAsync(Token))).ShouldBe(0);
+        (await Browser().IsFirstRunAsync(Token)).ShouldBeFalse();
+    }
+
     private async Task MarkAsync(Guid projectId, string sessionId, InjectionVerdict verdict)
     {
         var injection = await Context.Injections

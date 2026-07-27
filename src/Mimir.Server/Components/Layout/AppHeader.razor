@@ -8,7 +8,11 @@
 @inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
-   whole-install; the tab strip beneath it answers the selected-Project question instead (#89). *@
+   whole-install; the tab strip beneath it answers the selected-Project question instead (#89).
+
+   On first run the pipeline gives way to the model pull (#90). The two swap rather than sit side
+   by side for two reasons: four zeros state nothing an empty install does not already know, and
+   the header has a 1380px floor that the pipeline and the chip together overrun. *@
 <header class="app-header">
     <a class="app-brand" href="/">
         <span class="brand-mark" aria-hidden="true"></span>
@@ -31,7 +35,11 @@
 
     <span class="app-header-spacer"></span>
 
-    @if (_pipeline is { } pipeline)
+    @if (IsFirstRun is true)
+    {
+        <ModelPullChip />
+    }
+    else if (_pipeline is { } pipeline)
     {
         <div class="pipeline"
              title="The pipeline, live: Episodes captured → Sealed Episodes still owed distillation, failed included → Wisdom admitted → Injections recalled today">
@@ -71,14 +79,21 @@
 @code {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>
+    /// MainLayout's one first-run flag; the header trades the pipeline for the pull (#90). Null
+    /// until that answer lands, which is a third state here rather than a second: the pipeline is
+    /// five Postgres queries, and asking for them before knowing whether anything will render them
+    /// is the waste this is shaped to avoid.
+    /// </summary>
+    [CascadingParameter(Name = MainLayout.FirstRunCascade)]
+    public bool? IsFirstRun { get; set; }
+
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
     private CancellationTokenSource? _debounce;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await RefreshAsync();
-
         // A surface claiming or releasing the box changes what this input says and whether it is
         // enabled at all, and neither is this component's own state.
         Search.Changed += OnSearchChanged;
@@ -88,6 +103,17 @@
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
         // five-query round trip per Event.
         _subscription = Feed.Subscribe(change => ScheduleRefresh());
+    }
+
+    // Cascading parameters are set before the first render, so this is the initial fetch — and it
+    // is also the fetch that first-run ends on, since the pipeline replaces the pull chip on that
+    // very cascade change and has never been asked for until then.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsFirstRun is false && _pipeline is null)
+        {
+            await RefreshAsync();
+        }
     }
 
     private void ScheduleRefresh()
@@ -120,6 +146,14 @@
 
     private async Task RefreshAsync()
     {
+        // Nothing renders the pipeline while the install is still being introduced (#90), and the
+        // Events that end first run are exactly the ones the feed pushes — five Postgres queries
+        // per burst, every one of them discarded, for the whole of that window.
+        if (IsFirstRun is not false)
+        {
+            return;
+        }
+
         _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
         StateHasChanged();
     }

@@ -1,0 +1,127 @@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject ILogger<FirstRunPanel> Logger
+
+@* Spec §8 / #90: an install that has never been introduced to Claude Code explains itself as a
+   state of the same shell rather than a separate screen — the header, tab strip and sidebar around
+   this body are the ones the curator keeps using. Both registrations are rendered from
+   FirstRunCommands, which is also what the clipboard receives. *@
+<article class="first-run">
+    <div class="first-run-column">
+        <h6 class="first-run-eyebrow">Nothing captured yet</h6>
+        <h1 class="first-run-title">Mimir is listening. It just hasn't been introduced to Claude Code.</h1>
+        <p class="first-run-lede">
+            Two registrations, both at user scope, both once. From then on every session lands here
+            as an Episode, distils into Wisdom, and comes back as a Brief — with nothing else asked
+            of you.
+        </p>
+
+        <ol class="first-run-steps">
+            <li class="first-run-step">
+                <span class="first-run-numeral" aria-hidden="true">1</span>
+                <div>
+                    <p class="first-run-step-title">Register the capture hooks</p>
+                    <p class="first-run-step-note">
+                        In your user-level <code>~/.claude/settings.json</code>. Capture hooks are
+                        fire-and-forget, cap at 3 seconds and always exit 0 — a session never breaks
+                        or slows because Mimir is down, it just proceeds bare.
+                    </p>
+                    <pre class="first-run-command">@FirstRunCommands.Hooks</pre>
+                </div>
+            </li>
+            <li class="first-run-step">
+                <span class="first-run-numeral" aria-hidden="true">2</span>
+                <div>
+                    <p class="first-run-step-title">Add the MCP server, for deliberate recall</p>
+                    <p class="first-run-step-note">
+                        Gives the session <code>mimir_search</code>, <code>mimir_timeline</code> and
+                        <code>mimir_remember</code>.
+                    </p>
+                    <pre class="first-run-command">@FirstRunCommands.Mcp</pre>
+                </div>
+            </li>
+            <li class="first-run-step is-quiet">
+                <span class="first-run-numeral" aria-hidden="true">3</span>
+                <div>
+                    <p class="first-run-step-title">Work as usual</p>
+                    <p class="first-run-step-note">
+                        The first Episode shows up here the moment a session starts — live, no
+                        refresh. Any model still pulling finishes in the background; Capture does
+                        not wait for it.
+                    </p>
+                </div>
+            </li>
+        </ol>
+
+        <div class="first-run-actions">
+            <button type="button" class="btn btn-primary" @onclick="CopyAsync">Copy both commands</button>
+            @if (_copyState is { } state)
+            {
+                <span class="first-run-copy-state" role="status">@state</span>
+            }
+        </div>
+    </div>
+</article>
+
+@code {
+    // The port's one piece of JavaScript (#90): the clipboard has no server-side equivalent, so
+    // this single call is the exception to a chassis that is otherwise all platform CSS and Blazor.
+    private const string Module = "Components/FirstRun/FirstRunPanel.razor.js";
+
+    /// <summary>
+    /// Said whether the browser refused the write or the call never got that far — either way the
+    /// commands are on the screen to select, so the panel names the fallback rather than the fault.
+    /// </summary>
+    private const string Blocked = "Copying is blocked here — select the blocks above instead.";
+
+    private IJSObjectReference? _module;
+    private string? _copyState;
+    private bool _disposed;
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            // The panel is swapped out the moment the first hook lands, which can be mid-import if
+            // the curator copies as their first session starts. DisposeAsync would have seen no
+            // module to release, so the import that lands after it releases its own.
+            var module = _module ??= await Js.InvokeAsync<IJSObjectReference>("import", Assets[Module]);
+            if (_disposed)
+            {
+                _module = null;
+                await module.DisposeAsync();
+                return;
+            }
+
+            _copyState = await module.InvokeAsync<bool>("copyText", FirstRunCommands.Both)
+                ? "Both registrations copied."
+                : Blocked;
+        }
+        catch (Exception ex)
+        {
+            // The circuit may be tearing down, or the browser may refuse the clipboard outright.
+            // Neither is worth an error boundary on a screen whose commands are already readable.
+            Logger.LogWarning(ex, "Copying the first-run registrations failed");
+            _copyState = Blocked;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit went away before the module could be released; nothing to free.
+        }
+    }
+}
