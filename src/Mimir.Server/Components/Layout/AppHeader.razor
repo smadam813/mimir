@@ -75,6 +75,19 @@
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
     private CancellationTokenSource? _debounce;
+    private int _generation;
+
+    /// <summary>Serialises <see cref="ScheduleRefresh"/> against <see cref="Dispose"/>.</summary>
+    private readonly Lock _debounceGate = new();
+
+    private bool _disposed;
+
+    /// <summary>
+    /// Bumped on every handover, so a keystroke that outlived its surface can be recognised and
+    /// dropped. Read and written only on the circuit's dispatcher, which is where both the handover
+    /// and the debounce's delivery land.
+    /// </summary>
+    private int _claimGeneration;
 
     /// <summary>
     /// What is in the box right now, updated on every keystroke — the claimant only hears the term
@@ -103,7 +116,10 @@
     private void OnClaimChanged()
     {
         // The pending keystroke belongs to the surface that just left: delivering it after the
-        // handover would narrow the incoming surface by a term the box no longer shows.
+        // handover would narrow the incoming surface by a term the box no longer shows. Cancelling
+        // catches it while it is still waiting out the debounce; the generation catches it once the
+        // wait has elapsed and only the delivery is queued, where a cancel is a no-op.
+        _claimGeneration++;
         _searchDebounce?.Cancel();
         _searchDebounce?.Dispose();
         _searchDebounce = null;
@@ -122,15 +138,21 @@
         _searchDebounce?.Dispose();
         var cts = new CancellationTokenSource();
         _searchDebounce = cts;
-        _ = DebouncedSearchAsync(_searchText, cts.Token);
+        _ = DebouncedSearchAsync(_searchText, _claimGeneration, cts.Token);
     }
 
-    private async Task DebouncedSearchAsync(string term, CancellationToken cancellationToken)
+    private async Task DebouncedSearchAsync(
+        string term, int claimGeneration, CancellationToken cancellationToken)
     {
         try
         {
             await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(() => Search.EnterAsync(term));
+
+            // Checked on the dispatcher, alongside the delivery it guards: a handover processed
+            // between the delay elapsing and this running must still shed the term.
+            await InvokeAsync(() => claimGeneration == _claimGeneration
+                ? Search.EnterAsync(term)
+                : Task.CompletedTask);
         }
         catch (OperationCanceledException)
         {
@@ -142,12 +164,28 @@
         }
     }
 
+    /// <summary>
+    /// Coalesces a burst into one refresh. Guarded, because the feed publishes on whichever thread
+    /// captured — not this circuit's dispatcher — so this runs concurrently with <see cref="Dispose"/>
+    /// reaching for the same field. Unguarded, a change landing mid-teardown installs a fresh
+    /// timer nobody will ever cancel, and it fires against a disposed component 250 ms later.
+    /// </summary>
     private void ScheduleRefresh()
     {
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _debounce = cts;
+        CancellationTokenSource cts;
+        lock (_debounceGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+            cts = new CancellationTokenSource();
+            _debounce = cts;
+        }
+
         _ = DebouncedRefreshAsync(cts.Token);
     }
 
@@ -172,7 +210,19 @@
 
     private async Task RefreshAsync()
     {
-        _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+        var generation = ++_generation;
+
+        var pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+
+        // Two changes landing a debounce apart both reach here, and cancelling an elapsed delay is
+        // a no-op — so whichever query returns second must not be the one that wins. The feed
+        // delivers in bursts by design (§8), which makes overlapping queries the ordinary case.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _pipeline = pipeline;
         StateHasChanged();
     }
 
@@ -180,8 +230,13 @@
     {
         Search.ClaimChanged -= OnClaimChanged;
         _subscription?.Dispose();
-        _debounce?.Cancel();
-        _debounce?.Dispose();
+        lock (_debounceGate)
+        {
+            _disposed = true;
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+        }
+
         _searchDebounce?.Cancel();
         _searchDebounce?.Dispose();
     }

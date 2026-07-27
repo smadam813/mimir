@@ -106,6 +106,24 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     }
 
     [Fact]
+    public async Task RetiredWisdom_StopsCountingTowardsTheEpisodeThatProducedIt()
+    {
+        // Every Wisdom figure in the chassis excludes Retired (ChassisBrowser), and §6.4 Retires the
+        // loser of a supersede — so a row must not go on crediting a session for a line that has
+        // been taken away.
+        var project = await AddProjectAsync("retired");
+        var episode = await AddEpisodeAsync(project.Id);
+        var standing = await AddWisdomAsync(project.Id, "a lesson that stands");
+        var retired = await AddWisdomAsync(project.Id, "a lesson taken away", retiredAt: Now);
+        await AddProvenanceAsync(standing.Id, episodeId: episode.Id);
+        await AddProvenanceAsync(retired.Id, episodeId: episode.Id);
+
+        var summary = (await Browser().ListEpisodesAsync(project.Id, null, Token)).Single();
+
+        summary.WisdomCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Searching_KeepsOnlyTheEpisodesWhoseEventsMatch()
     {
         var project = await AddProjectAsync("search");

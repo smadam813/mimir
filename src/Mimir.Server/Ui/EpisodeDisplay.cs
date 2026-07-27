@@ -69,15 +69,19 @@ public static class EpisodeDisplay
     /// it, because "failed" alone reads terminal when §6 makes it nothing of the kind. A distilled
     /// Episode that produced nothing says <c>no Wisdom</c> in words: a quiet session and a session
     /// whose figure is simply absent would otherwise read alike. Before <c>done</c> there is no
-    /// figure to state — a live or queued Episode has not been distilled yet.
+    /// figure to state — a live or queued Episode has not been distilled yet. A live Episode has
+    /// not ended and has produced nothing yet, so it says only where it is running.
     /// </summary>
     public static string MetaLine(EpisodeSummary episode)
     {
         var parts = new List<string>(4) { episode.Cwd };
-        parts.Add(episode.SealedAt is null ? "unsealed" : "sealed");
+
+        // Worded by StateLabel, so a list row and the drill-down describe one Seal the same way.
+        // Its live half is deliberately unused here: the row's own state mark already says "live",
+        // and "unsealed" alongside it would be a second word for a fact the row states once.
         if (episode.SealedAt is not null)
         {
-            parts.Add(SealPhrase(episode.SealReason));
+            parts.Add(StateLabel(episode.SealedAt, episode.SealReason));
         }
 
         if (episode.WisdomCount > 0)

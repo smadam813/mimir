@@ -18,6 +18,8 @@
     <Content Include="..\..\src\Mimir.Server\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- OfflineAssetsTests scans every shipped stylesheet for a remote reference. -->
     <Content Include="..\..\src\Mimir.Server\wwwroot\**\*.css" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" />
+    <!-- LegacySurfaceTests checks every un-ported page still wraps itself for the unpadded body. -->
+    <Content Include="..\..\src\Mimir.Server\Components\Pages\**\*.razor" LinkBase="Components\Pages" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

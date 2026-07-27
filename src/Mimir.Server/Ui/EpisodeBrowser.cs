@@ -7,9 +7,12 @@ namespace Mimir.Server.Ui;
 
 /// <summary>
 /// One row of the Episode list (spec §8.2). Unsealed means the session is live (or crashed, §4).
-/// <paramref name="WisdomCount"/> is how much durable memory this session is Provenance for —
-/// Wisdom admitted from it and Wisdom it confirmed, since the Merge Gate unions provenance onto
-/// the line it reinforces (§6.3) and both readings are "what this session produced".
+/// <paramref name="WisdomCount"/> is how much durable memory this session is Provenance for that
+/// still stands — Wisdom admitted from it and Wisdom it confirmed, since the Merge Gate unions
+/// provenance onto the line it reinforces (§6.3) and both readings are "what this session
+/// produced". Retired Wisdom is excluded, the one convention every Wisdom figure in the chassis
+/// keeps (<see cref="ChassisBrowser"/>): a curator who Retires a bad line expects the row that
+/// produced it to stop claiming it.
 /// </summary>
 public sealed record EpisodeSummary(
     Guid Id,
@@ -74,7 +77,15 @@ public sealed class EpisodeBrowser(IDbContextFactory<MimirDbContext> contexts, I
                 e.Distillation,
                 // Distinct: the gate writes one Provenance row per provenance Event (§6), so a
                 // Wisdom drawn from three Events of this Episode is one Wisdom produced, not three.
-                db.Provenance.Where(p => p.EpisodeId == e.Id).Select(p => p.WisdomId).Distinct().Count()))
+                // Retired excluded, as every Wisdom figure in the chassis excludes it — and §6.4
+                // Retires the loser of a supersede, so a line adjudicated away stops being credited
+                // here while the successor, carrying this Episode's provenance, takes its place.
+                db.Provenance
+                    .Where(p => p.EpisodeId == e.Id
+                        && db.Wisdom.Any(w => w.Id == p.WisdomId && w.RetiredAt == null))
+                    .Select(p => p.WisdomId)
+                    .Distinct()
+                    .Count()))
             .ToListAsync(cancellationToken);
     }
 

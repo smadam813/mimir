@@ -40,11 +40,22 @@ public sealed class EpisodeDisplayTests
     }
 
     [Fact]
-    public void ALiveEpisode_SaysItIsUnsealed_WithNoWisdomFigureYet()
+    public void ALiveEpisode_SaysOnlyWhereItRuns_LeavingLiveToTheRowsOwnMark()
     {
+        // "live" in the row's mark and "unsealed" here would be two words for one fact; the meta
+        // line carries how a session ended, and this one has not.
         var live = Summary(sealReason: null) with { SealedAt = null };
 
-        EpisodeDisplay.MetaLine(live).ShouldBe(@"C:\git\mimir · unsealed");
+        EpisodeDisplay.MetaLine(live).ShouldBe(@"C:\git\mimir");
+    }
+
+    [Fact]
+    public void ARowAndTheDrillDown_WordOneSealTheSameWay()
+    {
+        var summary = Summary(sealReason: "logout");
+
+        EpisodeDisplay.MetaLine(summary)
+            .ShouldContain(EpisodeDisplay.StateLabel(summary.SealedAt, summary.SealReason));
     }
 
     [Fact]
