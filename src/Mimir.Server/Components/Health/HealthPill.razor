@@ -1,8 +1,6 @@
 @using Mimir.Contracts.Health
-@using Mimir.Server.Health
 @using Mimir.Server.Storage
-@implements IDisposable
-@inject IHealthState HealthState
+@inherits HealthAwareComponent
 
 @* Spec §8: one Health pill in the header, opening a popover with all four probes. Built on the
    native Popover API (popover="auto" is the default for a bare `popover` attribute) — light
@@ -32,11 +30,11 @@
     <div class="health-popover-body">
         <section class="health-probe">
             <div class="health-probe-head">
-                <span class="health-dot @StateDotClass(_snapshot.Ollama.State)"></span>
+                <span class="health-dot @StateDotClass(Snapshot.Ollama.State)"></span>
                 <span class="health-probe-title">Ollama</span>
-                <span class="health-probe-summary">@_snapshot.Ollama.Summary</span>
+                <span class="health-probe-summary">@Snapshot.Ollama.Summary</span>
             </div>
-            @foreach (var model in _snapshot.Ollama.Models)
+            @foreach (var model in Snapshot.Ollama.Models)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">@model.Name</span>
@@ -47,18 +45,18 @@
 
         <section class="health-probe">
             <div class="health-probe-head">
-                <span class="health-dot @StateDotClass(_snapshot.Distillation.State)"></span>
+                <span class="health-dot @StateDotClass(Snapshot.Distillation.State)"></span>
                 <span class="health-probe-title">Distillation</span>
-                <span class="health-probe-summary">@_snapshot.Distillation.Summary</span>
+                <span class="health-probe-summary">@Snapshot.Distillation.Summary</span>
             </div>
-            @if (_snapshot.Distillation.QueueDepth is { } queueDepth)
+            @if (Snapshot.Distillation.QueueDepth is { } queueDepth)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">queue</span>
                     <span class="health-detail-value">@queueDepth</span>
                 </div>
             }
-            @if (_snapshot.Distillation.LastRunAt is { } lastRun)
+            @if (Snapshot.Distillation.LastRunAt is { } lastRun)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">last run</span>
@@ -69,25 +67,25 @@
 
         <section class="health-probe">
             <div class="health-probe-head">
-                <span class="health-dot @StateDotClass(_snapshot.Harvester.State)"></span>
+                <span class="health-dot @StateDotClass(Snapshot.Harvester.State)"></span>
                 <span class="health-probe-title">Harvester</span>
-                <span class="health-probe-summary">@_snapshot.Harvester.Summary</span>
+                <span class="health-probe-summary">@Snapshot.Harvester.Summary</span>
             </div>
-            @if (_snapshot.Harvester.LastScanAt is { } lastScan)
+            @if (Snapshot.Harvester.LastScanAt is { } lastScan)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">last scan</span>
                     <span class="health-detail-value">@lastScan.LocalDateTime.ToString("HH:mm:ss")</span>
                 </div>
             }
-            @if (_snapshot.Harvester.Items is { } harvestedItems)
+            @if (Snapshot.Harvester.Items is { } harvestedItems)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">items</span>
                     <span class="health-detail-value">@harvestedItems</span>
                 </div>
             }
-            @if (_snapshot.Harvester.Changed is { } harvestedChanged)
+            @if (Snapshot.Harvester.Changed is { } harvestedChanged)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">changed</span>
@@ -98,11 +96,11 @@
 
         <section class="health-probe">
             <div class="health-probe-head">
-                <span class="health-dot @StateDotClass(_snapshot.Storage.State)"></span>
+                <span class="health-dot @StateDotClass(Snapshot.Storage.State)"></span>
                 <span class="health-probe-title">Storage</span>
-                <span class="health-probe-summary">@_snapshot.Storage.Summary</span>
+                <span class="health-probe-summary">@Snapshot.Storage.Summary</span>
             </div>
-            @foreach (var table in _snapshot.Storage.Tables)
+            @foreach (var table in Snapshot.Storage.Tables)
             {
                 <div class="health-detail-row">
                     <span class="health-detail-name">@table.Table</span>
@@ -118,24 +116,7 @@
 </section>
 
 @code {
-    private HealthSnapshot _snapshot = HealthSnapshot.Pending;
-    private IDisposable? _subscription;
-
-    protected override void OnInitialized()
-    {
-        _snapshot = HealthState.Current;
-
-        // Probes push from background threads; hop onto the circuit's dispatcher to re-render.
-        _subscription = HealthState.Subscribe(snapshot => InvokeAsync(() =>
-        {
-            _snapshot = snapshot;
-            StateHasChanged();
-        }));
-    }
-
-    public void Dispose() => _subscription?.Dispose();
-
-    private string Headline() => _snapshot switch
+    private string Headline() => Snapshot switch
     {
         { Ollama.State: HealthTileState.Degraded } or
         { Distillation.State: HealthTileState.Degraded } or
@@ -170,7 +151,7 @@
     };
 
     private string BytesLabel()
-        => _snapshot.Storage.DatabaseSizeBytes is { } bytes ? ByteSize.Format(bytes) : "—";
+        => Snapshot.Storage.DatabaseSizeBytes is { } bytes ? ByteSize.Format(bytes) : "—";
 
     // Emptiness is carried in words, never inferred from the byte figure — a 28 MB heap can hold
     // zero live rows. Only the two states we can prove get to say anything.

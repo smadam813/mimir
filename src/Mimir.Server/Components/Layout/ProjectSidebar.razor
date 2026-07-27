@@ -1,4 +1,5 @@
 @using Mimir.Server.Capture
+@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @implements IDisposable
 @inject ChassisBrowser Browser
@@ -8,7 +9,11 @@
 
 @* Spec §8: the project-centric chassis — every surface is scoped by the Project chosen here.
    Global is pinned on top by the query's ordering. The second group swaps to match whichever
-   surface is active, read from the URL the same way the tab strip does (#89). *@
+   surface is active, read from the URL the same way the tab strip does (#89).
+
+   On first run the list is Global alone at zero, and the second group gives way to the one thing
+   there is to say about it: Projects are not something to add, they appear on their session's
+   first hook (#90). *@
 <nav class="project-sidebar" aria-label="Projects">
     <h6 class="sidebar-heading">Projects</h6>
     <div class="sidebar-group">
@@ -22,32 +27,47 @@
         }
     </div>
 
-    @if (_activeTab is { } tab)
+    @if (IsFirstRun is true)
+    {
+        <p class="sidebar-note">
+            Projects appear here on their session's first hook — nothing to configure.
+        </p>
+        <div class="sidebar-waiting" aria-hidden="true">
+            <span class="sidebar-waiting-bar"></span>
+            <span class="sidebar-waiting-bar"></span>
+            <span class="sidebar-waiting-bar"></span>
+        </div>
+    }
+    else if (_activeTab is { } tab && _activeProject is { } projectId)
     {
         <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
         <div class="sidebar-group">
-            @* Stat rows, not links: no tab body reads a filter back off the URL, so a row promising
-               "Retired" or "Failed" would land on the tab's own unfiltered — or, for Wisdom,
-               Active-defaulted — default view. The ported Episode list does filter by state, but
-               from its own chips (#94); a linkable filter wants the URL to carry it. *@
+            @* Stat rows, not links, wherever the tab body still cannot read a filter back off the
+               URL — a row promising "Failed" would land on the tab's own unfiltered default view.
+               Wisdom's three are real links: its surface reads the lens from the query (#91). The
+               ported Episode list does filter by state, but from its own chips (#94), which the URL
+               does not carry — so its rows stay stat rows until something links a chip. *@
             @switch (tab)
             {
                 case "wisdom":
-                    <div class="sidebar-item">
+                    <a class="sidebar-item @(IsLens(WisdomLens.Contested) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Contested)">
                         <span class="attention-dot dot-accent"></span>
                         <span class="sidebar-item-name">Contested</span>
                         <span class="sidebar-item-count count-accent">@(_wisdomAttention?.Contested ?? 0)</span>
-                    </div>
-                    <div class="sidebar-item">
+                    </a>
+                    <a class="sidebar-item @(IsLens(WisdomLens.Orphaned) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Orphaned)">
                         <span class="attention-dot dot-danger"></span>
                         <span class="sidebar-item-name">Orphaned</span>
                         <span class="sidebar-item-count count-danger">@(_wisdomAttention?.Orphaned ?? 0)</span>
-                    </div>
-                    <div class="sidebar-item">
+                    </a>
+                    <a class="sidebar-item @(IsLens(WisdomLens.Retired) ? "is-selected" : null)"
+                       href="@LensHref(projectId, WisdomLens.Retired)">
                         <span class="attention-dot dot-neutral"></span>
                         <span class="sidebar-item-name">Retired</span>
                         <span class="sidebar-item-count">@(_wisdomAttention?.Retired ?? 0)</span>
-                    </div>
+                    </a>
                     break;
 
                 case "injections":
@@ -95,8 +115,18 @@
 </nav>
 
 @code {
+    /// <summary>
+    /// MainLayout's one first-run flag; the second group has nothing to count yet (#90). Null
+    /// until the answer lands, which reads as "not first run" here — the group it would replace is
+    /// the one this sidebar renders for every other state anyway.
+    /// </summary>
+    [CascadingParameter(Name = MainLayout.FirstRunCascade)]
+    public bool? IsFirstRun { get; set; }
+
     private IReadOnlyList<ProjectListItem> _projects = [];
     private string? _activeTab;
+    private Guid? _activeProject;
+    private WisdomLens _activeLens;
     private WisdomAttention? _wisdomAttention;
     private CaptureAttention? _captureAttention;
     private RecallAttention? _recallAttention;
@@ -184,6 +214,8 @@
 
         _projects = projects;
         _activeTab = activeTab;
+        _activeProject = route?.ProjectId;
+        _activeLens = WisdomRoute.LensOf(Nav.ToAbsoluteUri(Nav.Uri));
         _wisdomAttention = wisdomAttention;
         _captureAttention = captureAttention;
         _recallAttention = recallAttention;
@@ -195,6 +227,15 @@
 
     private bool IsSelectedProject(Guid id)
         => Nav.ToBaseRelativePath(Nav.Uri).StartsWith($"projects/{id}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Each "Needs attention" row is the Wisdom listing under one lens — the same screen the tab
+    /// already shows, narrowed — so the link is the Wisdom route carrying that lens (#91).
+    /// </summary>
+    private static string LensHref(Guid projectId, WisdomLens lens)
+        => WisdomRoute.Listing(projectId, lens);
+
+    private bool IsLens(WisdomLens lens) => _activeLens == lens;
 
     private static string GroupTitle(string tab) => tab switch
     {

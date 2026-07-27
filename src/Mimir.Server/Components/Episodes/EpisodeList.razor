@@ -10,6 +10,7 @@
    each row marking where its session and its distillation are. The list grows over the circuit as
    capture announces changes — no refresh, no polling — and the header's search box narrows it
    while this component is mounted. *@
+<div class="episode-surface">
 <div class="episode-pane">
     <div class="pane-head">
         <div class="pane-title-row">
@@ -88,6 +89,7 @@
         }
     </div>
 </div>
+</div>
 
 @code {
     /// <summary>The four states a row marks, in the order the chips carry them.</summary>
@@ -125,7 +127,13 @@
     private int Count(EpisodeState state) => _episodes.Count(e => e.State == state);
 
     protected override void OnInitialized()
-        => _subscription = Feed.Subscribe(change =>
+    {
+        // Claim, keystroke and release all arrive as one event (#91), and every one of them changes
+        // what this list should show — so all three go through the same coalescing the feed does. A
+        // keystroke otherwise costs one Event-and-Provenance count per row per letter.
+        Search.Changed += ScheduleRefresh;
+
+        _subscription = Feed.Subscribe(change =>
         {
             if (change.ProjectId == ProjectId)
             {
@@ -134,15 +142,17 @@
                 ScheduleRefresh();
             }
         });
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         // Both narrowings belong to the Project they were made on. Blazor keeps this one instance
         // across a sidebar switch — same route, no @key — so shedding them is ours to do: a carried
         // chip says "No failed Episodes here" over a list that has some, and a carried term
-        // silently narrows the new Project by something nobody typed for it. Dropping the claim is
-        // what clears the term: ClaimBy is the one place that resets it, and releasing first also
-        // tells the header to empty the box.
+        // silently narrows the new Project by something nobody typed for it. Releasing and
+        // re-claiming is what sheds the term, since a claim starts empty on both edges; released
+        // first, because the claim is held by identity and disposing a stale token afterwards would
+        // hand the box back out from under the new claim.
         if (_shownProjectId != ProjectId)
         {
             _shownProjectId = ProjectId;
@@ -168,7 +178,7 @@
             return;
         }
 
-        _claim ??= Search.ClaimBy("Search this Project's Events…", () => InvokeAsync(RefreshAsync));
+        _claim ??= Search.Claim(this, "Search this Project's Events…");
     }
 
     private void Filter(EpisodeState? state) => _filter = state;
@@ -238,6 +248,7 @@
 
     public void Dispose()
     {
+        Search.Changed -= ScheduleRefresh;
         _subscription?.Dispose();
         _claim?.Dispose();
         lock (_debounceGate)

@@ -1,0 +1,62 @@
+/* First run's replacement for the header pipeline (#90): the one model still coming down the
+   wire. Its own @keyframes rather than the header's — Blazor's CSS isolation scopes selectors but
+   leaves animation names global, so borrowing one across files is a dependency nothing states. */
+.model-pull {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex: none;
+    padding: 5px var(--space-4);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+.model-pull code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+}
+
+.model-pull-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--color-accent);
+    animation: model-pull-pulse 1.4s ease-in-out infinite;
+}
+
+.model-pull-track {
+    display: block;
+    width: 120px;
+    height: 3px;
+    flex: none;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-text) 12%, transparent);
+    overflow: hidden;
+}
+
+.model-pull-track i {
+    display: block;
+    height: 100%;
+    background: var(--color-accent);
+}
+
+.model-pull-percent {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-accent);
+}
+
+.model-pull-note {
+    font-size: 11.5px;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+@keyframes model-pull-pulse {
+    50% {
+        opacity: 0.3;
+    }
+}

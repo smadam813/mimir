@@ -2,7 +2,6 @@
 @page "/projects/{ProjectId:guid}/{Tab}"
 @using Mimir.Server.Components.Episodes
 @using Mimir.Server.Components.Injections
-@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @inject ChassisBrowser Browser
 
@@ -12,29 +11,20 @@
 
 @if (_project is null)
 {
-    <div class="legacy-surface">
-        <h1>Unknown Project</h1>
-        <p class="lede">Nothing lives at this id — the Project may have been deleted.</p>
-    </div>
+    <h1>Unknown Project</h1>
+    <p class="lede">Nothing lives at this id — the Project may have been deleted.</p>
 }
 else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
-    @* A ported surface fills the body with its own panes; the two still on the old stylesheet keep
-       the padded page they were written as, until #97 retires it with them. *@
+    @* Wisdom left this switch with #91 — its own route owns that surface now. The Episode list is
+       ported to panes and gets the layout's flush body (#94); the Injection log is still the padded
+       page it was written as, which is what the layout gives it until #96. *@
     @switch (ActiveTab)
     {
-        case "wisdom":
-            <div class="legacy-surface">
-                <WisdomBrowserTab ProjectId="ProjectId" />
-            </div>
-            break;
-
         case "injections":
-            <div class="legacy-surface">
-                <InjectionLogTab ProjectId="ProjectId" />
-            </div>
+            <InjectionLogTab ProjectId="ProjectId" />
             break;
 
         default:
@@ -54,9 +44,12 @@ else
 
     private ProjectListItem? _project;
 
+    /// <summary>
+    /// Wisdom is absent deliberately: <c>WisdomPage</c>'s literal <c>wisdom</c> route outranks this
+    /// page's <c>{Tab}</c> parameter, so that segment never reaches here (#91).
+    /// </summary>
     private string ActiveTab => Tab?.ToLowerInvariant() switch
     {
-        "wisdom" => "wisdom",
         "injections" => "injections",
         _ => "episodes",
     };

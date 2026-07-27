@@ -3,99 +3,106 @@ using Mimir.Server.Ui;
 namespace Mimir.Server.Tests.Ui;
 
 /// <summary>
-/// The chassis's one search box (§8, #94): who owns it, what the claimant hears, and what happens
-/// when a surface hands it on. No database — the whole class is one object's state machine.
+/// The header's one search box and the surface that claims it (§8). Nothing here touches Postgres,
+/// deliberately: the claim rules are pure, so they must run — and be able to fail — on a machine
+/// with no Docker.
 /// </summary>
 public sealed class SurfaceSearchTests
 {
     private readonly SurfaceSearch _search = new();
 
-    private readonly List<string> _heard = [];
-
-    private int _claimChanges;
-
-    public SurfaceSearchTests() => _search.ClaimChanged += () => _claimChanges++;
-
     [Fact]
-    public void Unclaimed_ItHasNoPlaceholderAndNoTerm()
+    public void Unclaimed_TheBoxSaysSo_AndSwallowsTyping()
     {
+        _search.IsClaimed.ShouldBeFalse();
         _search.Placeholder.ShouldBeNull();
-        _search.Term.ShouldBeEmpty();
+
+        _search.Set("into the void");
+
+        _search.Term.ShouldBe("", "an unclaimed box has no surface to narrow");
     }
 
     [Fact]
-    public void ASurfaceClaimingIt_NamesWhatToType_AndTheHeaderIsTold()
+    public void AClaim_NamesThePrompt_AndTakesTheTyping()
     {
-        _search.ClaimBy("Search these Episodes", Narrow);
+        using var claim = _search.Claim(this, "Search this Project's Wisdom…");
 
-        _search.Placeholder.ShouldBe("Search these Episodes");
-        _claimChanges.ShouldBe(1);
+        _search.IsClaimed.ShouldBeTrue();
+        _search.Placeholder.ShouldBe("Search this Project's Wisdom…");
+
+        _search.Set("zebra");
+
+        _search.Term.ShouldBe("zebra");
     }
 
     [Fact]
-    public async Task WhatTheCuratorTypes_ReachesTheClaimant()
+    public void ReleasingAClaim_ClearsTheTerm_SoTheNextSurfaceOpensUnfiltered()
     {
-        _search.ClaimBy("Search these Episodes", Narrow);
-
-        await _search.EnterAsync("interceptor");
-
-        _heard.ShouldBe(["interceptor"]);
-        _search.Term.ShouldBe("interceptor");
-    }
-
-    [Fact]
-    public async Task TypingWithNothingClaimed_IsDropped()
-    {
-        await _search.EnterAsync("interceptor");
-
-        _search.Term.ShouldBeEmpty();
-        _heard.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task ReleasingIt_DisablesTheBox_AndForgetsTheTerm()
-    {
-        var claim = _search.ClaimBy("Search these Episodes", Narrow);
-        await _search.EnterAsync("interceptor");
+        var claim = _search.Claim(this, "Search…");
+        _search.Set("zebra");
 
         claim.Dispose();
 
+        _search.IsClaimed.ShouldBeFalse();
+        _search.Term.ShouldBe("");
         _search.Placeholder.ShouldBeNull();
-        _search.Term.ShouldBeEmpty();
-        _claimChanges.ShouldBe(2);
     }
 
+    /// <summary>
+    /// Blazor mounts the incoming surface before disposing the outgoing one, so the overlap is the
+    /// ordinary case rather than an error — and the late release must not pull the box out from
+    /// under the surface that now holds it.
+    /// </summary>
     [Fact]
-    public async Task ANewClaim_StartsFromAnEmptyTerm_SoNoSurfaceInheritsAnothersSearch()
+    public void AnOverlappingClaim_Wins_AndTheOutgoingReleaseIsANoOp()
     {
-        _search.ClaimBy("Search these Episodes", Narrow);
-        await _search.EnterAsync("interceptor");
-
-        _search.ClaimBy("Search this Wisdom", Narrow);
-
-        _search.Term.ShouldBeEmpty();
-        _search.Placeholder.ShouldBe("Search this Wisdom");
-    }
-
-    [Fact]
-    public async Task AReleaseFromTheSurfaceJustLeft_LeavesTheNewOnesClaimStanding()
-    {
-        // Blazor may initialize the incoming surface before disposing the outgoing one, so the
-        // stale Dispose lands after the new claim. It must not disable a box someone is serving.
-        var outgoing = _search.ClaimBy("Search these Episodes", Narrow);
-        _search.ClaimBy("Search this Wisdom", Narrow);
+        var outgoing = _search.Claim(new object(), "Episodes…");
+        var incoming = _search.Claim(new object(), "Wisdom…");
+        _search.Set("zebra");
 
         outgoing.Dispose();
 
-        _search.Placeholder.ShouldBe("Search this Wisdom");
-        await _search.EnterAsync("dotnet");
-        _heard.ShouldBe(["dotnet"]);
+        _search.IsClaimed.ShouldBeTrue();
+        _search.Placeholder.ShouldBe("Wisdom…");
+        _search.Term.ShouldBe("zebra");
+
+        incoming.Dispose();
+        _search.IsClaimed.ShouldBeFalse();
     }
 
-    /// <summary>What a claimant does: re-read the term off the service, its one channel.</summary>
-    private Task Narrow()
+    /// <summary>
+    /// The reset on the claiming edge, which the overlap case above cannot see because it types
+    /// after the handover. Both ported surfaces lean on it: re-claiming is how a surface that stays
+    /// mounted across a Project change sheds the outgoing Project's term (#94), so a claim that
+    /// inherited one would silently narrow the incoming list by something nobody typed for it.
+    /// </summary>
+    [Fact]
+    public void ANewClaim_StartsFromAnEmptyTerm_SoNoSurfaceInheritsAnothersSearch()
     {
-        _heard.Add(_search.Term);
-        return Task.CompletedTask;
+        _search.Claim(this, "Episodes…");
+        _search.Set("zebra");
+
+        using var reclaimed = _search.Claim(this, "Episodes…");
+
+        _search.Term.ShouldBe("");
+    }
+
+    [Fact]
+    public void EveryEdge_RaisesChanged_SoBothSidesRedraw()
+    {
+        var raised = 0;
+        _search.Changed += () => raised++;
+
+        var claim = _search.Claim(this, "Search…");
+        _search.Set("zeb");
+        claim.Dispose();
+
+        raised.ShouldBe(3);
+    }
+
+    [Fact]
+    public void AClaimWithoutAHolder_IsRejected()
+    {
+        Should.Throw<ArgumentNullException>(() => _search.Claim(null!, "Search…"));
     }
 }

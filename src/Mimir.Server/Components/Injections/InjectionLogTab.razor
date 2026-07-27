@@ -98,7 +98,7 @@ else if (_view is { } view)
                                         <span class="wisdom-meta" title="The §7 score that ranked it">
                                             score @item.Score.ToString("0.0000")
                                         </span>
-                                        <WisdomCard Entry="wisdom" OnChanged="RefreshAsync" />
+                                        <WisdomCard Entry="wisdom" ProjectId="ProjectId" OnChanged="RefreshAsync" />
                                     </div>
                                 }
                                 else

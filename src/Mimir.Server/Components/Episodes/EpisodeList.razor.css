@@ -1,12 +1,24 @@
 /* The §8.2 list pane (#94), on Nocturne's tokens: a fixed 400px column whose head holds still
    while the rows scroll under it. The 400px and the divider are the four-pane shape's, shared with
    the Wisdom and Injection lists as each is ported. */
+
+/* The surface's root, the same shape WisdomSurface's is (#91): MainLayout gives a ported surface a
+   flush body that is a column, so the surface takes its height and lays its own panes out across
+   it. #95 adds the Event stream beside this pane. */
+.episode-surface {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+}
+
 .episode-pane {
     flex: none;
     width: 400px;
-    height: 100%;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     box-shadow: inset -1px 0 0 var(--color-divider);
 }
 

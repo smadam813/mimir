@@ -10,9 +10,9 @@
 
 <PageTitle>Episode · Mimir</PageTitle>
 
-@* Still the pre-port drill-down on the old stylesheet — #95 puts it on the four-pane shape — so it
-   wraps itself in the padded page the frame used to apply (#94). *@
-<div class="legacy-surface">
+@* Still the pre-port drill-down on the old stylesheet — #95 puts it on the four-pane shape. Until
+   then the layout keeps giving it the padded body, since it is the Episode list's route one segment
+   deeper and only the list's own root counts as ported (#94). *@
 @if (_detail is null)
 {
     <h1>Episode not found</h1>
@@ -78,7 +78,6 @@ else
         </ol>
     }
 }
-</div>
 
 @code {
     [Parameter]
