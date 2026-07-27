@@ -96,8 +96,6 @@
     private static readonly EpisodeState[] Chips =
         [EpisodeState.Live, EpisodeState.Pending, EpisodeState.Running, EpisodeState.Failed];
 
-    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
-
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
@@ -112,13 +110,21 @@
     private Guid _shownProjectId;
     private IDisposable? _subscription;
     private IDisposable? _claim;
-    private CancellationTokenSource? _debounce;
     private int _generation;
 
-    /// <summary>Serialises <see cref="ScheduleRefresh"/> against <see cref="Dispose"/>.</summary>
-    private readonly Lock _debounceGate = new();
+    /// <summary>
+    /// The feed's lane. This is the one surface driven by both triggers, and it is the only one
+    /// that needs two instances: a burst of captured Events must not postpone the list forever, so
+    /// this one carries the ceiling. What that costs is coalescing across the lanes — a keystroke
+    /// and a captured Event inside the same window used to collapse into one refresh, and no longer
+    /// do. That is the price of the ceiling, not an oversight: one instance cannot hold both, since
+    /// a ceiling armed by an Event would fire a refresh that reads the search term live, querying a
+    /// half-typed word (#101, D5).
+    /// </summary>
+    private Debouncer? _feedDebounce;
 
-    private bool _disposed;
+    /// <summary>The search box's lane, deliberately without a ceiling — see <see cref="_feedDebounce"/>.</summary>
+    private Debouncer? _searchDebounce;
 
     private IReadOnlyList<EpisodeSummary> Visible => _filter is { } state
         ? [.. _episodes.Where(e => e.State == state)]
@@ -128,10 +134,15 @@
 
     protected override void OnInitialized()
     {
+        _feedDebounce = new Debouncer(
+            Debouncer.DefaultDelay, Logger, "Episode list refresh", Debouncer.DefaultCeilingMultiple);
+        _searchDebounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Episode list refresh");
+
         // Claim, keystroke and release all arrive as one event (#91), and every one of them changes
-        // what this list should show — so all three go through the same coalescing the feed does. A
-        // keystroke otherwise costs one Event-and-Provenance count per row per letter.
-        Search.Changed += ScheduleRefresh;
+        // what this list should show — so all three are the search lane, the release and re-claim
+        // on a Project switch included. A keystroke otherwise costs one Event-and-Provenance count
+        // per row per letter.
+        Search.Changed += ScheduleSearchRefresh;
 
         _subscription = Feed.Subscribe(change =>
         {
@@ -139,7 +150,7 @@
             {
                 // Coalesced: the feed fires on every captured Event, and this list's query counts
                 // Events and Provenance per row — one refresh per burst, not one per Event.
-                ScheduleRefresh();
+                ScheduleFeedRefresh();
             }
         });
     }
@@ -161,6 +172,12 @@
             _claim = null;
         }
 
+        // Two refreshes land on a switch, and that is accepted rather than accidental: the release
+        // and the re-claim each raise Changed, which schedules one on the search lane, and the
+        // await below runs another straight away. The direct one is what paints the incoming
+        // Project without a debounce's wait — the first load has no claim to release and would
+        // otherwise sit empty for it — and the debounced pair collapses to a single duplicate query
+        // a moment later, against the same (now empty) term.
         UpdateClaim();
         await RefreshAsync();
     }
@@ -183,49 +200,9 @@
 
     private void Filter(EpisodeState? state) => _filter = state;
 
-    /// <summary>
-    /// Coalesces a burst into one refresh. Guarded, because the feed publishes on whichever thread
-    /// captured — not this circuit's dispatcher — so this runs concurrently with <see cref="Dispose"/>
-    /// reaching for the same field. Unguarded, a change landing mid-teardown installs a fresh
-    /// timer nobody will ever cancel, and it fires against a disposed component 250 ms later.
-    /// </summary>
-    private void ScheduleRefresh()
-    {
-        CancellationTokenSource cts;
-        lock (_debounceGate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
+    private void ScheduleFeedRefresh() => _feedDebounce?.Schedule(() => InvokeAsync(RefreshAsync));
 
-            _debounce?.Cancel();
-            _debounce?.Dispose();
-            cts = new CancellationTokenSource();
-            _debounce = cts;
-        }
-
-        _ = DebouncedRefreshAsync(cts.Token);
-    }
-
-    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(RefreshAsync);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later Event before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a stale-but-visible list.
-            Logger.LogWarning(ex, "Episode list refresh failed");
-        }
-    }
+    private void ScheduleSearchRefresh() => _searchDebounce?.Schedule(() => InvokeAsync(RefreshAsync));
 
     private async Task RefreshAsync()
     {
@@ -248,15 +225,11 @@
 
     public void Dispose()
     {
-        Search.Changed -= ScheduleRefresh;
+        Search.Changed -= ScheduleSearchRefresh;
         _subscription?.Dispose();
         _claim?.Dispose();
-        lock (_debounceGate)
-        {
-            _disposed = true;
-            _debounce?.Cancel();
-            _debounce?.Dispose();
-        }
+        _feedDebounce?.Dispose();
+        _searchDebounce?.Dispose();
     }
 
     /// <summary>

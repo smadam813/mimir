@@ -206,8 +206,6 @@
 </div>
 
 @code {
-    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
-
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
@@ -222,8 +220,10 @@
     protected override void OnInitialized()
     {
         // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
-        // answering each one — the same debounce the other live surfaces use (#89, #91).
-        _debounce = new Debouncer(DebounceDelay, Logger, "Injection listing refresh");
+        // answering each one — the same debounce the other live surfaces use (#89, #91), minus the
+        // ceiling the feed-driven ones take: Debouncer's ceilingMultiple says why a search lane
+        // gets none.
+        _debounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Injection listing refresh");
 
         // One search box, claimed by whichever surface is on screen (§8). The claim is for the
         // Project on screen, not for the life of the component — see AnchorOnProject. Parameters

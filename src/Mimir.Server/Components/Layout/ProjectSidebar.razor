@@ -132,12 +132,13 @@
     private RecallAttention? _recallAttention;
     private IDisposable? _subscription;
 
-    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
-
     private Debouncer? _debounce;
 
+    // Ceilinged: this is the other unfiltered feed subscriber the ceiling exists for. The argument
+    // for it is stated once, on Debouncer.DefaultCeilingMultiple.
     protected override void OnInitialized()
-        => _debounce = new Debouncer(DebounceDelay, Logger, "Project sidebar refresh");
+        => _debounce = new Debouncer(
+            Debouncer.DefaultDelay, Logger, "Project sidebar refresh", Debouncer.DefaultCeilingMultiple);
 
     protected override async Task OnInitializedAsync()
     {
