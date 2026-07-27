@@ -16,17 +16,17 @@
    separate screen (#90): the tab strip goes (there is no Project to count anything for), the body
    explains the two registrations, and the header and sidebar read the cascade to say their own
    part. Every region reads one flag from here rather than asking the database itself. *@
-<CascadingValue Value="_isFirstRun" Name="@FirstRunCascade">
+<CascadingValue Value="IsFirstRun" Name="@FirstRunCascade">
     <div class="app-frame">
         <AppHeader />
-        @if (!_isFirstRun)
+        @if (!ShowFirstRun)
         {
             <SurfaceTabStrip />
         }
         <div class="app-row">
             <ProjectSidebar />
-            <main class="app-body @(_isFirstRun ? "is-bare" : null)">
-                @if (_isFirstRun)
+            <main class="app-body @(ShowFirstRun ? "is-bare" : null)">
+                @if (ShowFirstRun)
                 {
                     <FirstRunPanel />
                 }
@@ -48,52 +48,106 @@
 @code {
     /// <summary>
     /// The name the header's and the sidebar's <c>[CascadingParameter]</c> bind to. One constant
-    /// rather than the same string literal in three files.
+    /// rather than the same string literal in three files. What it carries is nullable: null is
+    /// "no answer yet", which the shell renders as the populated chassis but neither consumer
+    /// treats as a fact worth querying for.
     /// </summary>
     public const string FirstRunCascade = "IsFirstRun";
 
-    private bool _isFirstRun;
+    /// <summary>
+    /// Whether this install has never been introduced to Claude Code — carried across the
+    /// prerender/circuit boundary rather than asked twice. Null until the first answer lands, and
+    /// again on a page whose prerender pass could not reach Postgres, which the circuit then
+    /// retries; an unknown answer shows the populated chassis, the state that asks nothing.
+    /// </summary>
+    /// <remarks>
+    /// Public and settable because that is the shape <c>[PersistentState]</c> binds to, and
+    /// persisted because without it the interactive instance starts at the default, renders once
+    /// before its own query resolves, and flashes the populated chassis over the prerendered
+    /// onboarding body on every first-run load — the one thing #90 is about.
+    /// </remarks>
+    [PersistentState]
+    public bool? IsFirstRun { get; set; }
+
+    private bool ShowFirstRun => IsFirstRun is true;
+
     private IDisposable? _subscription;
+    private bool _rechecking;
+    private bool _recheckAgain;
 
     protected override async Task OnInitializedAsync()
     {
-        _isFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+        if (IsFirstRun is null)
+        {
+            try
+            {
+                IsFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The chassis renders either way: nothing here is worth the whole shell becoming
+                // Blazor's error banner while the compose stack is still settling. Left unset
+                // rather than false, so the interactive pass asks again instead of inheriting a
+                // failure the prerender pass happened to hit.
+                Logger.LogWarning(ex, "First-run check failed");
+            }
+        }
 
-        if (_isFirstRun)
+        if (ShowFirstRun)
         {
             // A one-way latch: first run is "no non-Global Project exists", and a Project is only
             // ever created — so the shell watches the Episode feed only while it is still showing
-            // the first-run state, and stops for good the moment the first hook lands. That is why
-            // there is no debounce here, unlike AppHeader's and ProjectSidebar's own refreshes: the
-            // very first Event to arrive is the one that ends the watch.
+            // the first-run state, and stops for good the moment the first hook lands. No debounce,
+            // unlike AppHeader's and ProjectSidebar's own refreshes: the very first Event to arrive
+            // is normally the one that ends the watch, and delaying that is delaying the whole
+            // point. RecheckAsync coalesces a burst instead.
             _subscription = Feed.Subscribe(change => _ = InvokeAsync(RecheckAsync));
         }
     }
 
     private async Task RecheckAsync()
     {
-        if (!_isFirstRun)
+        if (!ShowFirstRun)
         {
             return;
         }
 
+        if (_rechecking)
+        {
+            // An Event landed while the last query was in flight. That query may have read the
+            // database before this Event's own write committed, so ask once more when it returns
+            // rather than either racing a second query alongside it or dropping the Event.
+            _recheckAgain = true;
+            return;
+        }
+
+        _rechecking = true;
         try
         {
-            _isFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+            do
+            {
+                _recheckAgain = false;
+                IsFirstRun = await Browser.IsFirstRunAsync(CancellationToken.None);
+            }
+            while (ShowFirstRun && _recheckAgain);
+
+            if (!ShowFirstRun)
+            {
+                _subscription?.Dispose();
+                _subscription = null;
+                StateHasChanged();
+            }
         }
         catch (Exception ex)
         {
-            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a shell still showing onboarding.
+            // Fire-and-forget from the feed callback, and the whole body is inside this: a
+            // transient Postgres failure, or a StateHasChanged against a circuit torn down while
+            // the query was in flight, would otherwise be an exception nobody ever observes.
             Logger.LogWarning(ex, "First-run check failed");
-            return;
         }
-
-        if (!_isFirstRun)
+        finally
         {
-            _subscription?.Dispose();
-            _subscription = null;
-            StateHasChanged();
+            _rechecking = false;
         }
     }
 

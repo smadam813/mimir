@@ -26,7 +26,7 @@
         }
     </div>
 
-    @if (IsFirstRun)
+    @if (IsFirstRun is true)
     {
         <p class="sidebar-note">
             Projects appear here on their session's first hook — nothing to configure.
@@ -109,9 +109,13 @@
 </nav>
 
 @code {
-    /// <summary>MainLayout's one first-run flag; the second group has nothing to count yet (#90).</summary>
+    /// <summary>
+    /// MainLayout's one first-run flag; the second group has nothing to count yet (#90). Null
+    /// until the answer lands, which reads as "not first run" here — the group it would replace is
+    /// the one this sidebar renders for every other state anyway.
+    /// </summary>
     [CascadingParameter(Name = MainLayout.FirstRunCascade)]
-    public bool IsFirstRun { get; set; }
+    public bool? IsFirstRun { get; set; }
 
     private IReadOnlyList<ProjectListItem> _projects = [];
     private string? _activeTab;

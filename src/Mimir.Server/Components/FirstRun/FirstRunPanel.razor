@@ -76,13 +76,24 @@
 
     private IJSObjectReference? _module;
     private string? _copyState;
+    private bool _disposed;
 
     private async Task CopyAsync()
     {
         try
         {
-            _module ??= await Js.InvokeAsync<IJSObjectReference>("import", Assets[Module]);
-            _copyState = await _module.InvokeAsync<bool>("copyText", FirstRunCommands.Both)
+            // The panel is swapped out the moment the first hook lands, which can be mid-import if
+            // the curator copies as their first session starts. DisposeAsync would have seen no
+            // module to release, so the import that lands after it releases its own.
+            var module = _module ??= await Js.InvokeAsync<IJSObjectReference>("import", Assets[Module]);
+            if (_disposed)
+            {
+                _module = null;
+                await module.DisposeAsync();
+                return;
+            }
+
+            _copyState = await module.InvokeAsync<bool>("copyText", FirstRunCommands.Both)
                 ? "Both registrations copied."
                 : Blocked;
         }
@@ -97,6 +108,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
+
         if (_module is null)
         {
             return;

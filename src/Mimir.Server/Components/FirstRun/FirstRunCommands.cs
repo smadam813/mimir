@@ -8,7 +8,7 @@ namespace Mimir.Server.Components.FirstRun;
 /// pins run with no Postgres — which is the machine a first run actually happens on (#90).
 /// </summary>
 /// <remarks>
-/// README.md's "Registering the hooks" and "Searching your memory from a session" sections state
+/// README.md's "Capturing your sessions" and "Searching your memory from a session" sections state
 /// the same two registrations for a reader who never opens the app. Change one, change the other.
 /// </remarks>
 internal static class FirstRunCommands

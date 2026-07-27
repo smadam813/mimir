@@ -28,7 +28,7 @@
 
     <span class="app-header-spacer"></span>
 
-    @if (IsFirstRun)
+    @if (IsFirstRun is true)
     {
         <ModelPullChip />
     }
@@ -72,23 +72,37 @@
 @code {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>MainLayout's one first-run flag; the header trades the pipeline for the pull (#90).</summary>
+    /// <summary>
+    /// MainLayout's one first-run flag; the header trades the pipeline for the pull (#90). Null
+    /// until that answer lands, which is a third state here rather than a second: the pipeline is
+    /// five Postgres queries, and asking for them before knowing whether anything will render them
+    /// is the waste this is shaped to avoid.
+    /// </summary>
     [CascadingParameter(Name = MainLayout.FirstRunCascade)]
-    public bool IsFirstRun { get; set; }
+    public bool? IsFirstRun { get; set; }
 
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
     private CancellationTokenSource? _debounce;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await RefreshAsync();
-
         // The Episode feed is the only signal that already exists for these figures (#89); it
         // fires on every captured Event, not only session start and Seal, so a burst (a tool use
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
         // five-query round trip per Event.
         _subscription = Feed.Subscribe(change => ScheduleRefresh());
+    }
+
+    // Cascading parameters are set before the first render, so this is the initial fetch — and it
+    // is also the fetch that first-run ends on, since the pipeline replaces the pull chip on that
+    // very cascade change and has never been asked for until then.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsFirstRun is false && _pipeline is null)
+        {
+            await RefreshAsync();
+        }
     }
 
     private void ScheduleRefresh()
@@ -121,6 +135,14 @@
 
     private async Task RefreshAsync()
     {
+        // Nothing renders the pipeline while the install is still being introduced (#90), and the
+        // Events that end first run are exactly the ones the feed pushes — five Postgres queries
+        // per burst, every one of them discarded, for the whole of that window.
+        if (IsFirstRun is not false)
+        {
+            return;
+        }
+
         _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
         StateHasChanged();
     }

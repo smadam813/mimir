@@ -1,7 +1,4 @@
-@using Mimir.Contracts.Health
-@using Mimir.Server.Health
-@implements IDisposable
-@inject IHealthState HealthState
+@inherits HealthAwareComponent
 
 @* Spec §8 / #90: the model pull, stated in the header while it is the one genuinely slow step a
    new install is waiting on. A sibling of HealthPill rather than markup inside AppHeader: both
@@ -10,7 +7,7 @@
 
    Renders nothing when no model is pulling — a §11 model already Ready, still Pending or Failed
    outright is not a pull, and the Health popover beside this is where those are stated. *@
-@if (ModelPull.From(_snapshot.Ollama) is { } pull)
+@if (ModelPull.From(Snapshot.Ollama) is { } pull)
 {
     <div class="model-pull">
         <span class="model-pull-dot" aria-hidden="true"></span>
@@ -24,23 +21,4 @@
         }
         <span class="model-pull-note">· once, in the background — Capture does not wait for it</span>
     </div>
-}
-
-@code {
-    private HealthSnapshot _snapshot = HealthSnapshot.Pending;
-    private IDisposable? _subscription;
-
-    protected override void OnInitialized()
-    {
-        _snapshot = HealthState.Current;
-
-        // Probes push from background threads; hop onto the circuit's dispatcher to re-render.
-        _subscription = HealthState.Subscribe(snapshot => InvokeAsync(() =>
-        {
-            _snapshot = snapshot;
-            StateHasChanged();
-        }));
-    }
-
-    public void Dispose() => _subscription?.Dispose();
 }

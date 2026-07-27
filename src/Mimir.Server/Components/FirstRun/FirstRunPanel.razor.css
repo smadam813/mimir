@@ -63,7 +63,10 @@
     color: var(--color-accent-400);
 }
 
-/* Step three is a statement about what happens next, not something to do — it recedes. */
+/* Step three is a statement about what happens next, not something to do — it recedes. A class on
+   the step and not :last-child, deliberately: the divider above is positional (no rule under the
+   last row, whatever it says) while this is about what the step is, and the two only coincide
+   today. Move the step and the dimming travels with it; the divider stays where it belongs. */
 .first-run-step.is-quiet .first-run-numeral {
     border-color: var(--color-divider);
     color: color-mix(in srgb, var(--color-text) 56%, transparent);

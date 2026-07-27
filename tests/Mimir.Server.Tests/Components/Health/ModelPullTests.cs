@@ -34,6 +34,22 @@ public class ModelPullTests
     }
 
     [Fact]
+    public void TwoModelsPullingAtOnce_NamesTheFirstTheTileLists()
+    {
+        // "At most one pulls at a time" is ModelProvisioner's sequential loop, not something the
+        // tile enforces — so what the header does if that ever stops holding is a decision, not an
+        // accident: the first listed, in the order §11 declares the models. The Health popover
+        // beside the chip is what states every model's own state.
+        var pull = ModelPull.From(Ollama(
+            Model("qwen3:8b", ModelProvisioningState.Pulling, percentComplete: 12),
+            Model("qwen3-embedding", ModelProvisioningState.Pulling, percentComplete: 90)));
+
+        pull.ShouldNotBeNull();
+        pull.Value.Name.ShouldBe("qwen3:8b");
+        pull.Value.PercentComplete.ShouldBe(12);
+    }
+
+    [Fact]
     public void APullWithNoTotalReported_IsNamedWithoutAPercentage()
     {
         var pull = ModelPull.From(Ollama(Model("qwen3:8b", ModelProvisioningState.Pulling)));
