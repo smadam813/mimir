@@ -85,11 +85,27 @@
 
     /// <summary>
     /// Read from the URL, the same way the sidebar and tab strip read it (#89); the layout
-    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. Each of
-    /// #94–#96 adds its own surface here; the branch goes with the old stylesheet (#97).
+    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. #95 and #96
+    /// add their own surfaces here; the branch goes with the old stylesheet (#97).
+    /// <para>
+    /// Episodes is ported at its root only: the list fills the body with panes (#94), while the
+    /// Event stream one segment deeper is still the padded page it was written as until #95 —
+    /// and both read as <c>episodes</c> to <see cref="ProjectRoute.Parse"/>.
+    /// </para>
     /// </summary>
     private bool IsPortedSurface
-        => ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri))?.Tab == "wisdom";
+    {
+        get
+        {
+            var path = Nav.ToBaseRelativePath(Nav.Uri);
+            return ProjectRoute.Parse(path)?.Tab switch
+            {
+                "wisdom" => true,
+                "episodes" => ProjectRoute.IsSurfaceRoot(path),
+                _ => false,
+            };
+        }
+    }
 
     private IDisposable? _subscription;
     private bool _rechecking;

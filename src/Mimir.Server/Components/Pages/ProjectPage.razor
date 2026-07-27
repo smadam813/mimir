@@ -18,6 +18,9 @@ else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
+    @* Wisdom left this switch with #91 — its own route owns that surface now. The Episode list is
+       ported to panes and gets the layout's flush body (#94); the Injection log is still the padded
+       page it was written as, which is what the layout gives it until #96. *@
     @switch (ActiveTab)
     {
         case "injections":
@@ -25,7 +28,9 @@ else
             break;
 
         default:
-            <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+            <EpisodeList ProjectId="ProjectId"
+                         ProjectName="@_project.DisplayName"
+                         IsGlobal="_project.IsGlobal" />
             break;
     }
 }

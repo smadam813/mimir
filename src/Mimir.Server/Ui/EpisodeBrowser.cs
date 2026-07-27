@@ -5,7 +5,15 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Ui;
 
-/// <summary>One timeline row (spec §8.2). Unsealed means the session is live (or crashed, §4).</summary>
+/// <summary>
+/// One row of the Episode list (spec §8.2). Unsealed means the session is live (or crashed, §4).
+/// <paramref name="WisdomCount"/> is how much durable memory this session is Provenance for that
+/// still stands — Wisdom admitted from it and Wisdom it confirmed, since the Merge Gate unions
+/// provenance onto the line it reinforces (§6.3) and both readings are "what this session
+/// produced". Retired Wisdom is excluded, the one convention every Wisdom figure in the chassis
+/// keeps (<see cref="ChassisBrowser"/>): a curator who Retires a bad line expects the row that
+/// produced it to stop claiming it.
+/// </summary>
 public sealed record EpisodeSummary(
     Guid Id,
     string SessionId,
@@ -13,26 +21,50 @@ public sealed record EpisodeSummary(
     DateTimeOffset? SealedAt,
     string? SealReason,
     string Cwd,
-    int EventCount);
+    int EventCount,
+    DistillationState Distillation,
+    int WisdomCount)
+{
+    /// <summary>
+    /// What the row marks. Derived here so the list's four readers — the chips' counts, the chip
+    /// filter, the row's own mark and <see cref="EpisodeDisplay.MetaLine"/> — ask one question
+    /// instead of passing the same two columns around; the rule itself stays
+    /// <see cref="EpisodeDisplay.State"/>'s.
+    /// </summary>
+    public EpisodeState State => EpisodeDisplay.State(SealedAt, Distillation);
+}
 
 /// <summary>The §8.2 drill-down: the Episode and its full Event stream in arrival order.</summary>
 public sealed record EpisodeDetail(Episode Episode, IReadOnlyList<Event> Events);
 
 /// <summary>
-/// The read-and-delete surface behind the Episode timeline (spec §8.2). Every method opens its
+/// The read-and-delete surface behind the Episode list (spec §8.2). Every method opens its
 /// own short-lived context — a Blazor circuit outlives any sensible DbContext lifetime. The hard
-/// deletes exist for sensitive content and are announced on the feed so every open timeline drops
+/// deletes exist for sensitive content and are announced on the feed so every open list drops
 /// the deleted rows without a refresh. The Project sidebar and lookup moved to
 /// <see cref="ChassisBrowser"/> — the sidebar and the Project page are their only callers.
 /// </summary>
 public sealed class EpisodeBrowser(IDbContextFactory<MimirDbContext> contexts, IEpisodeFeed feed)
 {
+    /// <param name="search">
+    /// Narrows the list to Episodes whose Event stream matches, word-aware over the payload's
+    /// string values — the GIN index over <c>Event.tsv</c> the §7 Episode search leg already reads
+    /// (<see cref="EventSearch"/>). Null or blank lists every Episode. The Episode's own metadata is
+    /// deliberately not searched: a curator scanning for a cwd or a session id has the list itself,
+    /// where both are on every row.
+    /// </param>
     public async Task<IReadOnlyList<EpisodeSummary>> ListEpisodesAsync(
-        Guid projectId, CancellationToken cancellationToken)
+        Guid projectId, string? search, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        return await db.Episodes
-            .Where(e => e.ProjectId == projectId)
+        var episodes = db.Episodes.Where(e => e.ProjectId == projectId);
+        if (search?.Trim() is { Length: > 0 } term)
+        {
+            episodes = episodes.Where(e => db.Events.Any(v =>
+                v.EpisodeId == e.Id && v.Tsv!.Matches(EF.Functions.PlainToTsQuery("english", term))));
+        }
+
+        return await episodes
             .OrderByDescending(e => e.StartedAt)
             .Select(e => new EpisodeSummary(
                 e.Id,
@@ -41,7 +73,19 @@ public sealed class EpisodeBrowser(IDbContextFactory<MimirDbContext> contexts, I
                 e.SealedAt,
                 e.SealReason,
                 e.Cwd,
-                db.Events.Count(v => v.EpisodeId == e.Id)))
+                db.Events.Count(v => v.EpisodeId == e.Id),
+                e.Distillation,
+                // Distinct: the gate writes one Provenance row per provenance Event (§6), so a
+                // Wisdom drawn from three Events of this Episode is one Wisdom produced, not three.
+                // Retired excluded, as every Wisdom figure in the chassis excludes it — and §6.4
+                // Retires the loser of a supersede, so a line adjudicated away stops being credited
+                // here while the successor, carrying this Episode's provenance, takes its place.
+                db.Provenance
+                    .Where(p => p.EpisodeId == e.Id
+                        && db.Wisdom.Any(w => w.Id == p.WisdomId && w.RetiredAt == null))
+                    .Select(p => p.WisdomId)
+                    .Distinct()
+                    .Count()))
             .ToListAsync(cancellationToken);
     }
 

@@ -21,7 +21,8 @@
 
     @* One box, whichever surface is on screen: it narrows that surface's list rather than opening a
        results screen of its own (§8). A surface claims it on mount and releases on leaving, so an
-       unclaimed box says so instead of pretending to search (#91). *@
+       unclaimed box — an unported surface, or Global's Episodes tab, which has no Episodes to
+       narrow — says so instead of pretending to search (#91, #94). *@
     <label class="app-search">
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
@@ -29,7 +30,7 @@
         <input class="input" aria-label="Search"
                placeholder="@(Search.Placeholder ?? "Search…")"
                disabled="@(!Search.IsClaimed)"
-               title="@(Search.IsClaimed ? null : "This surface has not claimed search yet — it narrows the active tab once that surface is ported.")"
+               title="@(Search.IsClaimed ? null : "Nothing here claims search — it narrows whichever list is on screen, once that surface is ported.")"
                value="@Search.Term" @oninput="OnSearchInput" />
     </label>
 
@@ -91,11 +92,18 @@
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
     private CancellationTokenSource? _debounce;
+    private int _generation;
+
+    /// <summary>Serialises <see cref="ScheduleRefresh"/> against <see cref="Dispose"/>.</summary>
+    private readonly Lock _debounceGate = new();
+
+    private bool _disposed;
 
     protected override void OnInitialized()
     {
         // A surface claiming or releasing the box changes what this input says and whether it is
-        // enabled at all, and neither is this component's own state.
+        // enabled at all, and neither is this component's own state. A handover also empties the
+        // term, so this is what drops whatever the outgoing surface's search left in the box.
         Search.Changed += OnSearchChanged;
 
         // The Episode feed is the only signal that already exists for these figures (#89); it
@@ -116,12 +124,28 @@
         }
     }
 
+    /// <summary>
+    /// Coalesces a burst into one refresh. Guarded, because the feed publishes on whichever thread
+    /// captured — not this circuit's dispatcher — so this runs concurrently with <see cref="Dispose"/>
+    /// reaching for the same field. Unguarded, a change landing mid-teardown installs a fresh
+    /// timer nobody will ever cancel, and it fires against a disposed component 250 ms later.
+    /// </summary>
     private void ScheduleRefresh()
     {
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _debounce = cts;
+        CancellationTokenSource cts;
+        lock (_debounceGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+            cts = new CancellationTokenSource();
+            _debounce = cts;
+        }
+
         _ = DebouncedRefreshAsync(cts.Token);
     }
 
@@ -148,13 +172,26 @@
     {
         // Nothing renders the pipeline while the install is still being introduced (#90), and the
         // Events that end first run are exactly the ones the feed pushes — five Postgres queries
-        // per burst, every one of them discarded, for the whole of that window.
+        // per burst, every one of them discarded, for the whole of that window. Checked before the
+        // generation is taken, so a discarded refresh does not invalidate a real one in flight.
         if (IsFirstRun is not false)
         {
             return;
         }
 
-        _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+        var generation = ++_generation;
+
+        var pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+
+        // Two changes landing a debounce apart both reach here, and cancelling an elapsed delay is
+        // a no-op — so whichever query returns second must not be the one that wins. The feed
+        // delivers in bursts by design (§8), which makes overlapping queries the ordinary case.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _pipeline = pipeline;
         StateHasChanged();
     }
 
@@ -164,9 +201,13 @@
 
     public void Dispose()
     {
-        _subscription?.Dispose();
         Search.Changed -= OnSearchChanged;
-        _debounce?.Cancel();
-        _debounce?.Dispose();
+        _subscription?.Dispose();
+        lock (_debounceGate)
+        {
+            _disposed = true;
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+        }
     }
 }

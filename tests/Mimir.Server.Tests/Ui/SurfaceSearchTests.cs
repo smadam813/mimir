@@ -70,6 +70,23 @@ public sealed class SurfaceSearchTests
         _search.IsClaimed.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// The reset on the claiming edge, which the overlap case above cannot see because it types
+    /// after the handover. Both ported surfaces lean on it: re-claiming is how a surface that stays
+    /// mounted across a Project change sheds the outgoing Project's term (#94), so a claim that
+    /// inherited one would silently narrow the incoming list by something nobody typed for it.
+    /// </summary>
+    [Fact]
+    public void ANewClaim_StartsFromAnEmptyTerm_SoNoSurfaceInheritsAnothersSearch()
+    {
+        _search.Claim(this, "Episodes…");
+        _search.Set("zebra");
+
+        using var reclaimed = _search.Claim(this, "Episodes…");
+
+        _search.Term.ShouldBe("");
+    }
+
     [Fact]
     public void EveryEdge_RaisesChanged_SoBothSidesRedraw()
     {

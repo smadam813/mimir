@@ -1,0 +1,274 @@
+@using Mimir.Server.Capture
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject EpisodeBrowser Browser
+@inject IEpisodeFeed Feed
+@inject SurfaceSearch Search
+@inject ILogger<EpisodeList> Logger
+
+@* Spec §8.2 on the four-pane shape (#94): this Project's Sealed and live Episodes, newest first,
+   each row marking where its session and its distillation are. The list grows over the circuit as
+   capture announces changes — no refresh, no polling — and the header's search box narrows it
+   while this component is mounted. *@
+<div class="episode-surface">
+<div class="episode-pane">
+    <div class="pane-head">
+        <div class="pane-title-row">
+            <h4 class="pane-title">Episodes</h4>
+            <span class="pane-count">@_episodes.Count.ToString("N0") · @ProjectName</span>
+        </div>
+
+        @* The drawn chips are All / Live / Pending / Failed; Running joins them so every state a
+           row can mark is also a state the curator can filter to. Done is the resting majority —
+           it is what "All" is mostly made of, and marks nothing on its row. *@
+        @if (_episodes.Count > 0)
+        {
+            <div class="state-chips">
+                <button type="button" class="btn btn-secondary chip @(_filter is null ? "is-active" : null)"
+                        @onclick="() => Filter(null)">
+                    All
+                </button>
+                @foreach (var state in Chips)
+                {
+                    <button type="button" class="btn btn-secondary chip @(_filter == state ? "is-active" : null)"
+                            @onclick="() => Filter(state)">
+                        @EpisodeDisplay.StateWord(state)<span class="chip-count">@Count(state)</span>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="pane-rows">
+        @if (IsGlobal)
+        {
+            <p class="pane-note">
+                Global holds Wisdom only — Episodes always belong to the Project their session ran
+                in (§3).
+            </p>
+        }
+        else if (_episodes.Count == 0 && Search.Term.Trim() is { Length: > 0 } term)
+        {
+            @* Word-aware, not substring — §7's Episode leg is FTS-only over Event.tsv, so a
+               fragment, an unstemmed form or a word too common to index matches nothing. The note
+               says how the search reads rather than asserting the Events never mention it. *@
+            <p class="pane-note">
+                No Event of this Project's Episodes matches “@term”. Search reads whole words out of
+                Event text, so a fragment or a very common word finds nothing.
+            </p>
+        }
+        else if (_episodes.Count == 0)
+        {
+            <p class="pane-note">No sessions captured for this Project yet.</p>
+        }
+        else if (Visible.Count == 0)
+        {
+            <p class="pane-note">No @EpisodeDisplay.StateWord(_filter!.Value) Episodes here.</p>
+        }
+        else
+        {
+            @foreach (var episode in Visible)
+            {
+                var (dot, mark) = Classes(episode.State);
+                @* The session id keys the Episode (ADR-0003) but is a hash, so it rides as the
+                   row's tooltip and the drill-down's heading rather than taking a line here. *@
+                <a class="episode-row" href="@($"projects/{ProjectId}/episodes/{episode.Id}")"
+                   title="@($"session {episode.SessionId}")">
+                    <div class="episode-row-head">
+                        <span class="state-dot @dot"></span>
+                        <span class="episode-when">@EpisodeDisplay.Stamp(episode.StartedAt)</span>
+                        @if (EpisodeDisplay.StateWord(episode.State) is { } word)
+                        {
+                            <span class="@mark">@word</span>
+                        }
+                        <span class="episode-events">@EpisodeDisplay.EventsLabel(episode.EventCount)</span>
+                    </div>
+                    <p class="episode-meta">@EpisodeDisplay.MetaLine(episode)</p>
+                </a>
+            }
+        }
+    </div>
+</div>
+</div>
+
+@code {
+    /// <summary>The four states a row marks, in the order the chips carry them.</summary>
+    private static readonly EpisodeState[] Chips =
+        [EpisodeState.Live, EpisodeState.Pending, EpisodeState.Running, EpisodeState.Failed];
+
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    [Parameter, EditorRequired]
+    public string ProjectName { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsGlobal { get; set; }
+
+    private IReadOnlyList<EpisodeSummary> _episodes = [];
+    private EpisodeState? _filter;
+    private Guid _shownProjectId;
+    private IDisposable? _subscription;
+    private IDisposable? _claim;
+    private CancellationTokenSource? _debounce;
+    private int _generation;
+
+    /// <summary>Serialises <see cref="ScheduleRefresh"/> against <see cref="Dispose"/>.</summary>
+    private readonly Lock _debounceGate = new();
+
+    private bool _disposed;
+
+    private IReadOnlyList<EpisodeSummary> Visible => _filter is { } state
+        ? [.. _episodes.Where(e => e.State == state)]
+        : _episodes;
+
+    private int Count(EpisodeState state) => _episodes.Count(e => e.State == state);
+
+    protected override void OnInitialized()
+    {
+        // Claim, keystroke and release all arrive as one event (#91), and every one of them changes
+        // what this list should show — so all three go through the same coalescing the feed does. A
+        // keystroke otherwise costs one Event-and-Provenance count per row per letter.
+        Search.Changed += ScheduleRefresh;
+
+        _subscription = Feed.Subscribe(change =>
+        {
+            if (change.ProjectId == ProjectId)
+            {
+                // Coalesced: the feed fires on every captured Event, and this list's query counts
+                // Events and Provenance per row — one refresh per burst, not one per Event.
+                ScheduleRefresh();
+            }
+        });
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Both narrowings belong to the Project they were made on. Blazor keeps this one instance
+        // across a sidebar switch — same route, no @key — so shedding them is ours to do: a carried
+        // chip says "No failed Episodes here" over a list that has some, and a carried term
+        // silently narrows the new Project by something nobody typed for it. Releasing and
+        // re-claiming is what sheds the term, since a claim starts empty on both edges; released
+        // first, because the claim is held by identity and disposing a stale token afterwards would
+        // hand the box back out from under the new claim.
+        if (_shownProjectId != ProjectId)
+        {
+            _shownProjectId = ProjectId;
+            _filter = null;
+            _claim?.Dispose();
+            _claim = null;
+        }
+
+        UpdateClaim();
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Claims the header's search box while there is something here to narrow. Global's tab has no
+    /// Episodes at all, so it hands the box back rather than offering a search over nothing.
+    /// </summary>
+    private void UpdateClaim()
+    {
+        if (IsGlobal)
+        {
+            _claim?.Dispose();
+            _claim = null;
+            return;
+        }
+
+        _claim ??= Search.Claim(this, "Search this Project's Events…");
+    }
+
+    private void Filter(EpisodeState? state) => _filter = state;
+
+    /// <summary>
+    /// Coalesces a burst into one refresh. Guarded, because the feed publishes on whichever thread
+    /// captured — not this circuit's dispatcher — so this runs concurrently with <see cref="Dispose"/>
+    /// reaching for the same field. Unguarded, a change landing mid-teardown installs a fresh
+    /// timer nobody will ever cancel, and it fires against a disposed component 250 ms later.
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        CancellationTokenSource cts;
+        lock (_debounceGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+            cts = new CancellationTokenSource();
+            _debounce = cts;
+        }
+
+        _ = DebouncedRefreshAsync(cts.Token);
+    }
+
+    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(DebounceDelay, cancellationToken);
+            await InvokeAsync(RefreshAsync);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later Event before the debounce elapsed.
+        }
+        catch (Exception ex)
+        {
+            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
+            // here is a silently swallowed exception rather than a stale-but-visible list.
+            Logger.LogWarning(ex, "Episode list refresh failed");
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var generation = ++_generation;
+
+        IReadOnlyList<EpisodeSummary> episodes = IsGlobal
+            ? []
+            : await Browser.ListEpisodesAsync(ProjectId, Search.Term, CancellationToken.None);
+
+        // A newer refresh — a later Event, another keystroke, a different Project — may have landed
+        // while this one was awaiting its query; drop this one rather than overwrite fresher rows.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _episodes = episodes;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        Search.Changed -= ScheduleRefresh;
+        _subscription?.Dispose();
+        _claim?.Dispose();
+        lock (_debounceGate)
+        {
+            _disposed = true;
+            _debounce?.Cancel();
+            _debounce?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// How a row wears its state, dot and word together in one answer. Live and failed are words in
+    /// their own hue — the two states a curator is looking for; the queue's two are pills, so a
+    /// row's distillation reads as a stage rather than an alarm.
+    /// </summary>
+    private static (string Dot, string Mark) Classes(EpisodeState state) => state switch
+    {
+        EpisodeState.Live => ("dot-live", "state-word is-live"),
+        EpisodeState.Failed => ("dot-failed", "state-word is-failed"),
+        EpisodeState.Running => ("dot-resting", "state-pill is-running"),
+        _ => ("dot-resting", "state-pill"),
+    };
+}

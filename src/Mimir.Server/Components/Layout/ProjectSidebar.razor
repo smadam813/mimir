@@ -44,7 +44,9 @@
         <div class="sidebar-group">
             @* Stat rows, not links, wherever the tab body still cannot read a filter back off the
                URL — a row promising "Failed" would land on the tab's own unfiltered default view.
-               Wisdom's three are real links: its surface reads the lens from the query (#91). *@
+               Wisdom's three are real links: its surface reads the lens from the query (#91). The
+               ported Episode list does filter by state, but from its own chips (#94), which the URL
+               does not carry — so its rows stay stat rows until something links a chip. *@
             @switch (tab)
             {
                 case "wisdom":
