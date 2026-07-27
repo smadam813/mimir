@@ -30,10 +30,20 @@ internal sealed class Debouncer(TimeSpan delay, ILogger logger, string what) : I
     /// Schedules <paramref name="action"/>, superseding whatever was already pending, and does
     /// nothing at all once disposed. Returns as soon as the timer is armed — this is called from
     /// render and from feed callbacks, neither of which can await.
+    ///
+    /// The token is read while the gate is still held, not from the source afterwards. The thread
+    /// the feed publishes on is not the circuit's, as above, so this runs concurrently with itself
+    /// as well as with <see cref="Dispose"/> — two sessions capturing at once are two threads in
+    /// here. Read after the release and the racer can have superseded — cancelled *and* disposed —
+    /// the source this call just installed, and <see cref="CancellationTokenSource.Token"/> throws
+    /// <see cref="ObjectDisposedException"/> on a disposed source. On the dispatcher that throw
+    /// reaches a Blazor event handler and ends the circuit. Nothing can interpose on the window to
+    /// pin it (#112 measured six escapes in 800,000 racing calls), so this is defense in depth
+    /// rather than a mechanism any test holds in place.
     /// </summary>
     public void Schedule(Func<Task> action)
     {
-        CancellationTokenSource cts;
+        CancellationToken token;
         lock (_gate)
         {
             if (_disposed)
@@ -43,11 +53,11 @@ internal sealed class Debouncer(TimeSpan delay, ILogger logger, string what) : I
 
             _pending?.Cancel();
             _pending?.Dispose();
-            cts = new CancellationTokenSource();
-            _pending = cts;
+            _pending = new CancellationTokenSource();
+            token = _pending.Token;
         }
 
-        _ = RunAsync(action, cts.Token);
+        _ = RunAsync(action, token);
     }
 
     private async Task RunAsync(Func<Task> action, CancellationToken cancellationToken)
@@ -68,8 +78,13 @@ internal sealed class Debouncer(TimeSpan delay, ILogger logger, string what) : I
     }
 
     /// <summary>
-    /// Drops anything pending, and closes the door behind it — a surface torn down mid-burst runs
-    /// nothing after this returns, including from a signal racing it on another thread.
+    /// Drops anything still waiting out its delay, and closes the door behind it: a signal racing
+    /// this on another thread is refused rather than arming a timer nobody will cancel.
+    ///
+    /// What it does not do is interrupt a run whose delay has already elapsed. Cancellation reaches
+    /// <see cref="Task.Delay(TimeSpan, CancellationToken)"/> and nothing past it — the scheduled
+    /// action takes no token — and the run task is discarded, so there is nothing to await either.
+    /// A surface torn down in that window still sees its last refresh finish.
     /// </summary>
     public void Dispose()
     {
