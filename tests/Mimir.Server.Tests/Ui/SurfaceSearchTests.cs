@@ -30,7 +30,7 @@ public class SurfaceSearchTests
             received.Add(term);
             return Task.CompletedTask;
         });
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
 
         search.IsClaimed.ShouldBeTrue();
         search.Placeholder.ShouldBe("Search this log…");
@@ -50,7 +50,7 @@ public class SurfaceSearchTests
         });
 
         claim.Dispose();
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
 
         search.IsClaimed.ShouldBeFalse();
         search.Placeholder.ShouldBeNull();
@@ -73,7 +73,7 @@ public class SurfaceSearchTests
         });
 
         outgoing.Dispose();
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
 
         search.IsClaimed.ShouldBeTrue();
         search.Placeholder.ShouldBe("Search this log…");
@@ -85,7 +85,7 @@ public class SurfaceSearchTests
     {
         var search = new SurfaceSearch();
         var first = search.Claim("Search Wisdom…", _ => Task.CompletedTask);
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
         first.Dispose();
 
         using var next = search.Claim("Search this log…", _ => Task.CompletedTask);
@@ -105,7 +105,7 @@ public class SurfaceSearchTests
 
         var first = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
         var claimed = search.Generation;
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
         var typed = search.Generation;
         first.Dispose();
         using var second = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
@@ -116,6 +116,50 @@ public class SurfaceSearchTests
     }
 
     [Fact]
+    public async Task ATermTypedBeforeAReclaim_LandsNowhere_RatherThanNarrowingTheNextSurface()
+    {
+        // The header debounces on the way out, so a curator who types and then switches Project
+        // inside the window has the keystroke arrive after the box was re-claimed and visibly
+        // emptied. "Something is claimed" cannot tell that from the ordinary case: the term would
+        // narrow the new listing by words the emptied box no longer shows.
+        var search = new SurfaceSearch();
+        var first = search.Claim("Search Project A's injections…", _ => Task.CompletedTask);
+        var typedUnder = search.Generation;
+        first.Dispose();
+        var received = new List<string>();
+        using var second = search.Claim("Search Project B's injections…", term =>
+        {
+            received.Add(term);
+            return Task.CompletedTask;
+        });
+
+        await search.SetTermAsync("migrations", typedUnder);
+
+        received.ShouldBeEmpty();
+        search.Term.ShouldBe("");
+    }
+
+    [Fact]
+    public async Task ATermTypedUnderTheLiveClaim_StillArrives()
+    {
+        // The other half of the guard: it must reject only the stale generation, or the box goes
+        // inert and no surface is ever narrowed at all.
+        var search = new SurfaceSearch();
+        var received = new List<string>();
+        using var claim = search.Claim("Search this log…", term =>
+        {
+            received.Add(term);
+            return Task.CompletedTask;
+        });
+        var typedUnder = search.Generation;
+
+        await search.SetTermAsync("migrations", typedUnder);
+
+        received.ShouldBe(["migrations"]);
+        search.Term.ShouldBe("migrations");
+    }
+
+    [Fact]
     public async Task EveryClaimReleaseAndTerm_RaisesChangedForTheHeaderToRenderOn()
     {
         var search = new SurfaceSearch();
@@ -123,7 +167,7 @@ public class SurfaceSearchTests
         search.Changed += () => changes++;
 
         var claim = search.Claim("Search this log…", _ => Task.CompletedTask);
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
         claim.Dispose();
 
         changes.ShouldBe(3);
@@ -136,7 +180,7 @@ public class SurfaceSearchTests
         var changes = 0;
         search.Changed += () => changes++;
 
-        await search.SetTermAsync("migrations");
+        await search.SetTermAsync("migrations", search.Generation);
 
         search.Term.ShouldBe("");
         changes.ShouldBe(0);

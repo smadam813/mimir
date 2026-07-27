@@ -161,8 +161,58 @@ public class InjectionDisplayTests
         InjectionDisplay.Name(InjectionLane.Mcp).ShouldBe("MCP");
     }
 
+    [Fact]
+    public void CannotPromote_IsSilentAboutAnEntryThatCanBePromoted()
+    {
+        InjectionDisplay.CannotPromote(Entry("why does CI skip?", Item("Because."))).ShouldBeNull();
+    }
+
+    [Fact]
+    public void CannotPromote_NamesTheQueryABriefNeverHad()
+    {
+        var brief = Entry(query: null, Item("Prefer rebase over merge."));
+
+        InjectionDisplay.CannotPromote(brief).ShouldNotBeNull()
+            .ShouldContain("a Brief carries none");
+    }
+
+    [Fact]
+    public void CannotPromote_TellsCarriedNothingApartFromCarriedOnlyDeadLines()
+    {
+        // Three ways an entry can fail to promote and only one of them is about retirement. An
+        // mimir_search whose answer matched Episodes alone records a query and no Wisdom at all
+        // (McpSearchService returns early only when *both* legs are empty) — telling that curator
+        // their lines were retired names a fault that never happened.
+        var carriedNothing = Entry("what did we decide about hooks?");
+        var carriedOnlyDead = Entry("what did we decide about hooks?", Retired(), Gone());
+
+        var nothing = InjectionDisplay.CannotPromote(carriedNothing).ShouldNotBeNull();
+        var dead = InjectionDisplay.CannotPromote(carriedOnlyDead).ShouldNotBeNull();
+
+        nothing.ShouldContain("carried no Wisdom at all");
+        nothing.ShouldNotContain("retired");
+        dead.ShouldContain("retired or deleted");
+        dead.ShouldNotBe(nothing);
+    }
+
+    private static InjectionLogEntry Entry(string? query, params InjectedWisdom[] items)
+        => new(
+            Guid.CreateVersion7(),
+            SessionId: "s-1",
+            At: Confirmed,
+            InjectionLane.Mcp,
+            query,
+            Chars: 100,
+            Verdict: null,
+            VerdictAt: null,
+            PromotedCaseId: null,
+            items);
+
     private static InjectedWisdom Item(
-        string text, WisdomKind kind = WisdomKind.Lesson, bool isGlobal = false)
+        string text,
+        WisdomKind kind = WisdomKind.Lesson,
+        bool isGlobal = false,
+        DateTimeOffset? retiredAt = null)
     {
         var id = Guid.CreateVersion7();
         return new InjectedWisdom(
@@ -178,10 +228,13 @@ public class InjectionDisplayTests
                 Reinforcement: 1,
                 Confirmed,
                 ContestedAt: null,
-                RetiredAt: null,
+                retiredAt,
                 SupersededBy: null,
                 OrphanedProvenance: false));
     }
+
+    /// <summary>An item whose Wisdom was retired after the injection (§10) — recall skips it.</summary>
+    private static InjectedWisdom Retired() => Item("Retired since.", retiredAt: Confirmed);
 
     /// <summary>An item whose Wisdom was hard-deleted after the injection (§10).</summary>
     private static InjectedWisdom Gone()

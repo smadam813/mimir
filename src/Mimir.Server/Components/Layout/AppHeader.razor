@@ -84,15 +84,20 @@
 
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
-    private CancellationTokenSource? _debounce;
-    private CancellationTokenSource? _searchDebounce;
+    private Debouncer? _refreshDebounce;
+    private Debouncer? _searchDebounce;
 
     /// <summary>
     /// Synchronous, and deliberately not folded into <see cref="OnInitializedAsync"/>: a surface
     /// claims the box as it mounts, and the first <c>await</c> there yields long enough for the
     /// claim to land before the subscription would exist to hear it.
     /// </summary>
-    protected override void OnInitialized() => Search.Changed += OnSearchChanged;
+    protected override void OnInitialized()
+    {
+        _refreshDebounce = new Debouncer(DebounceDelay, Logger, "Header pipeline refresh");
+        _searchDebounce = new Debouncer(DebounceDelay, Logger, "Surface search");
+        Search.Changed += OnSearchChanged;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -102,35 +107,8 @@
         // fires on every captured Event, not only session start and Seal, so a burst (a tool use
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
         // five-query round trip per Event.
-        _subscription = Feed.Subscribe(change => ScheduleRefresh());
-    }
-
-    private void ScheduleRefresh()
-    {
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _debounce = cts;
-        _ = DebouncedRefreshAsync(cts.Token);
-    }
-
-    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(RefreshAsync);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later Event before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a stale-but-visible header.
-            Logger.LogWarning(ex, "Header pipeline refresh failed");
-        }
+        _subscription = Feed.Subscribe(
+            change => _refreshDebounce?.Schedule(() => InvokeAsync(RefreshAsync)));
     }
 
     private async Task RefreshAsync()
@@ -140,33 +118,18 @@
     }
 
     /// <summary>
-    /// Debounced on the way out only. <c>_term</c> follows every keystroke so the rendered value
-    /// never lags what was typed, while the surface behind it is spared a query per character.
+    /// Debounced on the way out only: the box itself is uncontrolled, so what was typed is on
+    /// screen the instant it is typed, while the surface behind it is spared a query per character.
     /// </summary>
     private void OnSearchInput(ChangeEventArgs e)
     {
-        _searchDebounce?.Cancel();
-        _searchDebounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _searchDebounce = cts;
-        _ = DebouncedSearchAsync(e.Value?.ToString() ?? "", cts.Token);
-    }
-
-    private async Task DebouncedSearchAsync(string term, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(() => Search.SetTermAsync(term));
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later keystroke before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Surface search failed");
-        }
+        // Both are read here, at the keystroke, not after the delay. The generation is what tells
+        // SurfaceSearch whether the surface being typed at is still the one that will receive this
+        // term — nothing here cancels on a claim change, so a Project switched inside the window
+        // leaves this timer running with the old surface's word in it.
+        var term = e.Value?.ToString() ?? "";
+        var generation = Search.Generation;
+        _searchDebounce?.Schedule(() => InvokeAsync(() => Search.SetTermAsync(term, generation)));
     }
 
     /// <summary>A claim, a release, or the term the surface actually received.</summary>
@@ -176,9 +139,7 @@
     {
         _subscription?.Dispose();
         Search.Changed -= OnSearchChanged;
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        _searchDebounce?.Cancel();
+        _refreshDebounce?.Dispose();
         _searchDebounce?.Dispose();
     }
 }

@@ -142,9 +142,11 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
         // curator's filters touch.
         var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == query.ProjectId);
         var matching = scoped;
+        var narrowed = false;
         if (query.Lane is { } lane)
         {
             matching = matching.Where(i => i.Lane == lane);
+            narrowed = true;
         }
 
         if (query.Search?.Trim() is { Length: > 0 } term)
@@ -152,21 +154,26 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             // query_context is the only text an entry carries (§3) — no tsvector over it, so a
             // case-insensitive substring match, with the LIKE metacharacters escaped so a curator
             // typing "%" searches for one.
-            var pattern = "%" + term
-                .Replace(@"\", @"\\")
-                .Replace("%", @"\%")
-                .Replace("_", @"\_") + "%";
+            var pattern = LikePattern.Contains(term);
             matching = matching.Where(i =>
-                i.QueryContext != null && EF.Functions.ILike(i.QueryContext, pattern, @"\"));
+                i.QueryContext != null
+                && EF.Functions.ILike(i.QueryContext, pattern, LikePattern.EscapeCharacter));
+            narrowed = true;
         }
 
         var rows = await matching
             .OrderByDescending(i => i.At).ThenByDescending(i => i.Id)
             .Take(RecentEntryLimit)
             .ToListAsync(cancellationToken);
-        var matchingCount = await matching.CountAsync(cancellationToken);
 
         var totalEntries = await scoped.CountAsync(cancellationToken);
+        // No COUNT where something already answers it. A Take that came back short of the bound
+        // saw the whole matching set, and an unnarrowed listing's set is the Project's own — so
+        // only a narrowed listing that actually filled the bound needs its own query, which is the
+        // one case where Truncated's figure could not be worked out from what is already here.
+        var matchingCount = rows.Count < RecentEntryLimit ? rows.Count
+            : narrowed ? await matching.CountAsync(cancellationToken)
+            : totalEntries;
         var totalSessions = await scoped
             .Select(i => i.SessionId).Distinct().CountAsync(cancellationToken);
         var useful = await scoped

@@ -16,7 +16,9 @@
         <div class="pane-list-head">
             <div class="pane-list-title">
                 <h4>Injections</h4>
-                <span class="pane-count">@(_view?.TotalEntries.ToString("N0") ?? "—") entries</span>
+                @* The query's population, not the Project's — this count sits above the chips and
+                   the list it describes, and the aside carries the whole-Project figure. *@
+                <span class="pane-count">@(_view?.Matching.ToString("N0") ?? "—") entries</span>
             </div>
             <div class="lane-chips">
                 <button class="btn btn-secondary lane-chip @(_lane is null ? "is-active" : null)"
@@ -208,6 +210,7 @@
     private string? _search;
     private IDisposable? _searchClaim;
     private Guid _loadedProject;
+    private int _generation;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -262,8 +265,19 @@
 
     private async Task RefreshAsync()
     {
-        _view = await Browser.ListAsync(
+        var generation = ++_generation;
+        var view = await Browser.ListAsync(
             new InjectionQuery(ProjectId, _search, _lane), CancellationToken.None);
+
+        // A newer refresh may have already landed while this one was awaiting its queries — two
+        // lane chips clicked in quick succession, or a keystroke behind one. Drop this one rather
+        // than leave the listing showing a filter the chips no longer say is active.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _view = view;
 
         // The entries are records read fresh each time, so the selection has to be re-resolved by
         // id or a mark would show its old verdict until the curator clicked elsewhere. An entry

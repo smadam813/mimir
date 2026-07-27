@@ -103,7 +103,10 @@
 
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
-    private CancellationTokenSource? _debounce;
+    private Debouncer? _debounce;
+
+    protected override void OnInitialized()
+        => _debounce = new Debouncer(DebounceDelay, Logger, "Project sidebar refresh");
 
     protected override async Task OnInitializedAsync()
     {
@@ -113,36 +116,9 @@
         // be that first hook, so re-query the (tiny) list and let the sidebar grow live. The feed
         // fires on every captured Event, not only session start and Seal, so a burst is coalesced
         // into one refresh instead of one round trip (including the Recall group's query) per Event.
-        _subscription = Feed.Subscribe(change => ScheduleRefresh());
+        _subscription = Feed.Subscribe(
+            change => _debounce?.Schedule(() => InvokeAsync(RefreshAsync)));
         Nav.LocationChanged += OnLocationChanged;
-    }
-
-    private void ScheduleRefresh()
-    {
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _debounce = cts;
-        _ = DebouncedRefreshAsync(cts.Token);
-    }
-
-    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(RefreshAsync);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later Event before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a stale-but-visible sidebar.
-            Logger.LogWarning(ex, "Project sidebar refresh failed");
-        }
     }
 
     private int _generation;
@@ -206,7 +182,6 @@
     {
         _subscription?.Dispose();
         Nav.LocationChanged -= OnLocationChanged;
-        _debounce?.Cancel();
         _debounce?.Dispose();
     }
 }

@@ -138,6 +138,23 @@ internal static class InjectionDisplay
         return InjectionWrapper.Build(entries, int.MaxValue).Text;
     }
 
+    /// <summary>
+    /// Why an entry cannot be promoted to a GoldenCase (§9), or null when it can. Three faults, and
+    /// naming the wrong one is worse than saying nothing: a Brief carries no query to replay (§3);
+    /// an <c>mimir_search</c> whose answer matched only Episodes carried no Wisdom at all, an
+    /// ordinary outcome and nothing to do with retirement; and only the third is the entry whose
+    /// lines have since been retired or hard-deleted. <see cref="InjectionLogEntry.CanPromote"/>
+    /// collapses all three into one false, so the reason is worked out here rather than inferred
+    /// from the query alone.
+    /// </summary>
+    public static string? CannotPromote(InjectionLogEntry entry) => entry switch
+    {
+        { CanPromote: true } => null,
+        { QueryContext: null } => "needs a query to replay; a Brief carries none.",
+        { Items.Count: 0 } => "this entry carried no Wisdom at all, so no case could expect one.",
+        _ => "every Wisdom it carried is retired or deleted, so no case could expect one.",
+    };
+
     private static string Number(double value)
         => value.ToString("0.##", CultureInfo.InvariantCulture);
 }

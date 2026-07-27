@@ -52,12 +52,19 @@ public sealed class SurfaceSearch
     }
 
     /// <summary>
-    /// The header's own edit. Ignored while nothing is claimed — the box renders disabled then, so
-    /// the only way here is a race with a surface being torn down.
+    /// The header's own edit, carrying the <see cref="Generation"/> the keystroke was taken under.
+    /// Ignored while nothing is claimed — the box renders disabled then, so the only way here is a
+    /// race with a surface being torn down.
+    ///
+    /// Ignored too when the generation has moved since, because the header debounces on the way
+    /// out: a curator who types and switches Project inside the debounce window has the term land
+    /// after the box was re-claimed and visibly emptied, and "something is claimed" cannot tell
+    /// that apart from the ordinary case. It would silently narrow the new surface by words typed
+    /// at the old one, which the emptied box no longer shows.
     /// </summary>
-    public async Task SetTermAsync(string term)
+    public async Task SetTermAsync(string term, int generation)
     {
-        if (_handler is not { } handler)
+        if (_handler is not { } handler || generation != Generation)
         {
             return;
         }

@@ -432,6 +432,33 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     [Fact]
+    public async Task AFilteredListingThatFillsTheBound_CountsWhatMatched_NotTheWholeProject()
+    {
+        // The one case where the matching count cannot be worked out from what is already in hand:
+        // a Take that came back short saw everything, and an unnarrowed listing's population is the
+        // Project's — but a narrowed one that filled the bound is neither, and answering it with
+        // the Project's total would overstate the "N more" line by every entry the filter excluded.
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
+        var items = new[] { (wisdom.Id, 0.03) };
+        await AddInjectionAsync(
+            project.Id, "sess-a", InjectionLane.Brief, null, Now, items: items);
+        for (var i = 0; i <= InjectionBrowser.RecentEntryLimit; i++)
+        {
+            await AddInjectionAsync(
+                project.Id, "sess-a", InjectionLane.Prompt, $"prompt {i}", Now, items: items);
+        }
+
+        var view = await Browser()
+            .ListAsync(new InjectionQuery(project.Id, Lane: InjectionLane.Prompt), Token);
+
+        view.Listed.ShouldBe(InjectionBrowser.RecentEntryLimit);
+        view.Matching.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        view.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 2);
+        view.Truncated.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task TheAside_CountsMarkedNoiseUnmarkedAndSessions_OverTheWholeProject()
     {
         var project = await AddProjectAsync("injection");

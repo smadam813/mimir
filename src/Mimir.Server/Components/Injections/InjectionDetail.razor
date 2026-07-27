@@ -14,7 +14,7 @@
                 session @Entry.SessionId
                 · @InjectionDisplay.Trigger(Entry.Lane)
                 · @Entry.Items.Count Wisdom
-                · @Entry.Chars.ToString("N0")@(Budget is { } budget
+                · @Entry.Chars.ToString("N0")@(_budget is { } budget
                     ? $" of {budget:N0}" : "") chars
             </p>
 
@@ -25,7 +25,7 @@
             }
 
             <h6 class="detail-heading">What the session received</h6>
-            @if (Payload is null)
+            @if (_payload is null)
             {
                 <p class="detail-note">
                     This entry came from <code>mimir_search</code>, which composes its own sectioned
@@ -34,7 +34,7 @@
                     the reply itself cannot be shown. The lines below are the Wisdom half of it.
                 </p>
             }
-            else if (Payload.Length == 0)
+            else if (_payload.Length == 0)
             {
                 <p class="detail-note">
                     All @Entry.WisdomSinceDeleted of the Wisdom this entry carried have since been
@@ -44,19 +44,19 @@
             }
             else
             {
-                <pre class="detail-payload">@Payload</pre>
+                <pre class="detail-payload">@_payload</pre>
                 <p class="detail-note">
                     Rendered through the same §7 wrapper and label builders the lane itself used,
                     over what each line says now. §3 records an injection's size and its Wisdom, not
                     its text, so the recorded @Entry.Chars.ToString("N0") chars is the check:
-                    @if (Payload.Length == Entry.Chars)
+                    @if (_payload.Length == Entry.Chars)
                     {
                         <span>this rebuild is the same length, so nothing it carried has moved since.</span>
                     }
                     else
                     {
                         <span class="detail-drift">
-                            this rebuild is @Payload.Length.ToString("N0") chars, so the entry has
+                            this rebuild is @_payload.Length.ToString("N0") chars, so the entry has
                             drifted — a line edited or deleted since, or a Brief growth notice, which
                             rides in the count but is not itself recorded.
                         </span>
@@ -96,7 +96,7 @@
                     }
                 </div>
                 <p class="detail-note">
-                    <code class="detail-formula">@Formula.Expression</code> — @Formula.Factors
+                    <code class="detail-formula">@_formula.Expression</code> — @_formula.Factors
                     Reinforcement, salience and scope are each read now rather than as of the
                     injection: §3 records the score a lane arrived at, never the factors it got
                     there by. They explain a rank; they do not reproduce one.
@@ -130,10 +130,7 @@
                     else
                     {
                         <span class="detail-cannot-promote">
-                            @(Entry.QueryContext is null
-                                ? "Promote to golden — needs a query to replay; a Brief carries none."
-                                : "Promote to golden — every Wisdom it carried is retired or deleted,"
-                                  + " so no case could expect one.")
+                            Promote to golden — @InjectionDisplay.CannotPromote(Entry)
                         </span>
                     }
                 </span>
@@ -174,9 +171,20 @@
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
-    private string? Payload => InjectionDisplay.Payload(Entry.Lane, Entry.Items);
+    private string? _payload;
+    private int? _budget;
+    private ScoringFormula _formula = null!;
 
-    private int? Budget => InjectionDisplay.Budget(Entry.Lane, Options);
-
-    private ScoringFormula Formula => InjectionDisplay.Formula(Entry.Lane, Options);
+    /// <summary>
+    /// Built once per parameter change rather than once per reference. The markup reads the payload
+    /// five times in a single render — the two branch tests, the text, and both sides of the drift
+    /// compare — and a mark or a promote hands down a freshly-read entry record every time, so as
+    /// expression-bodied properties these rebuilt the whole wrapper on each of them.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        _payload = InjectionDisplay.Payload(Entry.Lane, Entry.Items);
+        _budget = InjectionDisplay.Budget(Entry.Lane, Options);
+        _formula = InjectionDisplay.Formula(Entry.Lane, Options);
+    }
 }
