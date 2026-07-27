@@ -335,7 +335,9 @@
 
         // One search box, claimed by whichever surface is on screen (§8). Claiming before
         // subscribing keeps the claim's own reset from costing a query the first load already does.
-        _claim = Search.Claim(this, "Search this Project's Wisdom…");
+        // Parameters are set before this runs, so anchoring here is also the first anchor: it is
+        // what keeps OnParametersSetAsync's re-anchor from re-claiming over a claim one line old.
+        AnchorOnProject();
         Search.Changed += OnSearchChanged;
     }
 
@@ -352,16 +354,32 @@
         }
 
         // Landing in another Project re-anchors the list on its universe, the way the tab this
-        // replaced re-anchored its project filter — so a Kind chip picked in the outgoing one
-        // does not silently keep narrowing the incoming one, and the header re-reads its name.
+        // replaced re-anchored its project filter — so nothing picked against the outgoing one
+        // keeps narrowing the incoming one, and the header re-reads its name.
         if (_boundProject != ProjectId)
         {
-            _boundProject = ProjectId;
-            _kind = null;
-            _project = null;
+            AnchorOnProject();
         }
 
         await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Binds this surface to <see cref="ProjectId"/>. It holds the header's box for the Project on
+    /// screen, not for its own lifetime: Blazor keeps the one instance across a Project change —
+    /// same route, no <c>@key</c> — so the outgoing Project's narrowings are this method's to shed,
+    /// the typed term as much as the Kind chip. Re-claiming is what sheds it, since
+    /// <see cref="SurfaceSearch.Claim"/> resets the term on the claiming edge and nothing else does
+    /// while one instance lives (#108). Released first, for the reason
+    /// <see cref="SurfaceSearch.Claim"/> states.
+    /// </summary>
+    private void AnchorOnProject()
+    {
+        _boundProject = ProjectId;
+        _kind = null;
+        _project = null;
+        _claim?.Dispose();
+        _claim = Search.Claim(this, "Search this Project's Wisdom…");
     }
 
     /// <summary>

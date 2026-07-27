@@ -32,7 +32,10 @@ public sealed class SurfaceSearch
     /// whatever was typed, so navigating to another surface never leaves it silently filtered by a
     /// term its own box is no longer showing. A second claim wins outright rather than throwing:
     /// Blazor mounts the incoming surface before disposing the outgoing one, so an overlap is the
-    /// ordinary case, and the release of a claim that has already been superseded does nothing.
+    /// ordinary case, and the release of a claim another holder has superseded does nothing.
+    /// A holder superseding <em>itself</em> is the exception, because the box is held by holder
+    /// identity rather than by token: its earlier token stays live, so a surface re-claiming for
+    /// itself releases first and leaves nothing behind to fire (#108).
     /// </summary>
     public IDisposable Claim(object holder, string placeholder)
     {
