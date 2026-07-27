@@ -57,7 +57,7 @@ public class DebouncerTests
     }
 
     [Fact]
-    public async Task DisposingMidBurst_RunsNothingAfterTheSurfaceIsGone()
+    public async Task DisposingMidBurst_RunsNothingThatWasStillWaitingOutItsDelay()
     {
         // A component torn down inside the window would otherwise touch its own disposed state
         // — the refresh writes fields and calls StateHasChanged on a circuit that has ended.
@@ -128,8 +128,10 @@ public class DebouncerTests
                 TestContext.Current.CancellationToken));
         await Settle();
 
-        // Whatever was scheduled before Dispose won the race was cancelled by it; whatever came
-        // after was refused. Either way nothing survives the teardown.
+        // Whatever was scheduled before Dispose won the race was still inside its delay, so it was
+        // cancelled by it; whatever came after was refused. Either way nothing survives here — a
+        // run whose delay had already elapsed would not have been, but the loop is far too fast to
+        // produce one.
         Volatile.Read(ref ran).ShouldBe(0);
     }
 
