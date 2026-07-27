@@ -1,0 +1,19 @@
+@using Mimir.Server.Storage.Entities
+
+@* Wisdom Kind carried by shape, never by hue (#86): Preference a diamond, Lesson a filled
+   triangle, Procedure a square outline, Fact a filled circle. Decorative on its own — every place
+   this renders puts the Kind's word beside it, which is what a screen reader reads. *@
+<span class="kind-glyph @Shape(Kind)" aria-hidden="true"></span>
+
+@code {
+    [Parameter, EditorRequired]
+    public WisdomKind Kind { get; set; }
+
+    private static string Shape(WisdomKind kind) => kind switch
+    {
+        WisdomKind.Preference => "glyph-diamond",
+        WisdomKind.Lesson => "glyph-triangle",
+        WisdomKind.Procedure => "glyph-square",
+        _ => "glyph-circle",
+    };
+}

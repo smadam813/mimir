@@ -5,6 +5,7 @@
 @implements IDisposable
 @inject ChassisBrowser Browser
 @inject IEpisodeFeed Feed
+@inject NavigationManager Nav
 @inject ILogger<MainLayout> Logger
 
 @* Spec §8: the chassis every surface lives in — header, tab strip, sidebar, then whichever
@@ -25,7 +26,7 @@
         }
         <div class="app-row">
             <ProjectSidebar />
-            <main class="app-body @(ShowFirstRun ? "is-bare" : null)">
+            <main class="app-body @BodyFit">
                 @if (ShowFirstRun)
                 {
                     <FirstRunPanel />
@@ -70,6 +71,25 @@
     public bool? IsFirstRun { get; set; }
 
     private bool ShowFirstRun => IsFirstRun is true;
+
+    /// <summary>
+    /// How the body sits in the frame. First run draws its own padding and accent wash to the
+    /// pane's edges (#90); otherwise a ported surface fills the body flush and scrolls its own
+    /// panes, while every surface still on the old stylesheet keeps the padded, single-scroll body
+    /// the frame used to give all of them (#91). The two never apply at once — first run replaces
+    /// <c>Body</c> outright, so no surface is rendering to be flush.
+    /// </summary>
+    private string? BodyFit => ShowFirstRun
+        ? "is-bare"
+        : IsPortedSurface ? "is-flush" : null;
+
+    /// <summary>
+    /// Read from the URL, the same way the sidebar and tab strip read it (#89); the layout
+    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. Each of
+    /// #94–#96 adds its own surface here; the branch goes with the old stylesheet (#97).
+    /// </summary>
+    private bool IsPortedSurface
+        => ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri))?.Tab == "wisdom";
 
     private IDisposable? _subscription;
     private bool _rechecking;

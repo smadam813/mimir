@@ -2,7 +2,6 @@
 @page "/projects/{ProjectId:guid}/{Tab}"
 @using Mimir.Server.Components.Episodes
 @using Mimir.Server.Components.Injections
-@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @inject ChassisBrowser Browser
 
@@ -21,10 +20,6 @@ else
 
     @switch (ActiveTab)
     {
-        case "wisdom":
-            <WisdomBrowserTab ProjectId="ProjectId" />
-            break;
-
         case "injections":
             <InjectionLogTab ProjectId="ProjectId" />
             break;
@@ -44,9 +39,12 @@ else
 
     private ProjectListItem? _project;
 
+    /// <summary>
+    /// Wisdom is absent deliberately: <c>WisdomPage</c>'s literal <c>wisdom</c> route outranks this
+    /// page's <c>{Tab}</c> parameter, so that segment never reaches here (#91).
+    /// </summary>
     private string ActiveTab => Tab?.ToLowerInvariant() switch
     {
-        "wisdom" => "wisdom",
         "injections" => "injections",
         _ => "episodes",
     };

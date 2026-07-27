@@ -12,13 +12,21 @@
             ×@Entry.Reinforcement · @EpisodeDisplay.Stamp(Entry.LastConfirmedAt)
         </span>
     </header>
-    <a class="wisdom-text" href="@($"projects/{Entry.ScopeProjectId}/wisdom/{Entry.Id}")">@Entry.Text</a>
+    <a class="wisdom-text" href="@WisdomRoute.Detail(ProjectId, Entry.Id, WisdomLens.Active)">@Entry.Text</a>
     <WisdomCuration Entry="Entry" OnChanged="OnChanged" />
 </article>
 
 @code {
     [Parameter, EditorRequired]
     public required WisdomListEntry Entry { get; set; }
+
+    /// <summary>
+    /// The Project whose surface this card is rendering on — never the Wisdom's own Scope, so
+    /// following a Global row out of one Project's log lands in that Project's universe, where it
+    /// is one of the rows, rather than switching the curator to Global's (see <see cref="WisdomRoute"/>).
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
 
     [Parameter]
     public EventCallback OnChanged { get; set; }
