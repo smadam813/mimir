@@ -1,0 +1,24 @@
+@inherits HealthAwareComponent
+
+@* Spec §8 / #90: the model pull, stated in the header while it is the one genuinely slow step a
+   new install is waiting on. A sibling of HealthPill rather than markup inside AppHeader: both
+   observe the same probe, and mounting this only on first run is what keeps the header off a
+   health subscription it would never read for the rest of the install's life.
+
+   Renders nothing when no model is pulling — a §11 model already Ready, still Pending or Failed
+   outright is not a pull, and the Health popover beside this is where those are stated. *@
+@if (ModelPull.From(Snapshot.Ollama) is { } pull)
+{
+    <div class="model-pull">
+        <span class="model-pull-dot" aria-hidden="true"></span>
+        <span>Pulling <code>@pull.Name</code></span>
+        @if (pull.PercentComplete is { } percent)
+        {
+            <span class="model-pull-track" aria-hidden="true">
+                <i style="width: @(percent)%"></i>
+            </span>
+            <span class="model-pull-percent">@percent%</span>
+        }
+        <span class="model-pull-note">· once, in the background — Capture does not wait for it</span>
+    </div>
+}
