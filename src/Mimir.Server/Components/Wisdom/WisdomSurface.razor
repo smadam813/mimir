@@ -273,8 +273,6 @@
     [Parameter]
     public WisdomLens Lens { get; set; }
 
-    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
-
     /// <summary>
     /// The detail pane's three states, one field rather than two flags because two of them must
     /// never coexist: a "Delete forever" reachable over an open editor throws the draft away with
@@ -330,8 +328,9 @@
     protected override void OnInitialized()
     {
         // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
-        // answering each one — the same debounce the chassis's own live readouts use (#89).
-        _debounce = new Debouncer(DebounceDelay, Logger, "Wisdom listing refresh");
+        // answering each one — the same debounce the chassis's own live readouts use (#89), minus
+        // the ceiling they take: Debouncer's ceilingMultiple says why a search lane gets none.
+        _debounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Wisdom listing refresh");
 
         // One search box, claimed by whichever surface is on screen (§8). Claiming before
         // subscribing keeps the claim's own reset from costing a query the first load already does.
