@@ -32,67 +32,15 @@ h1:focus {
     max-width: 44rem;
 }
 
-@keyframes pulse {
-    50% { opacity: 0.35; }
-}
+/* Episode detail (spec §8.2). The list's own rules left with it — the ported list pane is on
+   Nocturne, in EpisodeList.razor.css (#94). */
 
-/* Episode timeline + detail (spec §8.2) */
-
-.episode-timeline,
 .event-stream {
     list-style: none;
     margin: 1rem 0 0;
     padding: 0;
     display: grid;
     gap: 0.6rem;
-}
-
-.episode-row {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 0.75rem;
-    row-gap: 0.1rem;
-    padding: 0.6rem 0.8rem;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    text-decoration: none;
-}
-
-.episode-row:hover {
-    border-color: var(--text-dim);
-}
-
-.episode-state {
-    font-size: 0.75rem;
-    font-weight: 600;
-    align-self: center;
-    white-space: nowrap;
-}
-
-.episode-state.live {
-    color: var(--ready);
-    animation: pulse 1.4s ease-in-out infinite;
-}
-
-.episode-state.sealed {
-    color: var(--text-dim);
-}
-
-.episode-session {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.episode-meta {
-    grid-column: 2;
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .crumbs {
@@ -197,45 +145,12 @@ h1:focus {
     word-break: break-word;
 }
 
-/* Wisdom browser + curation (spec §8.1) */
-
-.filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
-}
-
-.filter-search {
-    flex: 1 1 12rem;
-    min-width: 8rem;
-}
-
-.filter-search,
-.filter-bar select {
-    padding: 0.3rem 0.5rem;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--text);
-    font: inherit;
-    font-size: 0.85rem;
-}
-
-.filter-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-    white-space: nowrap;
-}
-
-.wisdom-list {
-    display: grid;
-    gap: 0.6rem;
-}
+/* Wisdom's old card, and nothing renders it any more. The one caller left when #91 ported the
+   browser was the Injection log's score list, and #96 took the card out of that — a curation
+   button inside a table about how a line ranked offers to retire it from the screen judging it.
+   Kept here rather than swept in the merge that orphaned it, because WisdomCard.razor and the
+   three components only it uses (WisdomCuration, KindBadge, StateBadges) go at the same time and
+   that is its own change, not a conflict resolution. See #109. */
 
 .wisdom-card {
     padding: 0.6rem 0.8rem;
@@ -302,10 +217,6 @@ h1:focus {
     white-space: nowrap;
 }
 
-.provenance-item .wisdom-meta {
-    margin-left: 0;
-}
-
 .wisdom-text {
     display: block;
     color: var(--text);
@@ -315,11 +226,6 @@ h1:focus {
 
 .wisdom-text:hover {
     text-decoration: underline;
-}
-
-.wisdom-current {
-    max-width: 44rem;
-    margin: 0 0 0.75rem;
 }
 
 .wisdom-actions {
@@ -348,62 +254,6 @@ h1:focus {
     color: var(--degraded);
     font-size: 0.85rem;
 }
-
-.wisdom-facts {
-    margin-top: 0.75rem;
-}
-
-.wisdom-section {
-    margin: 1.5rem 0 0.5rem;
-    font-size: 1.05rem;
-}
-
-.version-chain,
-.provenance-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0.6rem;
-}
-
-.version-item {
-    padding: 0.6rem 0.8rem;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-}
-
-.version-text {
-    margin: 0.35rem 0 0;
-    color: var(--text-dim);
-}
-
-.provenance-item {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-}
-
-.provenance-item a {
-    color: var(--text);
-}
-
-.provenance-harvest {
-    color: var(--text-dim);
-    font-size: 0.85rem;
-    word-break: break-all;
-}
-
-.orphaned-note {
-    color: var(--degraded);
-    max-width: 44rem;
-}
-
-/* The §8.3 injection log's rules left with it — that surface is ported (#96) and draws from
-   wwwroot/nocturne plus its own scoped stylesheets. What is left here belongs to §8.1 and §8.2,
-   and goes the same way with #91 and #94. */
 
 /* Buttons + confirmed deletes (spec §8.2) */
 

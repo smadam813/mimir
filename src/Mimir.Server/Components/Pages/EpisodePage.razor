@@ -10,17 +10,20 @@
 
 <PageTitle>Episode · Mimir</PageTitle>
 
+@* Still the pre-port drill-down on the old stylesheet — #95 puts it on the four-pane shape. Until
+   then the layout keeps giving it the padded body, since it is the Episode list's route one segment
+   deeper and only the list's own root counts as ported (#94). *@
 @if (_detail is null)
 {
     <h1>Episode not found</h1>
     <p class="lede">This Episode does not exist — most likely it was hard-deleted.</p>
-    <p><a href="@TimelineHref">Back to the timeline</a></p>
+    <p><a href="@ListHref">Back to the Episode list</a></p>
 }
 else
 {
     var episode = _detail.Episode;
 
-    <nav class="crumbs"><a href="@TimelineHref">← Episodes</a></nav>
+    <nav class="crumbs"><a href="@ListHref">← Episodes</a></nav>
     <h1 class="episode-title">@episode.SessionId</h1>
 
     <dl class="episode-facts">
@@ -86,7 +89,7 @@ else
     private EpisodeDetail? _detail;
     private IDisposable? _subscription;
 
-    private string TimelineHref => $"projects/{ProjectId}/episodes";
+    private string ListHref => $"projects/{ProjectId}/episodes";
 
     protected override void OnInitialized()
         => _subscription = Feed.Subscribe(change =>
@@ -114,7 +117,7 @@ else
     private async Task DeleteEpisodeAsync()
     {
         await Browser.DeleteEpisodeAsync(EpisodeId, CancellationToken.None);
-        Nav.NavigateTo(TimelineHref);
+        Nav.NavigateTo(ListHref);
     }
 
     public void Dispose() => _subscription?.Dispose();

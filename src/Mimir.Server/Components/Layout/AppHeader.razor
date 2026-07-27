@@ -8,38 +8,39 @@
 @inject ILogger<AppHeader> Logger
 
 @* Spec §8: brand, search, the whole-install pipeline readout, and the Health pill. The header is
-   whole-install; the tab strip beneath it answers the selected-Project question instead (#89). *@
+   whole-install; the tab strip beneath it answers the selected-Project question instead (#89).
+
+   On first run the pipeline gives way to the model pull (#90). The two swap rather than sit side
+   by side for two reasons: four zeros state nothing an empty install does not already know, and
+   the header has a 1380px floor that the pipeline and the chip together overrun. *@
 <header class="app-header">
     <a class="app-brand" href="/">
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-word">Mimir</span>
     </a>
 
+    @* One box, whichever surface is on screen: it narrows that surface's list rather than opening a
+       results screen of its own (§8). A surface claims it on mount and releases on leaving, so an
+       unclaimed box — an unported surface, or Global's Episodes tab, which has no Episodes to
+       narrow — says so instead of pretending to search (#91, #94). *@
     <label class="app-search">
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
         </svg>
-        @* One box, whichever surface owns it: the active surface claims it on mount with its own
-           wording and receives the term (#89, #96). Disabled until one does.
-
-           Keyed on the claim's generation and carrying no `value`: the header must never write back
-           into a box the curator is typing in — with a value bound, the debounced round trip lands
-           a render mid-word and the caret jumps. A new element is therefore the only way to empty
-           it, and a new claim is the only thing that should, because a term typed at one surface
-           means nothing at the next. Keyed on the generation rather than the wording, since the
-           same tab on a second Project claims it under the same words. *@
-        <input class="input" @key="Search.Generation"
+        <input class="input" aria-label="Search"
+               placeholder="@(Search.Placeholder ?? "Search…")"
                disabled="@(!Search.IsClaimed)"
-               placeholder="@(Search.Placeholder ?? UnclaimedPlaceholder)"
-               title="@(Search.IsClaimed
-                   ? null
-                   : "No surface has claimed search yet — it narrows the active tab once a surface is ported.")"
-               @oninput="OnSearchInput" />
+               title="@(Search.IsClaimed ? null : "Nothing here claims search — it narrows whichever list is on screen, once that surface is ported.")"
+               value="@Search.Term" @oninput="OnSearchInput" />
     </label>
 
     <span class="app-header-spacer"></span>
 
-    @if (_pipeline is { } pipeline)
+    @if (IsFirstRun is true)
+    {
+        <ModelPullChip />
+    }
+    else if (_pipeline is { } pipeline)
     {
         <div class="pipeline"
              title="The pipeline, live: Episodes captured → Sealed Episodes still owed distillation, failed included → Wisdom admitted → Injections recalled today">
@@ -79,67 +80,82 @@
 @code {
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>What the box says while no surface owns it — also its @key in that state.</summary>
-    private const string UnclaimedPlaceholder = "Search all Wisdom and Episodes…";
+    /// <summary>
+    /// MainLayout's one first-run flag; the header trades the pipeline for the pull (#90). Null
+    /// until that answer lands, which is a third state here rather than a second: the pipeline is
+    /// five Postgres queries, and asking for them before knowing whether anything will render them
+    /// is the waste this is shaped to avoid.
+    /// </summary>
+    [CascadingParameter(Name = MainLayout.FirstRunCascade)]
+    public bool? IsFirstRun { get; set; }
 
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
-    private Debouncer? _refreshDebounce;
-    private Debouncer? _searchDebounce;
+    private Debouncer? _debounce;
+    private int _generation;
 
-    /// <summary>
-    /// Synchronous, and deliberately not folded into <see cref="OnInitializedAsync"/>: a surface
-    /// claims the box as it mounts, and the first <c>await</c> there yields long enough for the
-    /// claim to land before the subscription would exist to hear it.
-    /// </summary>
     protected override void OnInitialized()
     {
-        _refreshDebounce = new Debouncer(DebounceDelay, Logger, "Header pipeline refresh");
-        _searchDebounce = new Debouncer(DebounceDelay, Logger, "Surface search");
-        Search.Changed += OnSearchChanged;
-    }
+        _debounce = new Debouncer(DebounceDelay, Logger, "Header pipeline refresh");
 
-    protected override async Task OnInitializedAsync()
-    {
-        await RefreshAsync();
+        // A surface claiming or releasing the box changes what this input says and whether it is
+        // enabled at all, and neither is this component's own state. A handover also empties the
+        // term, so this is what drops whatever the outgoing surface's search left in the box.
+        Search.Changed += OnSearchChanged;
 
         // The Episode feed is the only signal that already exists for these figures (#89); it
         // fires on every captured Event, not only session start and Seal, so a burst (a tool use
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
         // five-query round trip per Event.
-        _subscription = Feed.Subscribe(
-            change => _refreshDebounce?.Schedule(() => InvokeAsync(RefreshAsync)));
+        _subscription = Feed.Subscribe(change => _debounce?.Schedule(() => InvokeAsync(RefreshAsync)));
+    }
+
+    // Cascading parameters are set before the first render, so this is the initial fetch — and it
+    // is also the fetch that first-run ends on, since the pipeline replaces the pull chip on that
+    // very cascade change and has never been asked for until then.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsFirstRun is false && _pipeline is null)
+        {
+            await RefreshAsync();
+        }
     }
 
     private async Task RefreshAsync()
     {
-        _pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+        // Nothing renders the pipeline while the install is still being introduced (#90), and the
+        // Events that end first run are exactly the ones the feed pushes — five Postgres queries
+        // per burst, every one of them discarded, for the whole of that window. Checked before the
+        // generation is taken, so a discarded refresh does not invalidate a real one in flight.
+        if (IsFirstRun is not false)
+        {
+            return;
+        }
+
+        var generation = ++_generation;
+
+        var pipeline = await Browser.GetHeaderPipelineAsync(CancellationToken.None);
+
+        // Two changes landing a debounce apart both reach here, and cancelling an elapsed delay is
+        // a no-op — so whichever query returns second must not be the one that wins. The feed
+        // delivers in bursts by design (§8), which makes overlapping queries the ordinary case.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _pipeline = pipeline;
         StateHasChanged();
     }
 
-    /// <summary>
-    /// Debounced on the way out only: the box itself is uncontrolled, so what was typed is on
-    /// screen the instant it is typed, while the surface behind it is spared a query per character.
-    /// </summary>
-    private void OnSearchInput(ChangeEventArgs e)
-    {
-        // Both are read here, at the keystroke, not after the delay. The generation is what tells
-        // SurfaceSearch whether the surface being typed at is still the one that will receive this
-        // term — nothing here cancels on a claim change, so a Project switched inside the window
-        // leaves this timer running with the old surface's word in it.
-        var term = e.Value?.ToString() ?? "";
-        var generation = Search.Generation;
-        _searchDebounce?.Schedule(() => InvokeAsync(() => Search.SetTermAsync(term, generation)));
-    }
+    private void OnSearchInput(ChangeEventArgs args) => Search.Set(args.Value as string);
 
-    /// <summary>A claim, a release, or the term the surface actually received.</summary>
     private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
-        _subscription?.Dispose();
         Search.Changed -= OnSearchChanged;
-        _refreshDebounce?.Dispose();
-        _searchDebounce?.Dispose();
+        _subscription?.Dispose();
+        _debounce?.Dispose();
     }
 }

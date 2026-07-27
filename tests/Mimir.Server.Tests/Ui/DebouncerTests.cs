@@ -105,6 +105,34 @@ public class DebouncerTests
         log.Warnings.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task ASignalRacingDispose_IsRefusedRatherThanArmingATimerNobodyCancels()
+    {
+        // The Episode feed publishes on whichever thread captured, not the circuit's dispatcher,
+        // so this really is concurrent. Unguarded, a Schedule landing just after Dispose installs
+        // a fresh token that nothing holds a reference to — it fires a delay later against a
+        // component that has already gone.
+        var ran = 0;
+        var debouncer = New();
+
+        await Task.WhenAll(
+            Task.Run(debouncer.Dispose, TestContext.Current.CancellationToken),
+            Task.Run(
+                () =>
+                {
+                    for (var i = 0; i < 200; i++)
+                    {
+                        debouncer.Schedule(() => { Interlocked.Increment(ref ran); return Task.CompletedTask; });
+                    }
+                },
+                TestContext.Current.CancellationToken));
+        await Settle();
+
+        // Whatever was scheduled before Dispose won the race was cancelled by it; whatever came
+        // after was refused. Either way nothing survives the teardown.
+        Volatile.Read(ref ran).ShouldBe(0);
+    }
+
     /// <summary>Waits long enough that a run which has not happened was never going to.</summary>
     private static Task Settle() => Task.Delay(LongEnough, TestContext.Current.CancellationToken);
 

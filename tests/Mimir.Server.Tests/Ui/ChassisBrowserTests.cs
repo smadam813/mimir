@@ -152,7 +152,7 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     }
 
     [Fact]
-    public async Task WisdomAttention_SeparatesContestedFromRetired_ScopedToThisProject()
+    public async Task WisdomAttention_SeparatesContestedFromRetired_AcrossTheAmbientUniverse()
     {
         var project = await AddProjectAsync("attention");
         var other = await AddProjectAsync("other");
@@ -165,6 +165,26 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
 
         attention.Contested.ShouldBe(1);
         attention.Retired.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// Each of these three is the label on a link into the Wisdom surface's matching lens, so the
+    /// count has to be the length of the list that link opens — Global included (#91). Only the
+    /// Global arm of the shared universe keeper can redden this one: nothing of the Project's own
+    /// is seeded.
+    /// </summary>
+    [Fact]
+    public async Task WisdomAttention_CountsGlobalToo_SoEachFigureIsItsOwnLinksList()
+    {
+        var project = await AddProjectAsync("attention");
+        await AddWisdomAsync(Project.GlobalId, "contested everywhere", contestedAt: Now);
+        await AddWisdomAsync(Project.GlobalId, "retired everywhere", retiredAt: Now);
+
+        var attention = await Browser().GetWisdomAttentionAsync(project.Id, Token);
+
+        attention.Contested.ShouldBe(1);
+        attention.Retired.ShouldBe(1);
+        attention.Orphaned.ShouldBe(1, "the contested Global row has no Provenance either");
     }
 
     [Fact]
@@ -242,6 +262,21 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
 
         await AddProjectAsync("the first hook");
 
+        (await Browser().IsFirstRunAsync(Token)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task FirstRun_StaysFalse_OnceIntroduced_EvenWithEveryEpisodeDeleted()
+    {
+        // §8.2 permits deleting every Episode, so "no Episodes" would send an established curator
+        // back to a screen telling them to register hooks they already have. The Project is what
+        // proves the introduction happened, and nothing deletes it here.
+        var project = await AddProjectAsync("introduced");
+        await AddEpisodeAsync(project.Id);
+
+        await Context.Episodes.ExecuteDeleteAsync(Token);
+
+        (await FromDb(db => db.Episodes.CountAsync(Token))).ShouldBe(0);
         (await Browser().IsFirstRunAsync(Token)).ShouldBeFalse();
     }
 

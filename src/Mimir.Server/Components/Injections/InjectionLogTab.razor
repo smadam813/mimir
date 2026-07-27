@@ -1,11 +1,13 @@
 @using Microsoft.Extensions.Options
 @using Mimir.Server.Configuration
+@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Storage.Entities
 @using Mimir.Server.Ui
 @implements IDisposable
 @inject InjectionBrowser Browser
 @inject SurfaceSearch Search
 @inject IOptions<RecallOptions> Recall
+@inject ILogger<InjectionLogTab> Logger
 
 @* Spec §8.3, on the Nocturne look (#96): the four-pane surface a curator judges Recall from — a
    session-grouped list, the payload the session actually received, and this Project's §9 figures
@@ -18,7 +20,10 @@
                 <h4>Injections</h4>
                 @* The query's population, not the Project's — this count sits above the chips and
                    the list it describes, and the aside carries the whole-Project figure. *@
-                <span class="pane-count">@(_view?.Matching.ToString("N0") ?? "—") entries</span>
+                <span class="pane-count">
+                    @(_view?.Matching.ToString("N0") ?? "—")
+                    @(_view?.Matching == 1 ? "entry" : "entries")
+                </span>
             </div>
             <div class="lane-chips">
                 <button class="btn btn-secondary lane-chip @(_lane is null ? "is-active" : null)"
@@ -164,7 +169,7 @@
                                 @if (recalled.Wisdom is { } wisdom)
                                 {
                                     <a class="aside-link" @key="recalled.WisdomId"
-                                       href="@($"projects/{ProjectId}/wisdom/{recalled.WisdomId}")">
+                                       href="@WisdomRoute.Detail(ProjectId, recalled.WisdomId, WisdomLens.Active)">
                                         <span class="aside-link-text">@wisdom.Text</span>
                                         <span class="aside-link-count">@recalled.Recalls</span>
                                     </a>
@@ -201,34 +206,48 @@
 </div>
 
 @code {
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
     private InjectionLogView? _view;
     private InjectionLogEntry? _selected;
     private InjectionLane? _lane;
-    private string? _search;
     private IDisposable? _searchClaim;
+    private Debouncer? _debounce;
     private Guid _loadedProject;
     private int _generation;
 
+    protected override void OnInitialized()
+    {
+        // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
+        // answering each one — the same debounce the other live surfaces use (#89, #91).
+        _debounce = new Debouncer(DebounceDelay, Logger, "Injection listing refresh");
+
+        // One search box, claimed by whichever surface is on screen (§8). The claim is for the
+        // life of the component, not of the Project: this instance is reused across a Project
+        // switch, and re-claiming there would be a second claim over its own live one.
+        _searchClaim = Search.Claim(this, "Search this Project's injections…");
+        Search.Changed += OnSearchChanged;
+    }
+
     protected override async Task OnParametersSetAsync()
     {
-        // A different Project is a different log: the lane chip and the term were chosen against
-        // the old one's counts, and the selected entry is not in the new one at all. The router
-        // reuses this instance across the switch — same route template, different parameter — so
-        // this is the only place that runs, and claiming in OnInitialized would leave the header
-        // still showing the term the previous Project's list was narrowed by.
+        // A different Project is a different log: the lane chip was chosen against the old one's
+        // counts and the selected entry is not in the new one at all. The router reuses this
+        // instance across the switch — same route template, different parameter — so this is the
+        // only place that runs.
         if (_loadedProject != ProjectId)
         {
             _loadedProject = ProjectId;
-            (_lane, _search, _selected) = (null, null, null);
-            _searchClaim?.Dispose();
-            _searchClaim = Search.Claim("Search this Project's injections…", OnSearchAsync);
+            (_lane, _selected) = (null, null);
         }
 
         await RefreshAsync();
     }
+
+    private void OnSearchChanged() => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
 
     private void Select(InjectionLogEntry entry) => _selected = entry;
 
@@ -236,13 +255,6 @@
     {
         _lane = lane;
         await RefreshAsync();
-    }
-
-    private async Task OnSearchAsync(string term)
-    {
-        _search = term;
-        await RefreshAsync();
-        StateHasChanged();
     }
 
     private async Task MarkAsync(InjectionVerdict verdict)
@@ -267,7 +279,7 @@
     {
         var generation = ++_generation;
         var view = await Browser.ListAsync(
-            new InjectionQuery(ProjectId, _search, _lane), CancellationToken.None);
+            new InjectionQuery(ProjectId, Search.Term, _lane), CancellationToken.None);
 
         // A newer refresh may have already landed while this one was awaiting its queries — two
         // lane chips clicked in quick succession, or a keystroke behind one. Drop this one rather
@@ -285,7 +297,18 @@
         _selected = _selected is { } previous
             ? _view.Sessions.SelectMany(s => s.Entries).FirstOrDefault(e => e.Id == previous.Id)
             : null;
+
+        // Explicit, because the debounced search arrives outside any event handler: Blazor
+        // re-renders after a handler returns, not after arbitrary dispatcher work, so without this
+        // a term narrows the query and nothing on screen moves. The lifecycle callers re-render
+        // anyway and pay one redundant pass — the same trade every live surface here makes.
+        StateHasChanged();
     }
 
-    public void Dispose() => _searchClaim?.Dispose();
+    public void Dispose()
+    {
+        Search.Changed -= OnSearchChanged;
+        _searchClaim?.Dispose();
+        _debounce?.Dispose();
+    }
 }

@@ -1,0 +1,497 @@
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+@implements IDisposable
+@inject WisdomBrowser Browser
+@inject ChassisBrowser Chassis
+@inject SurfaceSearch Search
+@inject NavigationManager Nav
+@inject ILogger<WisdomSurface> Logger
+
+@* Spec §8.1, one screen: the list and the detail are panes of the same surface, so a curator can
+   work down a list without losing their place (#91). The list is the selected Project's Ambient
+   Candidate Universe — its Wisdom plus Global (ADR-0009) — which is what a session in that
+   repository actually recalls, and what makes the per-row Scope label mean something. Both routes
+   render this: the listing route with nothing selected, the detail route with that Wisdom
+   selected, so every existing deep link still resolves. *@
+<div class="wisdom-surface">
+    <section class="list-pane" aria-label="Wisdom">
+        <header class="list-head">
+            <div class="list-title">
+                <h4>@Words.Heading</h4>
+                @if (_listing is { } counts)
+                {
+                    @* Both figures, not one: the sidebar's counts stay Project-owned, so they no
+                       longer match this list's length. Stating the arithmetic beats leaving it as
+                       an inference (ADR-0009). *@
+                    <span class="list-counts" title="This Project's own Wisdom plus Global — the set a session here recalls (§7)">
+                        @if (IsGlobal)
+                        {
+                            <span>@counts.Global · Global</span>
+                        }
+                        else
+                        {
+                            <span>@counts.ProjectOwned · @ProjectName</span>
+                            <span class="counts-join">+</span>
+                            <span>@counts.Global · Global</span>
+                        }
+                    </span>
+                }
+            </div>
+
+            @if (_listing is { } chips)
+            {
+                <div class="kind-chips" role="group" aria-label="Filter by Kind">
+                    <button type="button" class="chip @(_kind is null ? "is-active" : null)"
+                            aria-pressed="@Pressed(_kind is null)" @onclick="() => SetKindAsync(null)">
+                        All
+                    </button>
+                    @foreach (var chip in chips.Kinds)
+                    {
+                        <button type="button" class="chip @(_kind == chip.Kind ? "is-active" : null)"
+                                aria-pressed="@Pressed(_kind == chip.Kind)"
+                                @onclick="() => SetKindAsync(chip.Kind)">
+                            @chip.Kind<span class="chip-count">@chip.Count</span>
+                        </button>
+                    }
+                </div>
+            }
+        </header>
+
+        <div class="list-rows">
+            @if (_listing is { Entries.Count: 0 })
+            {
+                <p class="pane-note">@Words.Empty</p>
+            }
+            else if (_listing is { } listed)
+            {
+                @foreach (var entry in listed.Entries)
+                {
+                    <a @key="entry.Id" href="@DetailHref(entry.Id)"
+                       class="wisdom-row @(entry.Id == SelectedId ? "is-selected" : null) @(entry.RetiredAt is not null ? "is-retired" : null)">
+                        <span class="row-head">
+                            <KindGlyph Kind="entry.Kind" />
+                            <span class="row-kind">@entry.Kind</span>
+                            <span class="row-scope" title="Scope (§3)">@entry.ScopeName</span>
+                            @if (entry.ContestedAt is not null)
+                            {
+                                <span class="row-state state-accent">contested</span>
+                            }
+                            @if (entry.OrphanedProvenance)
+                            {
+                                <span class="row-state state-danger">orphaned</span>
+                            }
+                            @if (entry.RetiredAt is not null)
+                            {
+                                <span class="row-state">retired</span>
+                            }
+                            <span class="row-reinforcement" title="Reinforcement (§6)">×@entry.Reinforcement</span>
+                        </span>
+                        <span class="row-text">@entry.Text</span>
+                    </a>
+                }
+            }
+        </div>
+    </section>
+
+    <main class="detail-pane">
+        @if (SelectedId is null)
+        {
+            <p class="pane-note detail-empty">
+                Pick a Wisdom to read it, edit its words, or retire it. The list beside this is
+                everything a session in this repository recalls (§7).
+            </p>
+        }
+        else if (_detail is not { } detail)
+        {
+            <p class="pane-note detail-empty">
+                Nothing lives at this id — most likely it was deleted with its chain (§10).
+                <a href="@ListHref">Back to the list</a>
+            </p>
+        }
+        else
+        {
+            var entry = detail.Entry;
+
+            <div class="detail-head">
+                <span class="detail-kind"><KindGlyph Kind="entry.Kind" />@entry.Kind</span>
+                <span class="detail-sep">/</span>
+                <span class="detail-fact">scope <strong>@entry.ScopeName</strong></span>
+                <span class="detail-sep">/</span>
+                <span class="detail-fact">×@entry.Reinforcement reinforcement</span>
+                <span class="detail-sep">/</span>
+                <span class="detail-fact">confirmed @EpisodeDisplay.Stamp(entry.LastConfirmedAt)</span>
+            </div>
+
+            @if (entry.ContestedAt is { } contestedAt)
+            {
+                <p class="detail-state state-accent">
+                    Contested since @EpisodeDisplay.Stamp(contestedAt) — it survived an adjudication
+                    against a contradicting claim (§6.4).
+                </p>
+            }
+            @if (entry.RetiredAt is { } retiredAt)
+            {
+                <p class="detail-state">
+                    Retired since @EpisodeDisplay.Stamp(retiredAt) — out of all recall and default
+                    search, reversibly (§10).
+                </p>
+            }
+            @if (entry.SupersededBy is { } successor)
+            {
+                <p class="detail-state">
+                    Superseded by <a href="@DetailHref(successor)">the ruling's survivor</a>.
+                </p>
+            }
+
+            @if (_mode is DetailMode.Editing)
+            {
+                <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
+                          aria-label="Edited Wisdom text"></textarea>
+                <div class="detail-actions">
+                    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">Save edit</button>
+                    <button class="btn btn-secondary" disabled="@_saving"
+                            @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                </div>
+            }
+            else
+            {
+                <p class="detail-text @(entry.RetiredAt is not null ? "is-retired" : null)">@entry.Text</p>
+                <div class="detail-actions">
+                    <button class="btn btn-secondary" @onclick="() => BeginEdit(entry)">Edit</button>
+                    @if (entry.RetiredAt is null)
+                    {
+                        <button class="btn btn-secondary"
+                                title="Reversibly exclude from recall and default search (§10)"
+                                @onclick="RetireAsync">
+                            Retire
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
+                    }
+                </div>
+            }
+            @if (_error is not null)
+            {
+                <p class="detail-error" role="alert">@_error</p>
+            }
+
+            <h5 class="detail-section">Versions</h5>
+            <ol class="version-list">
+                @foreach (var version in detail.Versions)
+                {
+                    <li class="version-row">
+                        <span class="version-seq">v@(version.Version)</span>
+                        <span class="version-cause">@version.Cause.ToString().ToLowerInvariant()</span>
+                        <span class="version-at">@EpisodeDisplay.Stamp(version.CreatedAt)</span>
+                        <p class="version-text">@version.Text</p>
+                    </li>
+                }
+            </ol>
+
+            <h5 class="detail-section">Where this came from</h5>
+            @if (entry.OrphanedProvenance)
+            {
+                <p class="detail-orphaned">
+                    Orphaned: every record this Wisdom derived from was hard-deleted (§3). The
+                    Wisdom and its versions survive; only the trail back to those records is gone.
+                </p>
+            }
+            else
+            {
+                <ul class="provenance">
+                    @foreach (var link in detail.Provenance)
+                    {
+                        <li class="provenance-row">
+                            @if (link.EventId is not null)
+                            {
+                                <a href="@EpisodeHref(link)">Event #@link.EventSeq · @link.EventType</a>
+                                <span class="provenance-meta">in @link.SessionId</span>
+                            }
+                            else if (link.EpisodeId is not null)
+                            {
+                                <a href="@EpisodeHref(link)">Episode @link.SessionId</a>
+                            }
+                            else if (link.HarvestedItemId is null)
+                            {
+                                <span class="provenance-meta">
+                                    deliberate save — recorded outside any Episode (§7.1)
+                                </span>
+                            }
+                            @if (link.HarvestedPath is not null)
+                            {
+                                <span class="provenance-meta" title="Harvested Item (§5)">
+                                    harvested · @link.HarvestedPath
+                                </span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
+               which is not (§10). Absent entirely while the editor is open, so "Delete forever"
+               can never be the click that throws away a draft the curator is still typing. *@
+            @if (_mode is not DetailMode.Editing)
+            {
+                <div class="detail-danger">
+                    @if (_mode is DetailMode.ConfirmingDelete)
+                    {
+                        <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
+                            <span class="confirm-prompt">
+                                Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+                            </span>
+                            <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
+                            <button class="btn btn-secondary"
+                                    @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                        </span>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary danger-outline"
+                                @onclick="() => _mode = DetailMode.ConfirmingDelete">
+                            Delete Wisdom…
+                        </button>
+                    }
+                </div>
+            }
+        }
+    </main>
+</div>
+
+@code {
+    /// <summary>The sidebar's selected Project — whose ambient universe this list is.</summary>
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    /// <summary>The Wisdom the detail route named, or null on the listing route.</summary>
+    [Parameter]
+    public Guid? SelectedId { get; set; }
+
+    /// <summary>Which slice of the universe — the sidebar's "Needs attention" links set this.</summary>
+    [Parameter]
+    public WisdomLens Lens { get; set; }
+
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// The detail pane's three states, one field rather than two flags because two of them must
+    /// never coexist: a "Delete forever" reachable over an open editor throws the draft away with
+    /// the row, and its prompt names a version count. An enum leaves that pair unrepresentable.
+    /// </summary>
+    private enum DetailMode { Viewing, Editing, ConfirmingDelete }
+
+    private WisdomListing? _listing;
+    private WisdomDetail? _detail;
+    private Guid? _boundSelection;
+    private Guid _boundProject;
+    private WisdomKind? _kind;
+    private ProjectListItem? _project;
+
+    private DetailMode _mode;
+    private bool _saving;
+    private string _draft = "";
+    private string? _error;
+
+    private IDisposable? _claim;
+    private Debouncer? _debounce;
+    private int _generation;
+
+    private string ProjectName => _project?.DisplayName ?? "this Project";
+
+    private bool IsGlobal => _project?.IsGlobal ?? false;
+
+    private string ListHref => WisdomRoute.Listing(ProjectId, Lens);
+
+    private string DetailHref(Guid wisdomId) => WisdomRoute.Detail(ProjectId, wisdomId, Lens);
+
+    /// <summary>The §8.1 drill to the underlying Event: its Episode page, anchored on the Event.</summary>
+    private static string EpisodeHref(ProvenanceEntry link)
+        => $"projects/{link.EpisodeProjectId}/episodes/{link.EpisodeId}"
+            + (link.EventId is { } eventId ? $"#event-{eventId}" : "");
+
+    /// <summary>What the lens is called and what its emptiness means — one switch, so the two
+    /// can never describe different lenses.</summary>
+    private (string Heading, string Empty) Words => Lens switch
+    {
+        WisdomLens.Contested => ("Contested",
+            "Nothing is contested here — no adjudication has ruled against a standing claim in "
+            + "the last fortnight (§6.4)."),
+        WisdomLens.Orphaned => ("Orphaned",
+            "Nothing is orphaned here: every Wisdom in this universe still has the trail back to "
+            + "what it came from (§3)."),
+        WisdomLens.Retired => ("Retired", "Nothing has been retired here yet (§10)."),
+        _ => ("Wisdom",
+            "No Wisdom matches. The Merge Gate fills this surface as Episodes distill and Harvest "
+            + "runs (§6) — or the search and chips above are simply this narrow."),
+    };
+
+    protected override void OnInitialized()
+    {
+        // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
+        // answering each one — the same debounce the chassis's own live readouts use (#89).
+        _debounce = new Debouncer(DebounceDelay, Logger, "Wisdom listing refresh");
+
+        // One search box, claimed by whichever surface is on screen (§8). Claiming before
+        // subscribing keeps the claim's own reset from costing a query the first load already does.
+        _claim = Search.Claim(this, "Search this Project's Wisdom…");
+        Search.Changed += OnSearchChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Selecting another row must not carry the outgoing one's half-typed draft, its inline
+        // failure or an armed Delete onto it — the armed one especially, since the confirmation
+        // names a version count that is no longer the one it would take.
+        if (_boundSelection != SelectedId)
+        {
+            _boundSelection = SelectedId;
+            _mode = DetailMode.Viewing;
+            _error = null;
+        }
+
+        // Landing in another Project re-anchors the list on its universe, the way the tab this
+        // replaced re-anchored its project filter — so a Kind chip picked in the outgoing one
+        // does not silently keep narrowing the incoming one, and the header re-reads its name.
+        if (_boundProject != ProjectId)
+        {
+            _boundProject = ProjectId;
+            _kind = null;
+            _project = null;
+        }
+
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// ARIA states are strings: a <c>bool</c> here would render as a boolean <em>attribute</em>,
+    /// present-or-absent, which is not what <c>aria-pressed</c> means.
+    /// </summary>
+    private static string Pressed(bool active) => active ? "true" : "false";
+
+    private void OnSearchChanged()
+        => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
+
+    private async Task RefreshAsync()
+    {
+        var generation = ++_generation;
+
+        // The Project row only answers the header's name and Global-ness, neither of which a
+        // keystroke or a chip click can change — so it is read once per universe, not once per
+        // refresh. OnParametersSetAsync drops it when the Project does change.
+        var project = _project ?? await Chassis.GetProjectAsync(ProjectId, CancellationToken.None);
+        var listing = await Browser.ListAsync(
+            new WisdomQuery(ProjectId, Search.Term, _kind, Lens), CancellationToken.None);
+        var detail = SelectedId is { } selected
+            ? await Browser.GetAsync(selected, CancellationToken.None)
+            : null;
+
+        // A newer refresh — a later keystroke, a chip, a row click — may have landed while this
+        // one was awaiting its queries; drop this one rather than overwrite fresher state with
+        // stale. The same guard the sidebar carries, and this surface has more triggers than it.
+        if (generation != _generation)
+        {
+            return;
+        }
+
+        _project = project;
+        _listing = listing;
+        _detail = detail;
+
+        StateHasChanged();
+    }
+
+    private async Task SetKindAsync(WisdomKind? kind)
+    {
+        _kind = kind;
+        await RefreshAsync();
+    }
+
+    private void BeginEdit(WisdomListEntry entry)
+    {
+        _draft = entry.Text;
+        _error = null;
+        _mode = DetailMode.Editing;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            // The edit re-embeds the new text (§8.1), so this is the one curation action that
+            // needs Ollama up; the failure stays inline and the draft stays editable.
+            await Browser.EditAsync(SelectedId!.Value, _draft, CancellationToken.None);
+            _mode = DetailMode.Viewing;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Wisdom edit failed");
+            _error = "The edit did not save: the new text must re-embed and persist. "
+                + "Check the Health pill — Ollama and Postgres both have to be reachable.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task RetireAsync() => CurateAsync(
+        () => Browser.RetireAsync(SelectedId!.Value, CancellationToken.None),
+        "The retire did not land — Postgres has to be reachable. Check the Health pill.");
+
+    private Task UnretireAsync() => CurateAsync(
+        () => Browser.UnretireAsync(SelectedId!.Value, CancellationToken.None),
+        "The unretire did not land — Postgres has to be reachable. Check the Health pill.");
+
+    /// <summary>
+    /// The standing changes share the shape the edit already had: do it, re-read, and keep a
+    /// transient failure inline. Unhandled, an exception out of a Blazor event handler takes the
+    /// circuit down with it — the whole page reloads and the curator loses their place, over a
+    /// blipped connection that a banner above a stale row would have ridden out.
+    /// </summary>
+    private async Task CurateAsync(Func<Task> curate, string failure)
+    {
+        _error = null;
+        try
+        {
+            await curate();
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Wisdom curation failed");
+            _error = failure;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _mode = DetailMode.Viewing;
+        _error = null;
+        try
+        {
+            await Browser.DeleteAsync(SelectedId!.Value, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Nothing was deleted, so the row is still there to try again on — say so and stay.
+            Logger.LogWarning(ex, "Wisdom delete failed");
+            _error = "The delete did not land — Postgres has to be reachable. "
+                + "Check the Health pill; this Wisdom is untouched.";
+            return;
+        }
+
+        Nav.NavigateTo(ListHref);
+    }
+
+    public void Dispose()
+    {
+        Search.Changed -= OnSearchChanged;
+        _claim?.Dispose();
+        _debounce?.Dispose();
+    }
+}

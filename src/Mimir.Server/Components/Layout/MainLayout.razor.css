@@ -26,9 +26,19 @@
     overflow-y: auto;
     padding: var(--space-8);
 }
-/* A ported surface overrides all four of these — see .surface-panes' opt-out in
-   wwwroot/nocturne/mimir.css, which has to be global because the two classes belong to two
-   different components and scoped CSS cannot span them. */
+
+/* A ported surface fills the body flush and scrolls its own panes instead (#91). */
+.app-body.is-flush {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+}
+
+/* The first-run body draws its own padding and its own accent wash to the pane's edges (#90). */
+.app-body.is-bare {
+    padding: 0;
+}
 
 #blazor-error-ui {
     color-scheme: light only;

@@ -6,11 +6,13 @@ public static class UiRegistration
     public static IServiceCollection AddMimirUi(this IServiceCollection services)
     {
         services.AddSingleton<ChassisBrowser>();
+        // Scoped, unlike the browsers: the header's search box is claimed per circuit (#94).
+        services.AddScoped<SurfaceSearch>();
         services.AddSingleton<EpisodeBrowser>();
         services.AddSingleton<WisdomBrowser>();
         services.AddSingleton<InjectionBrowser>();
-        // Scoped, unlike the browsers: it carries one circuit's search claim and term, not shared
-        // read state.
+        // Scoped, unlike the browsers: a Blazor Server scope is one circuit, and the header's
+        // search term belongs to the curator typing it rather than to the install.
         services.AddScoped<SurfaceSearch>();
         return services;
     }

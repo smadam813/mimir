@@ -2,7 +2,6 @@
 @page "/projects/{ProjectId:guid}/{Tab}"
 @using Mimir.Server.Components.Episodes
 @using Mimir.Server.Components.Injections
-@using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 @inject ChassisBrowser Browser
 
@@ -19,20 +18,19 @@ else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
-    @* Injections draws the four-pane shape and owns its own scrolling (#96); the two unported
-       surfaces still render into the layout's padded body until #91 and #94 land. *@
+    @* Wisdom left this switch with #91 — its own route owns that surface now. Both cases that are
+       left draw the pane shape and own their own scrolling, so both take the layout's flush body
+       (#94, #96); the padded page this switch was written around is gone. *@
     @switch (ActiveTab)
     {
-        case "wisdom":
-            <WisdomBrowserTab ProjectId="ProjectId" />
-            break;
-
         case "injections":
             <InjectionLogTab ProjectId="ProjectId" />
             break;
 
         default:
-            <EpisodeTimeline ProjectId="ProjectId" IsGlobal="_project.IsGlobal" />
+            <EpisodeList ProjectId="ProjectId"
+                         ProjectName="@_project.DisplayName"
+                         IsGlobal="_project.IsGlobal" />
             break;
     }
 }
@@ -46,9 +44,12 @@ else
 
     private ProjectListItem? _project;
 
+    /// <summary>
+    /// Wisdom is absent deliberately: <c>WisdomPage</c>'s literal <c>wisdom</c> route outranks this
+    /// page's <c>{Tab}</c> parameter, so that segment never reaches here (#91).
+    /// </summary>
     private string ActiveTab => Tab?.ToLowerInvariant() switch
     {
-        "wisdom" => "wisdom",
         "injections" => "injections",
         _ => "episodes",
     };

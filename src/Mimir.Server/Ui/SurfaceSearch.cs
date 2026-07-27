@@ -1,96 +1,77 @@
 namespace Mimir.Server.Ui;
 
 /// <summary>
-/// The header's one search box, and whichever surface currently owns it (spec §8, #89: "the search
-/// box renders disabled until a surface claims it"). One control serves all three surfaces because
-/// each one claims it on mount and releases it on dispose — the header never learns what any of
-/// them search, only what to call it and where to send the term.
-///
-/// Scoped, so the claim is per circuit: two browser tabs on two surfaces each get their own, and a
-/// Singleton would have one narrow the other's list. Nothing here touches the database; it is the
-/// wire between two components that cannot see each other, which is why it lives beside the
-/// browsers rather than inside either component.
+/// The header's one search box and whichever surface has claimed it (spec §8): one control serves
+/// all three surfaces, narrowing the list the curator is looking at rather than opening a
+/// cross-surface results screen. A surface claims the box when it mounts and releases on dispose,
+/// so an unclaimed box can say so instead of pretending to search.
+/// <para>
+/// Registered per circuit, not per install — the term is one curator's typing, and two browser
+/// tabs are two curators as far as this is concerned. Pure of the database, so its rules are
+/// pinned by tests that run on a machine with no Postgres.
+/// </para>
 /// </summary>
 public sealed class SurfaceSearch
 {
-    private Func<string, Task>? _handler;
+    private object? _holder;
 
-    /// <summary>What the header calls the box — null while no surface has claimed it.</summary>
-    public string? Placeholder { get; private set; }
-
-    /// <summary>The term the claiming surface last received; "" whenever nothing is claimed.</summary>
+    /// <summary>What the claiming surface is filtering against; empty when nothing is typed.</summary>
     public string Term { get; private set; } = "";
 
-    public bool IsClaimed => _handler is not null;
+    /// <summary>The claiming surface's prompt, or null while no surface holds the box.</summary>
+    public string? Placeholder { get; private set; }
 
-    /// <summary>
-    /// Counts claims and releases, and nothing else — never a term. It is what the header keys its
-    /// input on: the box carries no bound value (a debounced round trip would otherwise land
-    /// mid-word and move the caret), so a new claim can only empty it by making it a new element.
-    /// Two surfaces wording their box identically — the same tab on a second Project — would not
-    /// be told apart by the placeholder alone.
-    /// </summary>
-    public int Generation { get; private set; }
+    public bool IsClaimed => _holder is not null;
 
-    /// <summary>Raised whenever the claim or the term changes, for the header to re-render on.</summary>
+    /// <summary>Raised on every claim, release and keystroke; both sides re-render off it.</summary>
     public event Action? Changed;
 
     /// <summary>
-    /// Claims the box for one surface. The term resets, because a term typed against the Wisdom
-    /// list means nothing to the injection log — carrying it across would leave the new surface
-    /// silently narrowed by words the curator typed at a different one.
+    /// Claims the box for <paramref name="holder"/> — the surface component — until the returned
+    /// token is disposed. The term resets on both edges: a claim starts empty, and releasing clears
+    /// whatever was typed, so navigating to another surface never leaves it silently filtered by a
+    /// term its own box is no longer showing. A second claim wins outright rather than throwing:
+    /// Blazor mounts the incoming surface before disposing the outgoing one, so an overlap is the
+    /// ordinary case, and the release of a claim that has already been superseded does nothing.
     /// </summary>
-    /// <returns>The release; disposing it hands the box back, disabled.</returns>
-    public IDisposable Claim(string placeholder, Func<string, Task> onTerm)
+    public IDisposable Claim(object holder, string placeholder)
     {
-        _handler = onTerm;
+        ArgumentNullException.ThrowIfNull(holder);
+
+        _holder = holder;
         Placeholder = placeholder;
         Term = "";
-        Generation++;
         Changed?.Invoke();
-        return new Release(this, onTerm);
+        return new Claimed(this, holder);
     }
 
-    /// <summary>
-    /// The header's own edit, carrying the <see cref="Generation"/> the keystroke was taken under.
-    /// Ignored while nothing is claimed — the box renders disabled then, so the only way here is a
-    /// race with a surface being torn down.
-    ///
-    /// Ignored too when the generation has moved since, because the header debounces on the way
-    /// out: a curator who types and switches Project inside the debounce window has the term land
-    /// after the box was re-claimed and visibly emptied, and "something is claimed" cannot tell
-    /// that apart from the ordinary case. It would silently narrow the new surface by words typed
-    /// at the old one, which the emptied box no longer shows.
-    /// </summary>
-    public async Task SetTermAsync(string term, int generation)
+    /// <summary>The header typing. Ignored while no surface holds the box.</summary>
+    public void Set(string? term)
     {
-        if (_handler is not { } handler || generation != Generation)
+        if (!IsClaimed)
         {
             return;
         }
 
-        Term = term;
+        Term = term ?? "";
         Changed?.Invoke();
-        await handler(term);
     }
 
-    private sealed class Release(SurfaceSearch search, Func<string, Task> handler) : IDisposable
+    private void Release(object holder)
     {
-        public void Dispose()
+        if (!ReferenceEquals(_holder, holder))
         {
-            // Only if this claim is still the live one: Blazor disposes the outgoing surface after
-            // constructing the incoming one, so a release that did not check would hand the box
-            // back disabled the moment the next surface had already claimed it.
-            if (!ReferenceEquals(search._handler, handler))
-            {
-                return;
-            }
-
-            search._handler = null;
-            search.Placeholder = null;
-            search.Term = "";
-            search.Generation++;
-            search.Changed?.Invoke();
+            return;
         }
+
+        _holder = null;
+        Placeholder = null;
+        Term = "";
+        Changed?.Invoke();
+    }
+
+    private sealed class Claimed(SurfaceSearch search, object holder) : IDisposable
+    {
+        public void Dispose() => search.Release(holder);
     }
 }

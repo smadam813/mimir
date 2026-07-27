@@ -3,186 +3,106 @@ using Mimir.Server.Ui;
 namespace Mimir.Server.Tests.Ui;
 
 /// <summary>
-/// The header's one search box and the surface that owns it (§8): claimed on mount, released on
-/// unmount, and disabled in between. Postgres-free — it is the wire between two components and
-/// touches no storage at all.
+/// The header's one search box and the surface that claims it (§8). Nothing here touches Postgres,
+/// deliberately: the claim rules are pure, so they must run — and be able to fail — on a machine
+/// with no Docker.
 /// </summary>
-public class SurfaceSearchTests
+public sealed class SurfaceSearchTests
 {
-    [Fact]
-    public void ABoxNoSurfaceHasClaimed_IsUnclaimedAndUnnamed()
-    {
-        var search = new SurfaceSearch();
+    private readonly SurfaceSearch _search = new();
 
-        search.IsClaimed.ShouldBeFalse();
-        search.Placeholder.ShouldBeNull();
-        search.Term.ShouldBe("");
+    [Fact]
+    public void Unclaimed_TheBoxSaysSo_AndSwallowsTyping()
+    {
+        _search.IsClaimed.ShouldBeFalse();
+        _search.Placeholder.ShouldBeNull();
+
+        _search.Set("into the void");
+
+        _search.Term.ShouldBe("", "an unclaimed box has no surface to narrow");
     }
 
     [Fact]
-    public async Task AClaimedBox_CarriesTheSurfacesWording_AndForwardsWhatIsTyped()
+    public void AClaim_NamesThePrompt_AndTakesTheTyping()
     {
-        var search = new SurfaceSearch();
-        var received = new List<string>();
+        using var claim = _search.Claim(this, "Search this Project's Wisdom…");
 
-        using var claim = search.Claim("Search this log…", term =>
-        {
-            received.Add(term);
-            return Task.CompletedTask;
-        });
-        await search.SetTermAsync("migrations", search.Generation);
+        _search.IsClaimed.ShouldBeTrue();
+        _search.Placeholder.ShouldBe("Search this Project's Wisdom…");
 
-        search.IsClaimed.ShouldBeTrue();
-        search.Placeholder.ShouldBe("Search this log…");
-        search.Term.ShouldBe("migrations");
-        received.ShouldBe(["migrations"]);
+        _search.Set("zebra");
+
+        _search.Term.ShouldBe("zebra");
     }
 
     [Fact]
-    public async Task ReleasingTheClaim_HandsTheBoxBackDisabled_AndStopsForwarding()
+    public void ReleasingAClaim_ClearsTheTerm_SoTheNextSurfaceOpensUnfiltered()
     {
-        var search = new SurfaceSearch();
-        var received = new List<string>();
-        var claim = search.Claim("Search this log…", term =>
-        {
-            received.Add(term);
-            return Task.CompletedTask;
-        });
+        var claim = _search.Claim(this, "Search…");
+        _search.Set("zebra");
 
         claim.Dispose();
-        await search.SetTermAsync("migrations", search.Generation);
 
-        search.IsClaimed.ShouldBeFalse();
-        search.Placeholder.ShouldBeNull();
-        search.Term.ShouldBe("");
-        received.ShouldBeEmpty();
+        _search.IsClaimed.ShouldBeFalse();
+        _search.Term.ShouldBe("");
+        _search.Placeholder.ShouldBeNull();
     }
 
+    /// <summary>
+    /// Blazor mounts the incoming surface before disposing the outgoing one, so the overlap is the
+    /// ordinary case rather than an error — and the late release must not pull the box out from
+    /// under the surface that now holds it.
+    /// </summary>
     [Fact]
-    public async Task AStaleRelease_DoesNotDisarmTheSurfaceThatClaimedAfterIt()
+    public void AnOverlappingClaim_Wins_AndTheOutgoingReleaseIsANoOp()
     {
-        // Blazor constructs the incoming surface before disposing the outgoing one, so the release
-        // that arrives second belongs to the surface that left first.
-        var search = new SurfaceSearch();
-        var outgoing = search.Claim("Search Wisdom…", _ => Task.CompletedTask);
-        var received = new List<string>();
-        using var incoming = search.Claim("Search this log…", term =>
-        {
-            received.Add(term);
-            return Task.CompletedTask;
-        });
+        var outgoing = _search.Claim(new object(), "Episodes…");
+        var incoming = _search.Claim(new object(), "Wisdom…");
+        _search.Set("zebra");
 
         outgoing.Dispose();
-        await search.SetTermAsync("migrations", search.Generation);
 
-        search.IsClaimed.ShouldBeTrue();
-        search.Placeholder.ShouldBe("Search this log…");
-        received.ShouldBe(["migrations"]);
+        _search.IsClaimed.ShouldBeTrue();
+        _search.Placeholder.ShouldBe("Wisdom…");
+        _search.Term.ShouldBe("zebra");
+
+        incoming.Dispose();
+        _search.IsClaimed.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The reset on the claiming edge, which the overlap case above cannot see because it types
+    /// after the handover. Both ported surfaces lean on it: re-claiming is how a surface that stays
+    /// mounted across a Project change sheds the outgoing Project's term (#94), so a claim that
+    /// inherited one would silently narrow the incoming list by something nobody typed for it.
+    /// </summary>
+    [Fact]
+    public void ANewClaim_StartsFromAnEmptyTerm_SoNoSurfaceInheritsAnothersSearch()
+    {
+        _search.Claim(this, "Episodes…");
+        _search.Set("zebra");
+
+        using var reclaimed = _search.Claim(this, "Episodes…");
+
+        _search.Term.ShouldBe("");
     }
 
     [Fact]
-    public async Task ANewClaim_EmptiesTheTerm_WordsTypedAtOneSurfaceMeanNothingAtTheNext()
+    public void EveryEdge_RaisesChanged_SoBothSidesRedraw()
     {
-        var search = new SurfaceSearch();
-        var first = search.Claim("Search Wisdom…", _ => Task.CompletedTask);
-        await search.SetTermAsync("migrations", search.Generation);
-        first.Dispose();
+        var raised = 0;
+        _search.Changed += () => raised++;
 
-        using var next = search.Claim("Search this log…", _ => Task.CompletedTask);
-
-        search.Term.ShouldBe("");
-    }
-
-    [Fact]
-    public async Task TheGeneration_MovesOnEveryClaimAndRelease_AndNeverOnATerm()
-    {
-        // It is the header input's @key, and the input carries no bound value — so this moving is
-        // the only thing that can empty the box, and its moving while a curator types would empty
-        // it mid-word. Two surfaces wording their box identically (the same tab on a second
-        // Project) are told apart by this and nothing else.
-        var search = new SurfaceSearch();
-        var atRest = search.Generation;
-
-        var first = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
-        var claimed = search.Generation;
-        await search.SetTermAsync("migrations", search.Generation);
-        var typed = search.Generation;
-        first.Dispose();
-        using var second = search.Claim("Search this Project's injections…", _ => Task.CompletedTask);
-
-        claimed.ShouldNotBe(atRest);
-        typed.ShouldBe(claimed);
-        search.Generation.ShouldNotBe(claimed);
-    }
-
-    [Fact]
-    public async Task ATermTypedBeforeAReclaim_LandsNowhere_RatherThanNarrowingTheNextSurface()
-    {
-        // The header debounces on the way out, so a curator who types and then switches Project
-        // inside the window has the keystroke arrive after the box was re-claimed and visibly
-        // emptied. "Something is claimed" cannot tell that from the ordinary case: the term would
-        // narrow the new listing by words the emptied box no longer shows.
-        var search = new SurfaceSearch();
-        var first = search.Claim("Search Project A's injections…", _ => Task.CompletedTask);
-        var typedUnder = search.Generation;
-        first.Dispose();
-        var received = new List<string>();
-        using var second = search.Claim("Search Project B's injections…", term =>
-        {
-            received.Add(term);
-            return Task.CompletedTask;
-        });
-
-        await search.SetTermAsync("migrations", typedUnder);
-
-        received.ShouldBeEmpty();
-        search.Term.ShouldBe("");
-    }
-
-    [Fact]
-    public async Task ATermTypedUnderTheLiveClaim_StillArrives()
-    {
-        // The other half of the guard: it must reject only the stale generation, or the box goes
-        // inert and no surface is ever narrowed at all.
-        var search = new SurfaceSearch();
-        var received = new List<string>();
-        using var claim = search.Claim("Search this log…", term =>
-        {
-            received.Add(term);
-            return Task.CompletedTask;
-        });
-        var typedUnder = search.Generation;
-
-        await search.SetTermAsync("migrations", typedUnder);
-
-        received.ShouldBe(["migrations"]);
-        search.Term.ShouldBe("migrations");
-    }
-
-    [Fact]
-    public async Task EveryClaimReleaseAndTerm_RaisesChangedForTheHeaderToRenderOn()
-    {
-        var search = new SurfaceSearch();
-        var changes = 0;
-        search.Changed += () => changes++;
-
-        var claim = search.Claim("Search this log…", _ => Task.CompletedTask);
-        await search.SetTermAsync("migrations", search.Generation);
+        var claim = _search.Claim(this, "Search…");
+        _search.Set("zeb");
         claim.Dispose();
 
-        changes.ShouldBe(3);
+        raised.ShouldBe(3);
     }
 
     [Fact]
-    public async Task TypingIntoAnUnclaimedBox_IsIgnoredRatherThanRemembered()
+    public void AClaimWithoutAHolder_IsRejected()
     {
-        var search = new SurfaceSearch();
-        var changes = 0;
-        search.Changed += () => changes++;
-
-        await search.SetTermAsync("migrations", search.Generation);
-
-        search.Term.ShouldBe("");
-        changes.ShouldBe(0);
+        Should.Throw<ArgumentNullException>(() => _search.Claim(null!, "Search…"));
     }
 }

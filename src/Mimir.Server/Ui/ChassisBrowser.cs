@@ -23,7 +23,13 @@ public sealed record HeaderPipeline(int Episodes, int Queued, int Wisdom, int Re
 /// <summary>The tab strip's per-Project counts — a different question from <see cref="HeaderPipeline"/>'s whole-install one.</summary>
 public sealed record SurfaceCounts(int Wisdom, int Episodes, int Injections);
 
-/// <summary>The sidebar's "Needs attention" group, scoped to one Project's Wisdom.</summary>
+/// <summary>
+/// The sidebar's "Needs attention" group. Counted over the Project's <see cref="AmbientUniverse"/>
+/// rather than its own Scope, unlike the per-Project counts beside each Project: each of these
+/// three is the label on a link, and a count that disagreed with the list its own link opens —
+/// "Retired 0" opening three Global ones — would be a worse discrepancy than the one ADR-0009
+/// accepted. The per-Project counts stay Project-owned because those still have to partition.
+/// </summary>
 public sealed record WisdomAttention(int Contested, int Orphaned, int Retired);
 
 /// <summary>
@@ -102,19 +108,20 @@ public sealed class ChassisBrowser(IDbContextFactory<MimirDbContext> contexts, T
         return new SurfaceCounts(wisdom, episodes, injections);
     }
 
+    /// <summary>
+    /// Each figure is the length of the list its own sidebar link opens, counted through the one
+    /// keeper that produces that list — so "what needs attention" and "what the link shows" cannot
+    /// drift into two rules (#91).
+    /// </summary>
     public async Task<WisdomAttention> GetWisdomAttentionAsync(Guid projectId, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var contested = await db.Wisdom.CountAsync(
-            w => w.ScopeProjectId == projectId && w.RetiredAt == null && w.ContestedAt != null,
-            cancellationToken);
-        var retired = await db.Wisdom.CountAsync(
-            w => w.ScopeProjectId == projectId && w.RetiredAt != null, cancellationToken);
-        // Same rule WisdomBrowser.ToEntries uses for OrphanedProvenance: no Provenance row at all.
-        var orphaned = await db.Wisdom.CountAsync(
-            w => w.ScopeProjectId == projectId && w.RetiredAt == null
-                && !db.Provenance.Any(p => p.WisdomId == w.Id),
-            cancellationToken);
+        var contested = await AmbientUniverse.For(db, projectId, WisdomLens.Contested)
+            .CountAsync(cancellationToken);
+        var orphaned = await AmbientUniverse.For(db, projectId, WisdomLens.Orphaned)
+            .CountAsync(cancellationToken);
+        var retired = await AmbientUniverse.For(db, projectId, WisdomLens.Retired)
+            .CountAsync(cancellationToken);
 
         return new WisdomAttention(contested, orphaned, retired);
     }

@@ -21,10 +21,7 @@ internal static class ProjectRoute
     /// </summary>
     public static (Guid ProjectId, string Tab)? Parse(string relativePath)
     {
-        // ToBaseRelativePath keeps the query string and fragment; strip them before segmenting so
-        // a pasted "?highlight=…" or "#anchor" doesn't get parsed as (or corrupt) the tab segment.
-        var path = relativePath.Split(['?', '#'], 2)[0];
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var segments = Segments(relativePath);
         if (segments.Length < 2
             || !string.Equals(segments[0], "projects", StringComparison.OrdinalIgnoreCase)
             || !Guid.TryParse(segments[1], out var projectId))
@@ -35,4 +32,21 @@ internal static class ProjectRoute
         var tab = segments.Length >= 3 ? segments[2].ToLowerInvariant() : DefaultTab;
         return (projectId, Array.IndexOf(Tabs, tab) >= 0 ? tab : DefaultTab);
     }
+
+    /// <summary>
+    /// Whether the route names a surface's own screen rather than a drill-down beneath it. The tab
+    /// segment alone cannot answer it: Episodes' list is ported to panes while the Event stream
+    /// under it is not (#94; #95 ports that), and both read as <c>episodes</c> to
+    /// <see cref="Parse"/>. Wisdom needs no such distinction — #91 made its detail part of the one
+    /// screen — so this is asked per surface, not of every route.
+    /// </summary>
+    public static bool IsSurfaceRoot(string relativePath) => Segments(relativePath).Length <= 3;
+
+    /// <summary>
+    /// ToBaseRelativePath keeps the query string and fragment; strip them before segmenting so a
+    /// pasted "?highlight=…" or "#anchor" doesn't get parsed as (or corrupt) the tab segment.
+    /// </summary>
+    private static string[] Segments(string relativePath) => relativePath
+        .Split(['?', '#'], 2)[0]
+        .Split('/', StringSplitOptions.RemoveEmptyEntries);
 }

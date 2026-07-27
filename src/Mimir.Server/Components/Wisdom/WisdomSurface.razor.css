@@ -1,0 +1,369 @@
+/* The §8.1 screen, on Nocturne's tokens (#91). Two panes side by side, each scrolling on its own
+   so the composition holds still while a curator reads. */
+.wisdom-surface {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+}
+
+.list-pane {
+    flex: none;
+    width: 400px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-shadow: inset -1px 0 0 var(--color-divider);
+}
+
+.list-head {
+    flex: none;
+    padding: var(--space-4) var(--space-6) var(--space-4);
+}
+
+.list-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.list-title h4 {
+    margin: 0;
+    font-size: 17px;
+}
+
+.list-counts {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+    white-space: nowrap;
+}
+
+.counts-join {
+    margin: 0 var(--space-1);
+    color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
+.kind-chips {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.chip {
+    padding: 3px 9px;
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-sm);
+    background: none;
+    font: inherit;
+    font-size: 11.5px;
+    line-height: 1.2;
+    color: color-mix(in srgb, var(--color-text) 65%, transparent);
+    cursor: pointer;
+}
+
+.chip:hover {
+    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.chip.is-active {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.chip-count {
+    margin-left: var(--space-1);
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.list-rows {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.wisdom-row {
+    display: block;
+    padding: var(--space-4) var(--space-6);
+    color: inherit;
+    text-decoration: none;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.wisdom-row:hover {
+    background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.wisdom-row.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+    box-shadow:
+        inset 2px 0 0 var(--color-accent),
+        inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+/* Retired rows are struck through, the way the sidebar's Retired link promises (§10). */
+.wisdom-row.is-retired {
+    opacity: 0.55;
+}
+
+.wisdom-row.is-retired .row-text {
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--color-text) 25%, transparent);
+}
+
+.row-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-1);
+}
+
+.row-kind {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.row-scope {
+    font-size: 10.5px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.row-state {
+    font-size: 9.5px;
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+    border-radius: 5px;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.row-state.state-accent {
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.row-state.state-danger {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 50%, transparent);
+}
+
+.row-reinforcement {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* Two lines, then an ellipsis: the list is for scanning; the detail pane carries the whole text. */
+.row-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.detail-pane {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: var(--space-8) 28px;
+    background: radial-gradient(
+        120% 70% at 50% -10%,
+        color-mix(in srgb, var(--color-accent) 9%, transparent),
+        transparent 70%);
+}
+
+.pane-note {
+    max-width: 44rem;
+    font-size: 13px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.detail-empty {
+    margin-top: var(--space-8);
+}
+
+.detail-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-6);
+}
+
+.detail-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+}
+
+.detail-sep {
+    color: color-mix(in srgb, var(--color-text) 25%, transparent);
+}
+
+.detail-fact {
+    font-size: 12px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.detail-fact strong {
+    font-weight: var(--font-heading-weight);
+    color: var(--color-text);
+}
+
+.detail-state {
+    max-width: 44rem;
+    font-size: 12px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.detail-state.state-accent {
+    color: var(--color-accent);
+}
+
+.detail-text {
+    max-width: 44rem;
+    margin-bottom: var(--space-4);
+}
+
+.detail-text.is-retired {
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--color-text) 25%, transparent);
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-editor {
+    display: block;
+    width: 100%;
+    max-width: 44rem;
+    min-height: 6rem;
+    margin-bottom: var(--space-3);
+    resize: vertical;
+}
+
+.detail-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+
+.detail-error {
+    max-width: 44rem;
+    font-size: 12px;
+    color: var(--color-danger);
+}
+
+.detail-section {
+    margin: var(--space-8) 0 var(--space-3);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.version-list,
+.provenance {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.version-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+
+.version-seq {
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.version-cause {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+}
+
+.version-at {
+    margin-left: auto;
+    font-size: 11px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.version-text {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 13px;
+    color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.provenance-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.provenance-meta {
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+    word-break: break-all;
+}
+
+.detail-orphaned {
+    max-width: 44rem;
+    font-size: 13px;
+    color: var(--color-danger);
+}
+
+/* Delete is the permanent act: set apart from the reversible Retire above, and confirmed (§10). */
+.detail-danger {
+    margin-top: var(--space-8);
+    padding-top: var(--space-4);
+    box-shadow: inset 0 1px 0 var(--color-divider);
+}
+
+.confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.confirm-prompt {
+    font-size: 12px;
+    color: var(--color-danger);
+}
+
+.danger-outline {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+}
+
+.danger-fill {
+    color: var(--color-bg);
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+}
