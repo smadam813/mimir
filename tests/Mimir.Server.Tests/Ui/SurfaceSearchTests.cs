@@ -72,9 +72,10 @@ public sealed class SurfaceSearchTests
 
     /// <summary>
     /// The reset on the claiming edge, which the overlap case above cannot see because it types
-    /// after the handover. Both ported surfaces lean on it: re-claiming is how a surface that stays
-    /// mounted across a Project change sheds the outgoing Project's term (#94), so a claim that
-    /// inherited one would silently narrow the incoming list by something nobody typed for it.
+    /// after the handover. All three ported surfaces lean on it: re-claiming is how a surface that
+    /// stays mounted across a Project change sheds the outgoing Project's term (#94, #108), so a
+    /// claim that inherited one would silently narrow the incoming list by something nobody typed
+    /// for it.
     /// </summary>
     [Fact]
     public void ANewClaim_StartsFromAnEmptyTerm_SoNoSurfaceInheritsAnothersSearch()
@@ -85,6 +86,26 @@ public sealed class SurfaceSearchTests
         using var reclaimed = _search.Claim(this, "Episodes…");
 
         _search.Term.ShouldBe("");
+    }
+
+    /// <summary>
+    /// The mechanic under the surfaces' release-then-claim ordering: the box is held by holder
+    /// identity, not by token, so a same-holder re-claim leaves the earlier token live rather than
+    /// stale-and-inert. Disposing it afterwards would hand the box back out from under the claim
+    /// that replaced it, leaving the header disabled over a surface still on screen — which is why
+    /// a surface re-claiming for itself releases first (#94, #108). This pins the mechanic and not
+    /// the ordering: with no bUnit, a surface that reverses the two goes uncaught here.
+    /// </summary>
+    [Fact]
+    public void AnEarlierTokenFromTheSameHolder_StillReleases_SoASurfaceReleasesBeforeReClaiming()
+    {
+        var surface = new object();
+        var earlier = _search.Claim(surface, "Wisdom…");
+        using var live = _search.Claim(surface, "Wisdom…");
+
+        earlier.Dispose();
+
+        _search.IsClaimed.ShouldBeFalse("the holder holds the box, so either of its tokens frees it");
     }
 
     [Fact]

@@ -226,9 +226,10 @@
         _debounce = new Debouncer(DebounceDelay, Logger, "Injection listing refresh");
 
         // One search box, claimed by whichever surface is on screen (§8). The claim is for the
-        // life of the component, not of the Project: this instance is reused across a Project
-        // switch, and re-claiming there would be a second claim over its own live one.
-        _searchClaim = Search.Claim(this, "Search this Project's injections…");
+        // Project on screen, not for the life of the component — see AnchorOnProject. Parameters
+        // are set before this runs, so anchoring here is also the first anchor, and the re-anchor
+        // below then fires only on a real switch.
+        AnchorOnProject();
         Search.Changed += OnSearchChanged;
     }
 
@@ -240,11 +241,25 @@
         // only place that runs.
         if (_loadedProject != ProjectId)
         {
-            _loadedProject = ProjectId;
-            (_lane, _selected) = (null, null);
+            AnchorOnProject();
         }
 
         await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Binds this tab to <see cref="ProjectId"/>, the typed term included. Re-claiming is what
+    /// sheds it: <see cref="SurfaceSearch.Claim"/> resets the term on the claiming edge and nothing
+    /// else does while the one instance lives, so a carried term would silently narrow the incoming
+    /// log by something nobody typed for it (#108). Released first, for the reason
+    /// <see cref="SurfaceSearch.Claim"/> states.
+    /// </summary>
+    private void AnchorOnProject()
+    {
+        _loadedProject = ProjectId;
+        (_lane, _selected) = (null, null);
+        _searchClaim?.Dispose();
+        _searchClaim = Search.Claim(this, "Search this Project's injections…");
     }
 
     private void OnSearchChanged() => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
