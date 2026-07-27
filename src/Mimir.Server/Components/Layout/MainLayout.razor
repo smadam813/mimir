@@ -85,12 +85,14 @@
 
     /// <summary>
     /// Read from the URL, the same way the sidebar and tab strip read it (#89); the layout
-    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. #95 and #96
-    /// add their own surfaces here; the branch goes with the old stylesheet (#97).
+    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. #95 adds its
+    /// own surface here; the branch goes with the old stylesheet (#97).
     /// <para>
     /// Episodes is ported at its root only: the list fills the body with panes (#94), while the
     /// Event stream one segment deeper is still the padded page it was written as until #95 —
-    /// and both read as <c>episodes</c> to <see cref="ProjectRoute.Parse"/>.
+    /// and both read as <c>episodes</c> to <see cref="ProjectRoute.Parse"/>. Injections has no
+    /// deeper route to tell apart: its detail is a pane on the same screen, and the Wisdom it links
+    /// to is <c>WisdomPage</c>'s route, not one of its own (#96).
     /// </para>
     /// </summary>
     private bool IsPortedSurface
@@ -101,6 +103,7 @@
             return ProjectRoute.Parse(path)?.Tab switch
             {
                 "wisdom" => true,
+                "injections" => true,
                 "episodes" => ProjectRoute.IsSurfaceRoot(path),
                 _ => false,
             };

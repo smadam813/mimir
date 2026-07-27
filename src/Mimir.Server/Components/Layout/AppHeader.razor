@@ -91,16 +91,13 @@
 
     private HeaderPipeline? _pipeline;
     private IDisposable? _subscription;
-    private CancellationTokenSource? _debounce;
+    private Debouncer? _debounce;
     private int _generation;
-
-    /// <summary>Serialises <see cref="ScheduleRefresh"/> against <see cref="Dispose"/>.</summary>
-    private readonly Lock _debounceGate = new();
-
-    private bool _disposed;
 
     protected override void OnInitialized()
     {
+        _debounce = new Debouncer(DebounceDelay, Logger, "Header pipeline refresh");
+
         // A surface claiming or releasing the box changes what this input says and whether it is
         // enabled at all, and neither is this component's own state. A handover also empties the
         // term, so this is what drops whatever the outgoing surface's search left in the box.
@@ -110,7 +107,7 @@
         // fires on every captured Event, not only session start and Seal, so a burst (a tool use
         // with the header mounted on several tabs) is coalesced into one refresh instead of one
         // five-query round trip per Event.
-        _subscription = Feed.Subscribe(change => ScheduleRefresh());
+        _subscription = Feed.Subscribe(change => _debounce?.Schedule(() => InvokeAsync(RefreshAsync)));
     }
 
     // Cascading parameters are set before the first render, so this is the initial fetch — and it
@@ -121,50 +118,6 @@
         if (IsFirstRun is false && _pipeline is null)
         {
             await RefreshAsync();
-        }
-    }
-
-    /// <summary>
-    /// Coalesces a burst into one refresh. Guarded, because the feed publishes on whichever thread
-    /// captured — not this circuit's dispatcher — so this runs concurrently with <see cref="Dispose"/>
-    /// reaching for the same field. Unguarded, a change landing mid-teardown installs a fresh
-    /// timer nobody will ever cancel, and it fires against a disposed component 250 ms later.
-    /// </summary>
-    private void ScheduleRefresh()
-    {
-        CancellationTokenSource cts;
-        lock (_debounceGate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _debounce?.Cancel();
-            _debounce?.Dispose();
-            cts = new CancellationTokenSource();
-            _debounce = cts;
-        }
-
-        _ = DebouncedRefreshAsync(cts.Token);
-    }
-
-    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(RefreshAsync);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later Event before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            // Fire-and-forget from the feed callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a stale-but-visible header.
-            Logger.LogWarning(ex, "Header pipeline refresh failed");
         }
     }
 
@@ -203,11 +156,6 @@
     {
         Search.Changed -= OnSearchChanged;
         _subscription?.Dispose();
-        lock (_debounceGate)
-        {
-            _disposed = true;
-            _debounce?.Cancel();
-            _debounce?.Dispose();
-        }
+        _debounce?.Dispose();
     }
 }

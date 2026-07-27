@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 using Npgsql;
@@ -7,15 +8,24 @@ using Npgsql;
 namespace Mimir.Server.Ui;
 
 /// <summary>
-/// One injected Wisdom on a log entry (§8.3): the score that ranked it, and the same card entry
-/// the browser renders — curation follows Wisdom wherever it appears (§8). Null when the Wisdom
-/// was hard-deleted after the injection; the entry still shows that something was injected.
+/// One injected Wisdom on a log entry (§8.3): the score that ranked it, whether it took §7's
+/// salience boost, and the row it links into the Wisdom surface by. <see cref="Wisdom"/> is null
+/// when it was hard-deleted after the injection; the entry still shows that something was injected.
+///
+/// The surface links rather than curating in place: this screen is about how a line ranked, and a
+/// retire button inside a score table would offer to change that ranking's inputs from the screen
+/// judging them. Curation stays §8.1's.
+///
+/// <see cref="Salient"/>, like the hydrated row itself, is read now rather than as of the injection
+/// — nothing records the factors a lane applied — so it explains a score rather than reproducing
+/// one, and the surface says so.
 /// </summary>
-public sealed record InjectedWisdom(Guid WisdomId, double Score, WisdomListEntry? Wisdom);
+public sealed record InjectedWisdom(Guid WisdomId, double Score, bool Salient, WisdomListEntry? Wisdom);
 
 /// <summary>One §8.3 log entry: what a lane injected, its size, mark, and promotion state.</summary>
 public sealed record InjectionLogEntry(
     Guid Id,
+    string SessionId,
     DateTimeOffset At,
     InjectionLane Lane,
     string? QueryContext,
@@ -32,20 +42,71 @@ public sealed record InjectionLogEntry(
     /// </summary>
     public bool CanPromote => QueryContext is not null
         && Items.Any(i => i.Wisdom is { RetiredAt: null });
+
+    /// <summary>
+    /// How many of the lines this entry carried have since been hard-deleted (§10). Here rather
+    /// than counted in the markup, because it is also what decides whether the payload can be
+    /// rebuilt at all — two readings of one rule is how they come apart.
+    /// </summary>
+    public int WisdomSinceDeleted => Items.Count(i => i.Wisdom is null);
 }
 
 /// <summary>One session's entries, newest first (§8.3).</summary>
 public sealed record InjectionSession(string SessionId, IReadOnlyList<InjectionLogEntry> Entries);
 
-/// <summary>The §8.3 tab: per-session entries plus the §9 injection-precision inputs.</summary>
+/// <summary>One lane's share of the Project's whole log — the list's lane chips (§8.3).</summary>
+public sealed record LaneCount(InjectionLane Lane, int Entries);
+
+/// <summary>
+/// One Wisdom in the aside's "most recalled this week" (§8.3): how many of the week's entries
+/// carried it, and the row to link to. <see cref="Wisdom"/> is null when it was hard-deleted since
+/// — it still did the work the count records.
+/// </summary>
+public sealed record RecalledWisdom(Guid WisdomId, int Recalls, WisdomListEntry? Wisdom);
+
+/// <summary>
+/// The §8.3 filters. <see cref="Search"/> narrows on <c>query_context</c>, which is the only text an
+/// entry carries (§3) — so it can never match a Brief, which has none.
+/// </summary>
+public sealed record InjectionQuery(Guid ProjectId, string? Search = null, InjectionLane? Lane = null);
+
+/// <summary>
+/// The §8.3 tab: the filtered, bounded listing, plus the Project-wide figures the aside carries.
+///
+/// The aside's numbers are deliberately the whole Project's, never the filtered listing's:
+/// <see cref="Precision"/> is a §9 stat over the whole history, and a figure that moved when a
+/// curator typed in the search box would be a different stat under the same name. Only
+/// <see cref="Sessions"/> and <see cref="Matching"/> answer the query.
+/// </summary>
 public sealed record InjectionLogView(
-    IReadOnlyList<InjectionSession> Sessions, int Useful, int Marked, int TotalEntries)
+    IReadOnlyList<InjectionSession> Sessions,
+    int Matching,
+    int Useful,
+    int Marked,
+    int TotalEntries,
+    int TotalSessions,
+    int PromotedCases,
+    IReadOnlyList<LaneCount> Lanes,
+    IReadOnlyList<RecalledWisdom> MostRecalledThisWeek)
 {
     /// <summary>§9 injection precision: useful / marked. Null until anything is marked.</summary>
     public double? Precision => Marked == 0 ? null : (double)Useful / Marked;
 
-    /// <summary>True when entries older than the recent-entry bound fell off the listing.</summary>
-    public bool Truncated => Sessions.Sum(s => s.Entries.Count) < TotalEntries;
+    /// <summary>The §9 mark's other face — every marked entry is one or the other.</summary>
+    public int Noise => Marked - Useful;
+
+    /// <summary>How much of the log a curator has not judged yet, whole history.</summary>
+    public int Unmarked => TotalEntries - Marked;
+
+    /// <summary>How many entries the listing actually rendered, after the bound.</summary>
+    public int Listed => Sessions.Sum(s => s.Entries.Count);
+
+    /// <summary>
+    /// True when entries matching the query fell off the listing at the recent-entry bound.
+    /// Measured against <see cref="Matching"/>, not <see cref="TotalEntries"/>: a search that
+    /// narrows to three entries has truncated nothing, however long the whole log is.
+    /// </summary>
+    public bool Truncated => Listed < Matching;
 }
 
 /// <summary>
@@ -64,23 +125,103 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
     /// </summary>
     internal const int RecentEntryLimit = 100;
 
-    public async Task<InjectionLogView> ListAsync(Guid projectId, CancellationToken cancellationToken)
+    /// <summary>How many Wisdom the aside's "most recalled this week" names.</summary>
+    internal const int MostRecalledLimit = 5;
+
+    /// <summary>The window "most recalled this week" looks back over.</summary>
+    private static readonly TimeSpan RecalledWindow = TimeSpan.FromDays(7);
+
+    public async Task<InjectionLogView> ListAsync(
+        InjectionQuery query, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == projectId);
-        var rows = await scoped
+
+        // Two queryables on purpose. `scoped` is the whole Project's log and feeds every figure the
+        // aside carries — §9's precision above all, which is a whole-history stat and must not move
+        // when a curator narrows the list. `matching` is the listing, and the only thing the
+        // curator's filters touch.
+        var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == query.ProjectId);
+        var matching = scoped;
+        var narrowed = false;
+        if (query.Lane is { } lane)
+        {
+            matching = matching.Where(i => i.Lane == lane);
+            narrowed = true;
+        }
+
+        if (query.Search?.Trim() is { Length: > 0 } term)
+        {
+            // query_context is the only text an entry carries (§3) — no tsvector over it, so a
+            // case-insensitive substring match, with the LIKE metacharacters escaped so a curator
+            // typing "%" searches for one.
+            var pattern = LikePattern.Contains(term);
+            matching = matching.Where(i =>
+                i.QueryContext != null
+                && EF.Functions.ILike(i.QueryContext, pattern, LikePattern.EscapeCharacter));
+            narrowed = true;
+        }
+
+        var rows = await matching
             .OrderByDescending(i => i.At).ThenByDescending(i => i.Id)
             .Take(RecentEntryLimit)
             .ToListAsync(cancellationToken);
+
         var totalEntries = await scoped.CountAsync(cancellationToken);
+        // No COUNT where something already answers it. A Take that came back short of the bound
+        // saw the whole matching set, and an unnarrowed listing's set is the Project's own — so
+        // only a narrowed listing that actually filled the bound needs its own query, which is the
+        // one case where Truncated's figure could not be worked out from what is already here.
+        var matchingCount = rows.Count < RecentEntryLimit ? rows.Count
+            : narrowed ? await matching.CountAsync(cancellationToken)
+            : totalEntries;
+        var totalSessions = await scoped
+            .Select(i => i.SessionId).Distinct().CountAsync(cancellationToken);
         var useful = await scoped
             .CountAsync(i => i.Verdict == InjectionVerdict.Useful, cancellationToken);
         var marked = await scoped.CountAsync(i => i.Verdict != null, cancellationToken);
+        var promotedCases = await db.GoldenCases.CountAsync(
+            g => g.ProjectId == query.ProjectId && g.CreatedFromInjectionId != null,
+            cancellationToken);
 
-        var wisdomIds = rows.SelectMany(i => i.Items.Select(x => x.WisdomId)).Distinct().ToList();
+        var laneRows = await scoped
+            .GroupBy(i => i.Lane)
+            .Select(g => new { Lane = g.Key, Entries = g.Count() })
+            .ToListAsync(cancellationToken);
+        // Every lane, including the ones this Project has never used: a chip that vanishes at zero
+        // reads as "this lane does not exist" rather than "this lane injected nothing".
+        var lanes = Enum.GetValues<InjectionLane>()
+            .Select(l => new LaneCount(
+                l, laneRows.FirstOrDefault(r => r.Lane == l)?.Entries ?? 0))
+            .ToList();
+
+        // Grouped server-side over the jsonb rather than materialized: this is a leaderboard over a
+        // week of the fastest-growing table in the schema, and pulling its Items back for one Take
+        // is the mistake ChassisBrowser.GetRecallAttentionAsync already had to undo.
+        var since = clock.GetUtcNow() - RecalledWindow;
+        var recalled = await scoped
+            .Where(i => i.At >= since)
+            .SelectMany(i => i.Items)
+            .GroupBy(x => x.WisdomId)
+            .Select(g => new { WisdomId = g.Key, Recalls = g.Count() })
+            .OrderByDescending(r => r.Recalls).ThenBy(r => r.WisdomId)
+            .Take(MostRecalledLimit)
+            .ToListAsync(cancellationToken);
+
+        var wisdomIds = rows
+            .SelectMany(i => i.Items.Select(x => x.WisdomId))
+            .Concat(recalled.Select(r => r.WisdomId))
+            .Distinct()
+            .ToList();
         var wisdom = await WisdomBrowser
             .ToEntries(db, db.Wisdom.Where(w => wisdomIds.Contains(w.Id)))
             .ToDictionaryAsync(w => w.Id, cancellationToken);
+        // §7's salience definition, composed rather than restated — the boost the screen explains
+        // has to be the one the lanes actually score with.
+        var salient = (await ExplicitSalience.Ids(db)
+                .Where(id => wisdomIds.Contains(id))
+                .Distinct()
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
 
         // The partial unique index on created_from_injection_id caps the breadcrumb at one case
         // per entry, so this lookup cannot collide.
@@ -99,6 +240,7 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
                 g.Key,
                 g.Select(i => new InjectionLogEntry(
                         i.Id,
+                        i.SessionId,
                         i.At,
                         i.Lane,
                         i.QueryContext,
@@ -108,12 +250,25 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
                         promoted.TryGetValue(i.Id, out var caseId) ? caseId : null,
                         i.Items
                             .Select(x => new InjectedWisdom(
-                                x.WisdomId, x.Score, wisdom.GetValueOrDefault(x.WisdomId)))
+                                x.WisdomId,
+                                x.Score,
+                                salient.Contains(x.WisdomId),
+                                wisdom.GetValueOrDefault(x.WisdomId)))
                             .ToList()))
                     .ToList()))
             .ToList();
 
-        return new InjectionLogView(sessions, useful, marked, totalEntries);
+        return new InjectionLogView(
+            sessions,
+            matchingCount,
+            useful,
+            marked,
+            totalEntries,
+            totalSessions,
+            promotedCases,
+            lanes,
+            [.. recalled.Select(r => new RecalledWisdom(
+                r.WisdomId, r.Recalls, wisdom.GetValueOrDefault(r.WisdomId)))]);
     }
 
     /// <summary>

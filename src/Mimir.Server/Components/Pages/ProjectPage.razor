@@ -18,9 +18,9 @@ else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
-    @* Wisdom left this switch with #91 — its own route owns that surface now. The Episode list is
-       ported to panes and gets the layout's flush body (#94); the Injection log is still the padded
-       page it was written as, which is what the layout gives it until #96. *@
+    @* Wisdom left this switch with #91 — its own route owns that surface now. Both cases that are
+       left draw the pane shape and own their own scrolling, so both take the layout's flush body
+       (#94, #96); the padded page this switch was written around is gone. *@
     @switch (ActiveTab)
     {
         case "injections":

@@ -1,0 +1,360 @@
+/* Spec §8.3 on the Nocturne look (#96): the surface's three panes — a 400px session-grouped list,
+   the detail's frame, and the 283px aside — each scrolling on its own inside the chassis. The
+   opt-out from MainLayout's padded body lives in wwwroot/nocturne/mimir.css, because it spans two
+   components and scoped CSS cannot. */
+.surface-panes {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+}
+
+/* ── The list ─────────────────────────────────────────────────────────────────────────────── */
+
+.pane-list {
+    flex: none;
+    width: 400px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: inset -1px 0 0 var(--color-divider);
+}
+
+.pane-list-head {
+    flex: none;
+    padding: var(--space-4) var(--space-6) var(--space-3);
+}
+
+.pane-list-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.pane-list-title h4 {
+    margin: 0;
+}
+
+.pane-count {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.lane-chips {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.lane-chip {
+    font-size: 11.5px;
+    padding: 3px 9px;
+    color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+
+.lane-chip.is-active {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.lane-chip-count {
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.pane-list-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.session-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 7px var(--space-6);
+    background: color-mix(in srgb, var(--color-text) 2.5%, transparent);
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.session-word {
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.session-id {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: color-mix(in srgb, var(--color-text) 70%, transparent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A button, not a link: selecting an entry is state on this surface, not a URL of its own. */
+.entry-row {
+    display: block;
+    width: 100%;
+    padding: var(--space-4) var(--space-6);
+    border: 0;
+    background: transparent;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.entry-row:hover {
+    background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.entry-row.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+    box-shadow:
+        inset 2px 0 0 var(--color-accent),
+        inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
+    cursor: default;
+}
+
+.entry-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: 4px;
+}
+
+.entry-time {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+.entry-lane {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.is-selected .entry-lane {
+    color: var(--color-accent-400);
+}
+
+.entry-mark {
+    font-size: 9.5px;
+    padding: 0 5px;
+    border-radius: 5px;
+    border: 1px solid color-mix(in srgb, var(--color-text) 30%, transparent);
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+    white-space: nowrap;
+}
+
+.entry-mark.mark-useful {
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.entry-mark.mark-gone {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+}
+
+.entry-size {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+    white-space: nowrap;
+}
+
+.entry-query {
+    display: block;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 57%, transparent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pane-empty {
+    margin: 0;
+    padding: var(--space-6);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.pane-truncated {
+    margin: 0;
+    padding: var(--space-6);
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 40%, transparent);
+}
+
+/* ── The detail's frame ───────────────────────────────────────────────────────────────────── */
+
+.pane-detail-frame {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    background: radial-gradient(
+        120% 70% at 50% -10%,
+        color-mix(in srgb, var(--color-accent) 9%, transparent),
+        transparent 70%);
+}
+
+/* ::deep, because the same three classes are the InjectionDetail component's own root and body on
+   a selected entry and this component's placeholder when nothing is selected — one pane, drawn
+   from two components, and it has to be the same pane either way. */
+.pane-detail-frame ::deep .pane-detail {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.pane-detail-frame ::deep .pane-detail-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-8) 28px 28px;
+}
+
+.pane-detail-frame ::deep .pane-detail-footer {
+    flex: none;
+    padding: var(--space-4) 28px var(--space-4);
+    box-shadow: inset 0 1px 0 var(--color-divider);
+    background: var(--color-bg);
+}
+
+.pane-placeholder {
+    max-width: 44ch;
+    font-size: 13px;
+    line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+/* ── The aside ────────────────────────────────────────────────────────────────────────────── */
+
+.pane-aside {
+    flex: none;
+    width: 283px;
+    padding: var(--space-8) 28px var(--space-8) var(--space-8);
+    border-left: 1px solid var(--color-divider);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.pane-aside h6 {
+    margin: 0 0 var(--space-3);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.aside-figure {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.aside-figure-value {
+    font-size: 34px;
+    font-weight: var(--font-heading-weight);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.aside-figure-unit {
+    font-size: 11.5px;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.aside-rows {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px var(--space-4);
+    margin: var(--space-4) 0 0;
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.aside-rows dt,
+.aside-rows dd {
+    margin: 0;
+}
+
+.aside-rows dd {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.aside-rows dd.is-accent {
+    color: var(--color-accent-400);
+}
+
+.aside-rows dd.is-strong {
+    color: var(--color-text);
+}
+
+.aside-note {
+    margin: var(--space-3) 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.aside-links {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 calc(var(--space-3) * -1);
+}
+
+.aside-link {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 7px var(--space-3);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: inherit;
+}
+
+a.aside-link:hover {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.aside-link-text {
+    font-size: 12px;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--color-text) 80%, transparent);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.aside-link.is-gone .aside-link-text {
+    color: var(--color-danger);
+}
+
+.aside-link-count {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-accent-400);
+}

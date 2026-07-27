@@ -144,13 +144,10 @@ internal sealed class WisdomBrowser(
 
         // Word-aware FTS over the generated tsv, with a substring fallback so partial words
         // still find their Wisdom — a browser search, not the §3 ranked hybrid search.
-        var pattern = "%" + term
-            .Replace(@"\", @"\\")
-            .Replace("%", @"\%")
-            .Replace("_", @"\_") + "%";
+        var pattern = LikePattern.Contains(term);
         return wisdom.Where(w =>
             w.Tsv!.Matches(EF.Functions.PlainToTsQuery("english", term))
-            || EF.Functions.ILike(w.Text, pattern, @"\"));
+            || EF.Functions.ILike(w.Text, pattern, LikePattern.EscapeCharacter));
     }
 
     public async Task<WisdomDetail?> GetAsync(Guid wisdomId, CancellationToken cancellationToken)

@@ -1,0 +1,191 @@
+@using Mimir.Server.Configuration
+@using Mimir.Server.Components.Wisdom
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+
+@* Spec §8.3: one entry, read the way the session read it — the payload first, then the score that
+   put each line in it, then the §7 formula those scores came out of, and only then the §9 mark.
+   The mark is the entry's, not any line's, and the screen says so beside the buttons (#96). *@
+<main class="pane-detail">
+    <div class="pane-detail-body">
+        <article class="entry-detail">
+            <span class="detail-kicker">@InjectionDisplay.Name(Entry.Lane)</span>
+            <h3 class="detail-title">@EpisodeDisplay.Stamp(Entry.At)</h3>
+            <p class="detail-meta">
+                session @Entry.SessionId
+                · @InjectionDisplay.Trigger(Entry.Lane)
+                · @Entry.Items.Count Wisdom
+                · @Entry.Chars.ToString("N0")@(_budget is { } budget
+                    ? $" of {budget:N0}" : "") chars
+            </p>
+
+            @if (Entry.QueryContext is { } query)
+            {
+                <h6 class="detail-heading">The query it answered</h6>
+                <p class="detail-query">“@query”</p>
+            }
+
+            <h6 class="detail-heading">What the session received</h6>
+            @if (_payload is null)
+            {
+                <p class="detail-note">
+                    This entry came from <code>mimir_search</code>, which composes its own sectioned
+                    answer — Episodes included — rather than the ambient <code>&lt;mimir-memory&gt;</code>
+                    wrapper. §3 records the answer's size and the Wisdom it carried, not its text, so
+                    the reply itself cannot be shown. The lines below are the Wisdom half of it.
+                </p>
+            }
+            else if (_payload.Length == 0)
+            {
+                <p class="detail-note">
+                    All @Entry.WisdomSinceDeleted of the Wisdom this entry carried have since been
+                    hard-deleted (§10), so there is nothing left to render the payload's lines from.
+                    The injection still happened — it was @Entry.Chars.ToString("N0") chars.
+                </p>
+            }
+            else
+            {
+                <pre class="detail-payload">@_payload</pre>
+                <p class="detail-note">
+                    Rendered through the same §7 wrapper and label builders the lane itself used,
+                    over what each line says now. §3 records an injection's size and its Wisdom, not
+                    its text, so the recorded @Entry.Chars.ToString("N0") chars is the check:
+                    @if (_payload.Length == Entry.Chars)
+                    {
+                        <span>this rebuild is the same length, so nothing it carried has moved since.</span>
+                    }
+                    else
+                    {
+                        <span class="detail-drift">
+                            this rebuild is @_payload.Length.ToString("N0") chars, so the entry has
+                            drifted — a line edited or deleted since, or a Brief growth notice, which
+                            rides in the count but is not itself recorded.
+                        </span>
+                    }
+                </p>
+            }
+
+            <h6 class="detail-heading">Why each line was chosen</h6>
+            @if (Entry.Items.Count == 0)
+            {
+                <p class="detail-note">This entry carried no Wisdom at all.</p>
+            }
+            else
+            {
+                <div class="score-table">
+                    @foreach (var item in Entry.Items)
+                    {
+                        <div class="score-row" @key="item.WisdomId">
+                            @if (item.Wisdom is { } wisdom)
+                            {
+                                <a class="score-text"
+                                   href="@WisdomRoute.Detail(ProjectId, item.WisdomId, WisdomLens.Active)">@wisdom.Text</a>
+                                <span class="score-facts">
+                                    ×@wisdom.Reinforcement@(item.Salient ? " · salient" : "")
+                                    · @(wisdom.ScopeProjectId == Project.GlobalId ? "Global" : "this project")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="score-text is-gone">
+                                    A Wisdom hard-deleted since (§10) — it was injected all the same.
+                                </span>
+                                <span class="score-facts"></span>
+                            }
+                            <span class="score-value">@InjectionDisplay.Score(item.Score)</span>
+                        </div>
+                    }
+                </div>
+                <p class="detail-note">
+                    <code class="detail-formula">@_formula.Expression</code> — @_formula.Factors
+                    Reinforcement, salience and scope are each read now rather than as of the
+                    injection: §3 records the score a lane arrived at, never the factors it got
+                    there by. They explain a rank; they do not reproduce one.
+                </p>
+            }
+
+            <div class="detail-actions">
+                <span class="detail-actions-label">Mark the entry</span>
+                <button class="btn @(Entry.Verdict == InjectionVerdict.Useful ? "btn-primary" : "btn-secondary")"
+                        @onclick="() => OnMark.InvokeAsync(InjectionVerdict.Useful)">Useful</button>
+                <button class="btn @(Entry.Verdict == InjectionVerdict.Noise ? "btn-primary" : "btn-secondary")"
+                        @onclick="() => OnMark.InvokeAsync(InjectionVerdict.Noise)">Noise</button>
+                <span class="detail-actions-note">
+                    One mark for the whole entry, not per line.@(Entry.VerdictAt is { } markedAt
+                        ? $" Marked {EpisodeDisplay.Stamp(markedAt)}." : "")
+                </span>
+
+                <span class="detail-promote">
+                    @if (Entry.PromotedCaseId is not null)
+                    {
+                        <span class="detail-promoted" title="A GoldenCase carries this entry's query (§9)">
+                            Promoted to golden
+                        </span>
+                    }
+                    else if (Entry.CanPromote)
+                    {
+                        <button class="btn btn-secondary" @onclick="() => OnPromote.InvokeAsync()">
+                            Promote to golden
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="detail-cannot-promote">
+                            Promote to golden — @InjectionDisplay.CannotPromote(Entry)
+                        </span>
+                    }
+                </span>
+            </div>
+        </article>
+    </div>
+
+    <div class="pane-detail-footer">
+        <p>
+            Three lanes write here. <strong>Brief</strong> fills up to
+            @Options.BriefBudgetChars.ToString("N0") chars once at SessionStart.
+            <strong>Prompt</strong> fills up to @Options.PromptBudgetChars.ToString("N0") mid-session,
+            and only when the best match reaches @Options.PromptGateCosine cosine — most prompts
+            inject nothing. <strong>MCP</strong> is the session asking. An empty decision leaves no
+            row at all.
+        </p>
+    </div>
+</main>
+
+@code {
+    [Parameter, EditorRequired]
+    public InjectionLogEntry Entry { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public RecallOptions Options { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public EventCallback<InjectionVerdict> OnMark { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback OnPromote { get; set; }
+
+    /// <summary>
+    /// The Project whose surface this is, for the Wisdom links — never the injected Wisdom's own
+    /// scope, which may be Global and whose page is reached through whichever Project is being
+    /// browsed.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    private string? _payload;
+    private int? _budget;
+    private ScoringFormula _formula = null!;
+
+    /// <summary>
+    /// Built once per parameter change rather than once per reference. The markup reads the payload
+    /// five times in a single render — the two branch tests, the text, and both sides of the drift
+    /// compare — and a mark or a promote hands down a freshly-read entry record every time, so as
+    /// expression-bodied properties these rebuilt the whole wrapper on each of them.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        _payload = InjectionDisplay.Payload(Entry.Lane, Entry.Items);
+        _budget = InjectionDisplay.Budget(Entry.Lane, Options);
+        _formula = InjectionDisplay.Formula(Entry.Lane, Options);
+    }
+}

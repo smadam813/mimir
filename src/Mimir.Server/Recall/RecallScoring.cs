@@ -5,6 +5,9 @@ namespace Mimir.Server.Recall;
 /// <summary>
 /// The §7 ranking factors as pure arithmetic: the Brief's query-free score and the query
 /// ranking's per-hit multiplier, sharing the recency factor.
+///
+/// The §8.3 surface states both expressions back to a curator in words
+/// (<c>Ui.InjectionDisplay.Formula</c>) — change either shape here and change it there.
 /// </summary>
 internal static class RecallScoring
 {

@@ -295,7 +295,7 @@
     private string? _error;
 
     private IDisposable? _claim;
-    private CancellationTokenSource? _debounce;
+    private Debouncer? _debounce;
     private int _generation;
 
     private string ProjectName => _project?.DisplayName ?? "this Project";
@@ -329,6 +329,10 @@
 
     protected override void OnInitialized()
     {
+        // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
+        // answering each one — the same debounce the chassis's own live readouts use (#89).
+        _debounce = new Debouncer(DebounceDelay, Logger, "Wisdom listing refresh");
+
         // One search box, claimed by whichever surface is on screen (§8). Claiming before
         // subscribing keeps the claim's own reset from costing a query the first load already does.
         _claim = Search.Claim(this, "Search this Project's Wisdom…");
@@ -367,37 +371,7 @@
     private static string Pressed(bool active) => active ? "true" : "false";
 
     private void OnSearchChanged()
-    {
-        _debounce?.Cancel();
-        _debounce?.Dispose();
-        var cts = new CancellationTokenSource();
-        _debounce = cts;
-        _ = DebouncedRefreshAsync(cts.Token);
-    }
-
-    /// <summary>
-    /// Typing narrows the list live, so the query waits out a burst of keystrokes rather than
-    /// answering each one — the same debounce the chassis's own live readouts use (#89).
-    /// </summary>
-    private async Task DebouncedRefreshAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(DebounceDelay, cancellationToken);
-            await InvokeAsync(RefreshAsync);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a later keystroke before the debounce elapsed.
-        }
-        catch (Exception ex)
-        {
-            // Fire-and-forget from the search callback: without this, a transient Postgres failure
-            // here is a silently swallowed exception rather than a stale-but-visible list — the
-            // same arm, for the same reason, that AppHeader and ProjectSidebar carry.
-            Logger.LogWarning(ex, "Wisdom listing refresh failed");
-        }
-    }
+        => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
 
     private async Task RefreshAsync()
     {
@@ -518,7 +492,6 @@
     {
         Search.Changed -= OnSearchChanged;
         _claim?.Dispose();
-        _debounce?.Cancel();
         _debounce?.Dispose();
     }
 }
