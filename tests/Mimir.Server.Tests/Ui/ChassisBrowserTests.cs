@@ -225,13 +225,10 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     {
         var project = await AddProjectAsync("recall");
         var other = await AddProjectAsync("other");
-        await AddInjectionAsync(project.Id, sessionId: "useful");
-        await AddInjectionAsync(project.Id, sessionId: "noise");
+        await AddInjectionAsync(project.Id, sessionId: "useful", verdict: InjectionVerdict.Useful);
+        await AddInjectionAsync(project.Id, sessionId: "noise", verdict: InjectionVerdict.Noise);
         await AddInjectionAsync(project.Id, sessionId: "unmarked");
-        await AddInjectionAsync(other.Id, sessionId: "elsewhere");
-        await MarkAsync(project.Id, "useful", InjectionVerdict.Useful);
-        await MarkAsync(project.Id, "noise", InjectionVerdict.Noise);
-        await MarkAsync(other.Id, "elsewhere", InjectionVerdict.Useful);
+        await AddInjectionAsync(other.Id, sessionId: "elsewhere", verdict: InjectionVerdict.Useful);
 
         var attention = await Browser().GetRecallAttentionAsync(project.Id, Token);
 
@@ -278,15 +275,6 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
 
         (await FromDb(db => db.Episodes.CountAsync(Token))).ShouldBe(0);
         (await Browser().IsFirstRunAsync(Token)).ShouldBeFalse();
-    }
-
-    private async Task MarkAsync(Guid projectId, string sessionId, InjectionVerdict verdict)
-    {
-        var injection = await Context.Injections
-            .SingleAsync(i => i.ProjectId == projectId && i.SessionId == sessionId, Token);
-        injection.Verdict = verdict;
-        injection.VerdictAt = Now;
-        await Context.SaveChangesAsync(Token);
     }
 
     private ChassisBrowser Browser() => new(Contexts, Clock);

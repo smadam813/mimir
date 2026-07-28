@@ -93,171 +93,248 @@
         </div>
     </section>
 
-    <main class="detail-pane">
-        @if (SelectedId is null)
-        {
-            <p class="pane-note detail-empty">
-                Pick a Wisdom to read it, edit its words, or retire it. The list beside this is
-                everything a session in this repository recalls (§7).
-            </p>
-        }
-        else if (_detail is not { } detail)
-        {
-            <p class="pane-note detail-empty">
-                Nothing lives at this id — most likely it was deleted with its chain (§10).
-                <a href="@ListHref">Back to the list</a>
-            </p>
-        }
-        else
-        {
-            var entry = detail.Entry;
-
-            <div class="detail-head">
-                <span class="detail-kind"><KindGlyph Kind="entry.Kind" />@entry.Kind</span>
-                <span class="detail-sep">/</span>
-                <span class="detail-fact">scope <strong>@entry.ScopeName</strong></span>
-                <span class="detail-sep">/</span>
-                <span class="detail-fact">×@entry.Reinforcement reinforcement</span>
-                <span class="detail-sep">/</span>
-                <span class="detail-fact">confirmed @EpisodeDisplay.Stamp(entry.LastConfirmedAt)</span>
-            </div>
-
-            @if (entry.ContestedAt is { } contestedAt)
+    <div class="detail-frame">
+        <main class="detail-pane">
+            @if (SelectedId is null)
             {
-                <p class="detail-state state-accent">
-                    Contested since @EpisodeDisplay.Stamp(contestedAt) — it survived an adjudication
-                    against a contradicting claim (§6.4).
+                <p class="pane-note detail-empty">
+                    Pick a Wisdom to read it, edit its words, or retire it. The list beside this is
+                    everything a session in this repository recalls (§7).
                 </p>
             }
-            @if (entry.RetiredAt is { } retiredAt)
+            else if (_detail is not { } detail)
             {
-                <p class="detail-state">
-                    Retired since @EpisodeDisplay.Stamp(retiredAt) — out of all recall and default
-                    search, reversibly (§10).
+                <p class="pane-note detail-empty">
+                    Nothing lives at this id — most likely it was deleted with its chain (§10).
+                    <a href="@ListHref">Back to the list</a>
                 </p>
-            }
-            @if (entry.SupersededBy is { } successor)
-            {
-                <p class="detail-state">
-                    Superseded by <a href="@DetailHref(successor)">the ruling's survivor</a>.
-                </p>
-            }
-
-            @if (_mode is DetailMode.Editing)
-            {
-                <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
-                          aria-label="Edited Wisdom text"></textarea>
-                <div class="detail-actions">
-                    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">Save edit</button>
-                    <button class="btn btn-secondary" disabled="@_saving"
-                            @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
-                </div>
             }
             else
             {
-                <p class="detail-text @(entry.RetiredAt is not null ? "is-retired" : null)">@entry.Text</p>
-                <div class="detail-actions">
-                    <button class="btn btn-secondary" @onclick="() => BeginEdit(entry)">Edit</button>
-                    @if (entry.RetiredAt is null)
+                var entry = detail.Entry;
+
+                <div class="detail-head">
+                    <span class="detail-kind"><KindGlyph Kind="entry.Kind" />@entry.Kind</span>
+                    <span class="detail-sep">/</span>
+                    <span class="detail-fact">scope <strong>@entry.ScopeName</strong></span>
+                    @if (detail.FirstVersionAt is { } first)
                     {
-                        <button class="btn btn-secondary"
-                                title="Reversibly exclude from recall and default search (§10)"
-                                @onclick="RetireAsync">
-                            Retire
-                        </button>
-                    }
-                    else
-                    {
-                        <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
+                        <span class="detail-sep">/</span>
+                        <span class="detail-fact">first written @EpisodeDisplay.Stamp(first)</span>
                     }
                 </div>
-            }
-            @if (_error is not null)
-            {
-                <p class="detail-error" role="alert">@_error</p>
-            }
 
-            <h5 class="detail-section">Versions</h5>
-            <ol class="version-list">
-                @foreach (var version in detail.Versions)
+                @if (entry.ContestedAt is { } contestedAt)
                 {
-                    <li class="version-row">
-                        <span class="version-seq">v@(version.Version)</span>
-                        <span class="version-cause">@version.Cause.ToString().ToLowerInvariant()</span>
-                        <span class="version-at">@EpisodeDisplay.Stamp(version.CreatedAt)</span>
-                        <p class="version-text">@version.Text</p>
-                    </li>
+                    <p class="detail-state state-accent">
+                        Contested since @EpisodeDisplay.Stamp(contestedAt) — it survived an adjudication
+                        against a contradicting claim (§6.4).
+                    </p>
                 }
-            </ol>
+                @if (entry.RetiredAt is { } retiredAt)
+                {
+                    <p class="detail-state">
+                        Retired since @EpisodeDisplay.Stamp(retiredAt) — out of all recall and default
+                        search, reversibly (§10). Its words stay editable, and an edit never unretires it.
+                    </p>
+                }
+                @if (entry.SupersededBy is { } successor)
+                {
+                    <p class="detail-state">
+                        Superseded by <a href="@DetailHref(successor)">the ruling's survivor</a>.
+                    </p>
+                }
 
-            <h5 class="detail-section">Where this came from</h5>
-            @if (entry.OrphanedProvenance)
-            {
-                <p class="detail-orphaned">
-                    Orphaned: every record this Wisdom derived from was hard-deleted (§3). The
-                    Wisdom and its versions survive; only the trail back to those records is gone.
-                </p>
-            }
-            else
-            {
-                <ul class="provenance">
-                    @foreach (var link in detail.Provenance)
+                @if (_mode is DetailMode.Editing)
+                {
+                    <div class="text-head">
+                        <h6 class="text-title is-editing">
+                            The text · editing v@(detail.Versions.Count) → v@(detail.Versions.Count + 1)
+                        </h6>
+                        <span class="text-count">@WisdomDisplay.CharacterCount(_draft.Length)</span>
+                    </div>
+                    <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
+                              aria-label="Edited Wisdom text"></textarea>
+                    <div class="detail-actions">
+                        <button class="btn btn-primary"
+                                disabled="@(_saving || WisdomDisplay.UnsavableReason(_draft, entry.Text) is not null)"
+                                @onclick="SaveAsync">
+                            Save edit
+                        </button>
+                        <button class="btn btn-secondary" disabled="@_saving"
+                                @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                        @if (WisdomDisplay.UnsavableReason(_draft, entry.Text) is { } why)
+                        {
+                            <span class="detail-hint">@why</span>
+                        }
+                    </div>
+
+                    @* §8.1's own acceptance criterion: what saving does, on the screen rather than
+                       in the spec. It restates MergeGate.EditAsync — change that rule and change
+                       this sentence with it. *@
+                    <p class="edit-explains">
+                        Saving goes through the <strong>Merge Gate</strong>: it appends
+                        <strong>v@(detail.Versions.Count + 1) · cause=edited</strong>, re-embeds the
+                        new text, and waits behind any in-flight Admission batch. Reinforcement stays
+                        <strong>×@entry.Reinforcement</strong> and recency does not move — an edit
+                        rewords, it does not confirm (§6).
+                    </p>
+                }
+                else
+                {
+                    <p class="detail-text @(entry.RetiredAt is not null ? "is-retired" : null)">@entry.Text</p>
+                    <div class="detail-actions">
+                        <button class="btn btn-secondary" @onclick="() => BeginEdit(entry)">Edit</button>
+                        @if (entry.RetiredAt is null)
+                        {
+                            <button class="btn btn-secondary"
+                                    title="Reversibly exclude from recall and default search (§10)"
+                                    @onclick="RetireAsync">
+                                Retire
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
+                        }
+                        <span class="detail-hint">@WisdomDisplay.RetireHint(entry.RetiredAt is not null)</span>
+                    </div>
+                }
+                @if (_error is not null)
+                {
+                    <p class="detail-error" role="alert">@_error</p>
+                }
+
+                <h5 class="detail-section">Versions</h5>
+                <ol class="version-list">
+                    @foreach (var version in detail.Versions)
                     {
-                        <li class="provenance-row">
-                            @if (link.EventId is not null)
-                            {
-                                <a href="@EpisodeHref(link)">Event #@link.EventSeq · @link.EventType</a>
-                                <span class="provenance-meta">in @link.SessionId</span>
-                            }
-                            else if (link.EpisodeId is not null)
-                            {
-                                <a href="@EpisodeHref(link)">Episode @link.SessionId</a>
-                            }
-                            else if (link.HarvestedItemId is null)
-                            {
-                                <span class="provenance-meta">
-                                    deliberate save — recorded outside any Episode (§7.1)
-                                </span>
-                            }
-                            @if (link.HarvestedPath is not null)
-                            {
-                                <span class="provenance-meta" title="Harvested Item (§5)">
-                                    harvested · @link.HarvestedPath
-                                </span>
-                            }
+                        <li class="version-row">
+                            <span class="version-seq">v@(version.Version)</span>
+                            <span class="version-cause">@version.Cause.ToString().ToLowerInvariant()</span>
+                            <span class="version-at">@EpisodeDisplay.Stamp(version.CreatedAt)</span>
+                            <p class="version-text">@version.Text</p>
                         </li>
                     }
-                </ul>
-            }
+                </ol>
 
-            @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
-               which is not (§10). Absent entirely while the editor is open, so "Delete forever"
-               can never be the click that throws away a draft the curator is still typing. *@
-            @if (_mode is not DetailMode.Editing)
-            {
-                <div class="detail-danger">
-                    @if (_mode is DetailMode.ConfirmingDelete)
-                    {
-                        <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
-                            <span class="confirm-prompt">
-                                Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+                @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
+                   which is not (§10). Absent entirely while the editor is open, so "Delete forever"
+                   can never be the click that throws away a draft the curator is still typing. *@
+                @if (_mode is not DetailMode.Editing)
+                {
+                    <div class="detail-danger">
+                        @if (_mode is DetailMode.ConfirmingDelete)
+                        {
+                            <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
+                                <span class="confirm-prompt">
+                                    Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+                                    Nothing reverses this.
+                                </span>
+                                <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
+                                <button class="btn btn-secondary"
+                                        @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
                             </span>
-                            <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
-                            <button class="btn btn-secondary"
-                                    @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-secondary danger-outline"
+                                    @onclick="() => _mode = DetailMode.ConfirmingDelete">
+                                Delete Wisdom…
+                            </button>
+                        }
+                    </div>
+                }
+            }
+        </main>
+
+        @* The numbers a curator judges by: what has confirmed this Wisdom, what Recall has done
+           with it, and what it came from. Only ever beside a Wisdom — an aside of blanks over the
+           unselected placeholder would be three headings claiming nothing. *@
+        @if (_detail is { } aside)
+        {
+            <aside class="detail-aside">
+                <div>
+                    <h6>Reinforcement</h6>
+                    <div class="aside-figure">
+                        <span class="aside-figure-value">@aside.Entry.Reinforcement.ToString("N0")</span>
+                        <span class="aside-figure-unit">
+                            @WisdomDisplay.ReinforcementUnit(aside.Entry.Reinforcement)
                         </span>
+                    </div>
+                    <div class="reinforcement-bar" aria-hidden="true">
+                        @for (var segment = 0; segment < WisdomDisplay.ReinforcementBarSegments; segment++)
+                        {
+                            <i class="@(segment < WisdomDisplay.ReinforcementFilled(aside.Entry.Reinforcement)
+                                        ? "is-lit" : null)"></i>
+                        }
+                    </div>
+                    <p class="aside-note">
+                        last confirmed @EpisodeDisplay.Stamp(aside.Entry.LastConfirmedAt) — an
+                        Admission moves this, an edit does not (§6).
+                    </p>
+                </div>
+
+                <div>
+                    <h6>Recall</h6>
+                    <dl class="aside-rows">
+                        @foreach (var lane in aside.Recall.Lanes)
+                        {
+                            <dt @key="lane.Lane">@InjectionDisplay.Name(lane.Lane) lane</dt>
+                            <dd class="is-strong">@lane.Entries.ToString("N0")</dd>
+                        }
+                        <dt>Marked useful</dt><dd class="is-accent">@aside.Recall.MarkedUseful.ToString("N0")</dd>
+                        <dt>Marked noise</dt><dd>@aside.Recall.MarkedNoise.ToString("N0")</dd>
+                    </dl>
+                    <p class="aside-note">@WisdomDisplay.RecallNote(aside.Recall)</p>
+                </div>
+
+                <div>
+                    <div class="aside-head">
+                        <h6>Where this came from</h6>
+                        <span class="aside-head-count">@aside.Provenance.Count</span>
+                    </div>
+                    @if (aside.Entry.OrphanedProvenance)
+                    {
+                        <p class="aside-orphaned">
+                            Orphaned: every Episode, Event and Harvested Item this Wisdom derived
+                            from was deleted, and the cascade took the links with them (§3). The
+                            words and the version chain survive; only the trail back is gone, and
+                            nothing reverses it.
+                        </p>
                     }
                     else
                     {
-                        <button class="btn btn-secondary danger-outline"
-                                @onclick="() => _mode = DetailMode.ConfirmingDelete">
-                            Delete Wisdom…
-                        </button>
+                        <div class="aside-links">
+                            @foreach (var link in aside.Provenance)
+                            {
+                                @if (link.EpisodeId is not null)
+                                {
+                                    <a class="aside-link" @key="link.Id" href="@EpisodeHref(link)">
+                                        <span class="aside-link-title">@WisdomDisplay.ProvenanceTitle(link)</span>
+                                        <span class="aside-link-detail">@WisdomDisplay.ProvenanceDetail(link)</span>
+                                    </a>
+                                }
+                                else
+                                {
+                                    @* Nothing to open: a harvested file and a deliberate save are
+                                       records with no §8.2 surface of their own. *@
+                                    <span class="aside-link" @key="link.Id">
+                                        <span class="aside-link-title">@WisdomDisplay.ProvenanceTitle(link)</span>
+                                        <span class="aside-link-detail">@WisdomDisplay.ProvenanceDetail(link)</span>
+                                    </span>
+                                }
+                            }
+                        </div>
+                        @if (WisdomDisplay.ProvenanceNote(aside.Provenance) is { } promise)
+                        {
+                            <p class="aside-note">@promise</p>
+                        }
                     }
                 </div>
-            }
+            </aside>
         }
-    </main>
+    </div>
 </div>
 
 @code {

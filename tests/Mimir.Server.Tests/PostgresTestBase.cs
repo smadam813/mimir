@@ -308,7 +308,10 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
 
     /// <summary>
     /// One logged injection (§3). <paramref name="items"/> are the injected Wisdom and the scores
-    /// that ordered them, in rank order.
+    /// that ordered them, in rank order. <paramref name="verdict"/> seeds the §9 mark a curator
+    /// would have left, stamped at the base clock — every figure read off the mark wants entries
+    /// already carrying one, and marking them through the browser afterwards is the same row
+    /// written twice.
     /// </summary>
     private protected async Task<Injection> AddInjectionAsync(
         Guid projectId,
@@ -317,7 +320,8 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         string? queryContext = "a prompt",
         DateTimeOffset? at = null,
         int chars = 240,
-        IReadOnlyList<(Guid WisdomId, double Score)>? items = null)
+        IReadOnlyList<(Guid WisdomId, double Score)>? items = null,
+        InjectionVerdict? verdict = null)
     {
         var injection = new Injection
         {
@@ -330,6 +334,8 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Chars = chars,
             Items = [.. (items ?? []).Select(
                 i => new InjectionItem { WisdomId = i.WisdomId, Score = i.Score })],
+            Verdict = verdict,
+            VerdictAt = verdict is null ? null : at ?? Now,
         };
         Context.Injections.Add(injection);
         await Context.SaveChangesAsync(Token);

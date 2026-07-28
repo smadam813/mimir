@@ -236,11 +236,159 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         var fromEvent = detail.Provenance.Single(s => s.EventId == evt.Id);
         fromEvent.EpisodeId.ShouldBe(episode.Id);
         fromEvent.EpisodeProjectId.ShouldBe(project.Id);
-        fromEvent.SessionId.ShouldBe(episode.SessionId);
         fromEvent.EventSeq.ShouldBe(3);
         fromEvent.EventType.ShouldBe(EventType.PostToolUse);
         var fromHarvest = detail.Provenance.Single(s => s.HarvestedItemId == item.Id);
         fromHarvest.HarvestedPath.ShouldBe(item.Path);
+    }
+
+    /// <summary>
+    /// What the aside names each Provenance by (§8.1): the moment itself and where the session ran,
+    /// rather than the ids the link is followed by. Seeded away from the Episode's own times so a
+    /// line reading the wrong column cannot come out right by accident.
+    /// </summary>
+    [Fact]
+    public async Task TheProvenanceDrillDown_CarriesTheMomentAndTheWorkingDirectory()
+    {
+        var project = await AddProjectAsync("recognisable");
+        var episode = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-3));
+        var evt = await AddEventAsync(episode.Id, seq: 2, EventType.Remember, at: Now.AddHours(-2));
+        var wisdom = await AddWisdomAsync(project.Id, "a remembered fact");
+        await AddProvenanceAsync(wisdom.Id, episode.Id, evt.Id);
+        await AddProvenanceAsync(wisdom.Id, episode.Id);
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        detail.ShouldNotBeNull();
+        var fromEvent = detail.Provenance.Single(s => s.EventId == evt.Id);
+        fromEvent.EventAt.ShouldBe(Now.AddHours(-2));
+        fromEvent.EpisodeCwd.ShouldBe(episode.Cwd);
+        fromEvent.EpisodeStartedAt.ShouldBe(Now.AddHours(-3));
+        var fromEpisode = detail.Provenance.Single(s => s.EventId is null);
+        fromEpisode.EventAt.ShouldBeNull();
+        fromEpisode.EpisodeCwd.ShouldBe(episode.Cwd);
+        fromEpisode.EpisodeStartedAt.ShouldBe(Now.AddHours(-3));
+    }
+
+    /// <summary>
+    /// The aside's lane figures, aggregated over the injected-items payload: every lane that
+    /// carried this Wisdom, counted across every Project — a Global Wisdom is recalled from all of
+    /// them, so a figure scoped to the sidebar's selection would change with it. The three lanes'
+    /// counts are deliberately distinct, so swapping any two arms reddens this.
+    /// </summary>
+    [Fact]
+    public async Task TheDetail_CountsEveryLaneThatRecalledIt_AcrossEveryProject()
+    {
+        var here = await AddProjectAsync("recalled here");
+        var elsewhere = await AddProjectAsync("recalled elsewhere");
+        var wisdom = await AddWisdomAsync(Project.GlobalId, "a much-recalled fact");
+        await AddInjectionAsync(
+            here.Id, lane: InjectionLane.Brief, queryContext: null, items: [(wisdom.Id, 4.0)]);
+        for (var i = 0; i < 2; i++)
+        {
+            await AddInjectionAsync(here.Id, lane: InjectionLane.Prompt, items: [(wisdom.Id, 0.04)]);
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            await AddInjectionAsync(elsewhere.Id, lane: InjectionLane.Mcp, items: [(wisdom.Id, 0.02)]);
+        }
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Recall.Lanes.Select(l => (l.Lane, l.Entries)).ShouldBe(
+            [(InjectionLane.Brief, 1), (InjectionLane.Prompt, 2), (InjectionLane.Mcp, 3)]);
+        detail.Recall.Injections.ShouldBe(6);
+    }
+
+    /// <summary>The §9 mark is per entry, so it counts against every line that entry carried.</summary>
+    [Fact]
+    public async Task TheDetail_CountsTheMarksLeftOnTheEntriesThatCarriedIt()
+    {
+        var project = await AddProjectAsync("judged");
+        var wisdom = await AddWisdomAsync(project.Id, "a judged fact");
+        await AddInjectionAsync(
+            project.Id, items: [(wisdom.Id, 0.04)], verdict: InjectionVerdict.Useful);
+        await AddInjectionAsync(
+            project.Id, items: [(wisdom.Id, 0.04)], verdict: InjectionVerdict.Useful);
+        await AddInjectionAsync(
+            project.Id, items: [(wisdom.Id, 0.04)], verdict: InjectionVerdict.Noise);
+        await AddInjectionAsync(project.Id, items: [(wisdom.Id, 0.04)]);
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Recall.MarkedUseful.ShouldBe(2);
+        detail.Recall.MarkedNoise.ShouldBe(1);
+        detail.Recall.Injections.ShouldBe(
+            4, "an entry nobody has judged still recalled this Wisdom");
+        detail.Recall.Unmarked.ShouldBe(1, "which is what the aside says is left to judge");
+    }
+
+    /// <summary>
+    /// The figures are this line's, not its neighbours' on the same payload: an entry that carried
+    /// something else counts nowhere here, mark included.
+    /// </summary>
+    [Fact]
+    public async Task TheDetail_CountsNoEntryThatCarriedAnotherWisdomAlone()
+    {
+        var project = await AddProjectAsync("carriers");
+        var subject = await AddWisdomAsync(project.Id, "the line under judgement");
+        var other = await AddWisdomAsync(project.Id, "a line injected beside it");
+        await AddInjectionAsync(
+            project.Id, items: [(other.Id, 0.04)], verdict: InjectionVerdict.Useful);
+        await AddInjectionAsync(project.Id, items: [(other.Id, 0.04), (subject.Id, 0.02)]);
+
+        var detail = await Browser().GetAsync(subject.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Recall.Injections.ShouldBe(1);
+        detail.Recall.MarkedUseful.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Every lane, including the ones that never carried it: a row dropped at zero reads as "this
+    /// lane cannot recall it" rather than "this lane never has" — the rule the §8.3 chips keep.
+    /// </summary>
+    [Fact]
+    public async Task TheDetail_OfNeverRecalledWisdom_StillNamesEveryLane()
+    {
+        var wisdom = await AddWisdomAsync(Project.GlobalId, "nothing has recalled this");
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Recall.Lanes.Select(l => (l.Lane, l.Entries)).ShouldBe(
+            [(InjectionLane.Brief, 0), (InjectionLane.Prompt, 0), (InjectionLane.Mcp, 0)]);
+        detail.Recall.Injections.ShouldBe(0);
+        detail.Recall.MarkedUseful.ShouldBe(0);
+        detail.Recall.MarkedNoise.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The head's "first version" stamp: the foot of the chain, not the row's own recency, which an
+    /// Admission moves and an edit does not. Seeded so the two differ.
+    /// </summary>
+    [Fact]
+    public async Task TheDetail_DatesTheChainFromItsOldestVersion()
+    {
+        var wisdom = await AddWisdomAsync(
+            Project.GlobalId, "reworded since", lastConfirmedAt: Now.AddDays(-5));
+        Context.WisdomVersions.Add(new WisdomVersion
+        {
+            WisdomId = wisdom.Id,
+            Version = 2,
+            Text = "reworded since",
+            CreatedAt = Now,
+            Cause = WisdomVersionCause.Edited,
+        });
+        await Context.SaveChangesAsync(Token);
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.FirstVersionAt.ShouldBe(Now.AddDays(-5));
     }
 
     [Fact]

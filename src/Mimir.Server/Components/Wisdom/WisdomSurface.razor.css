@@ -1,5 +1,6 @@
-/* The §8.1 screen, on Nocturne's tokens (#91). Two panes side by side, each scrolling on its own
-   so the composition holds still while a curator reads. */
+/* The §8.1 screen, on Nocturne's tokens (#91, #92). A 400px list, the detail, and the 283px aside
+   carrying that Wisdom's numbers — each scrolling on its own so the composition holds still while a
+   curator reads. */
 .wisdom-surface {
     flex: 1;
     min-height: 0;
@@ -170,15 +171,24 @@
     color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
+/* The detail and its aside share one frame, so the accent wash behind them is one wash rather
+   than two that meet at a seam. */
+.detail-frame {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+    background: radial-gradient(
+        120% 70% at 50% -10%,
+        color-mix(in srgb, var(--color-accent) 9%, transparent),
+        transparent 70%);
+}
+
 .detail-pane {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
     padding: var(--space-8) 28px;
-    background: radial-gradient(
-        120% 70% at 50% -10%,
-        color-mix(in srgb, var(--color-accent) 9%, transparent),
-        transparent 70%);
 }
 
 .pane-note {
@@ -244,6 +254,35 @@
     color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
+/* ── The editor ───────────────────────────────────────────────────────────────────────────── */
+
+.text-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    max-width: 44rem;
+    margin-bottom: var(--space-3);
+}
+
+.text-title {
+    margin: 0;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.text-title.is-editing {
+    color: var(--color-accent);
+}
+
+.text-count {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
 .detail-editor {
     display: block;
     width: 100%;
@@ -257,7 +296,32 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    flex-wrap: wrap;
+    max-width: 44rem;
     margin-bottom: var(--space-4);
+}
+
+.detail-hint {
+    font-size: 11.5px;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+/* What saving does, in words, beside the button that does it (§8.1). */
+.edit-explains {
+    max-width: 44rem;
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+    box-shadow: inset 1px 0 0 var(--color-accent);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.edit-explains strong {
+    font-weight: var(--font-heading-weight);
+    color: var(--color-text);
 }
 
 .detail-error {
@@ -274,8 +338,7 @@
     color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
-.version-list,
-.provenance {
+.version-list {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -319,22 +382,151 @@
     color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
-.provenance-row {
+/* ── The aside ────────────────────────────────────────────────────────────────────────────── */
+
+.detail-aside {
+    flex: none;
+    width: 283px;
+    padding: var(--space-8) 28px var(--space-8) var(--space-8);
+    border-left: 1px solid var(--color-divider);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.detail-aside h6 {
+    margin: 0 0 var(--space-3);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.aside-head {
     display: flex;
     align-items: baseline;
+    justify-content: space-between;
     gap: var(--space-3);
-    flex-wrap: wrap;
-    font-size: 13px;
 }
 
-.provenance-meta {
+.aside-head-count {
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
+.aside-figure {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.aside-figure-value {
+    font-size: 34px;
+    font-weight: var(--font-heading-weight);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.aside-figure-unit {
+    font-size: 11.5px;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* A fixed row of segments, so one confirmation and eleven look different without the figure
+   above being read. WisdomDisplay decides how many light. */
+.reinforcement-bar {
+    display: flex;
+    gap: 3px;
+    margin-top: var(--space-3);
+}
+
+.reinforcement-bar i {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.reinforcement-bar i.is-lit {
+    background: var(--color-accent);
+}
+
+.aside-rows {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px var(--space-4);
+    margin: 0;
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.aside-rows dt,
+.aside-rows dd {
+    margin: 0;
+}
+
+.aside-rows dd {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
     color: color-mix(in srgb, var(--color-text) 55%, transparent);
-    word-break: break-all;
 }
 
-.detail-orphaned {
-    max-width: 44rem;
-    font-size: 13px;
+.aside-rows dd.is-accent {
+    color: var(--color-accent-400);
+}
+
+.aside-rows dd.is-strong {
+    color: var(--color-text);
+}
+
+.aside-note {
+    margin: var(--space-3) 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.aside-links {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 calc(var(--space-3) * -1);
+}
+
+.aside-link {
+    display: block;
+    padding: 7px var(--space-3);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: inherit;
+}
+
+a.aside-link:hover {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.aside-link-title {
+    display: block;
+    font-size: 12.5px;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--color-text) 82%, transparent);
+}
+
+.aside-link-detail {
+    display: block;
+    font-size: 11px;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--color-text) 57%, transparent);
+    overflow-wrap: anywhere;
+}
+
+/* Orphaned is a data-integrity state, which is what --color-danger is for (#86). */
+.aside-orphaned {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
     color: var(--color-danger);
 }
 
