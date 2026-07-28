@@ -202,6 +202,100 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     }
 
     [Fact]
+    public async Task TheDrillDown_NamesTheWisdomThisEpisodeProduced_NewestConfirmationFirst()
+    {
+        var project = await AddProjectAsync("produced");
+        var episode = await AddEpisodeAsync(project.Id);
+        // Seeded out of the order asserted, so a dropped ORDER BY cannot pass on insertion order.
+        var older = await AddWisdomAsync(
+            project.Id, "prefer ripgrep", lastConfirmedAt: Now.AddDays(-3), kind: WisdomKind.Preference);
+        var newer = await AddWisdomAsync(Project.GlobalId, "always run the linter", lastConfirmedAt: Now);
+        await AddProvenanceAsync(older.Id, episodeId: episode.Id);
+        await AddProvenanceAsync(newer.Id, episodeId: episode.Id);
+
+        var detail = await Browser().GetEpisodeAsync(episode.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Produced.Select(w => w.Id).ShouldBe([newer.Id, older.Id]);
+        detail.Produced[1].Kind.ShouldBe(WisdomKind.Preference);
+        detail.Produced[1].Text.ShouldBe("prefer ripgrep");
+        detail.Produced[1].IsGlobal.ShouldBeFalse();
+        detail.Produced[0].IsGlobal.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task WisdomDrawnFromSeveralOfOneEpisodesEvents_IsOneLine()
+    {
+        // The gate writes one Provenance row per provenance Event (§6), so a line drawn from three
+        // moments of one session is one thing the session produced, not three.
+        var project = await AddProjectAsync("distinct-detail");
+        var episode = await AddEpisodeAsync(project.Id);
+        var first = await AddEventAsync(episode.Id, seq: 1);
+        var second = await AddEventAsync(episode.Id, seq: 2);
+        var wisdom = await AddWisdomAsync(project.Id, "one lesson");
+        await AddProvenanceAsync(wisdom.Id, episodeId: episode.Id, eventId: first.Id);
+        await AddProvenanceAsync(wisdom.Id, episodeId: episode.Id, eventId: second.Id);
+
+        var detail = await Browser().GetEpisodeAsync(episode.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Produced.Select(w => w.Id).ShouldBe([wisdom.Id]);
+    }
+
+    [Fact]
+    public async Task RetiredWisdom_StopsBeingSomethingTheEpisodeProduced()
+    {
+        // The one convention every Wisdom figure in the chassis keeps, and the drill-down has to
+        // agree with the row the curator arrived from.
+        var project = await AddProjectAsync("retired-detail");
+        var episode = await AddEpisodeAsync(project.Id);
+        var standing = await AddWisdomAsync(project.Id, "still true");
+        var retired = await AddWisdomAsync(project.Id, "was true", retiredAt: Now);
+        await AddProvenanceAsync(standing.Id, episodeId: episode.Id);
+        await AddProvenanceAsync(retired.Id, episodeId: episode.Id);
+
+        var detail = await Browser().GetEpisodeAsync(episode.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Produced.Select(w => w.Id).ShouldBe([standing.Id]);
+    }
+
+    [Fact]
+    public async Task AnotherEpisodesWisdom_IsNotThisOnesToClaim()
+    {
+        var project = await AddProjectAsync("scoped-detail");
+        var mine = await AddEpisodeAsync(project.Id);
+        var theirs = await AddEpisodeAsync(project.Id);
+        var wisdom = await AddWisdomAsync(project.Id, "their lesson");
+        await AddProvenanceAsync(wisdom.Id, episodeId: theirs.Id);
+
+        var detail = await Browser().GetEpisodeAsync(mine.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Produced.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TheDrillDown_CountsPromptsAlone_NotEveryEvent()
+    {
+        // §3: session start and end are not Events at all, so the turns a curator took are exactly
+        // the UserPromptSubmit rows — and a stream is mostly PostToolUse.
+        var project = await AddProjectAsync("prompts");
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddEventAsync(episode.Id, seq: 1, EventType.UserPromptSubmit);
+        await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
+        await AddEventAsync(episode.Id, seq: 3, EventType.Remember, salient: true);
+        await AddEventAsync(episode.Id, seq: 4, EventType.UserPromptSubmit);
+        await AddEventAsync(episode.Id, seq: 5, EventType.Stop);
+
+        var detail = await Browser().GetEpisodeAsync(episode.Id, Token);
+
+        detail.ShouldNotBeNull();
+        detail.Events.Count.ShouldBe(5);
+        detail.PromptCount.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task DeletingAnEvent_RemovesItAlone_AndAnnouncesTheChange()
     {
         var project = await AddProjectAsync("event-delete");

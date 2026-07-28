@@ -24,6 +24,14 @@ public enum EpisodeState
 /// </summary>
 public static class EpisodeDisplay
 {
+    /// <summary>
+    /// How many Events the drill-down's stream renders before it asks (#95). A session's stream runs
+    /// to thousands of Events and the whole of it is one scroll pane, so the bound is what keeps the
+    /// top of the record reachable; the control beside it says exactly what is being withheld, so a
+    /// bounded stream is never mistaken for a short one.
+    /// </summary>
+    public const int StreamBound = 50;
+
     public static string Stamp(DateTimeOffset at)
         => at.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'");
 
@@ -33,9 +41,108 @@ public static class EpisodeDisplay
 
     /// <summary>
     /// How a Seal reads, in the one place both §8.2 surfaces get it from: a Seal always carries a
-    /// reason, and a row missing one says so rather than reading unsealed.
+    /// reason, and a row missing one says so rather than reading unsealed. The list reaches it
+    /// through <see cref="StateLabel"/>; the drill-down's aside states it on a line of its own.
     /// </summary>
-    private static string SealPhrase(string? sealReason) => sealReason ?? "no reason";
+    public static string SealPhrase(string? sealReason) => sealReason ?? "no reason";
+
+    /// <summary>
+    /// How long the session ran, for the aside — null while it is unsealed, because a session that
+    /// has not ended has no duration recorded and counting up to now would state a figure §3 never
+    /// wrote. Reads in the largest unit it fills, days included: §4 crash-Seals an idle Episode
+    /// only after <c>CrashSealIdleAfter</c>, so the ordinary swept session is over a day old and a
+    /// three-digit hour count would be the common case rather than the odd one. Clamped at zero,
+    /// because <c>started_at</c> and <c>sealed_at</c> are written by two hosts' clocks and a
+    /// negative span would report their skew rather than the session.
+    /// </summary>
+    public static string? Duration(DateTimeOffset startedAt, DateTimeOffset? sealedAt)
+    {
+        if (sealedAt is not { } ended)
+        {
+            return null;
+        }
+
+        var span = ended - startedAt;
+        if (span < TimeSpan.Zero)
+        {
+            span = TimeSpan.Zero;
+        }
+
+        return span.TotalDays >= 1 ? $"{(int)span.TotalDays}d {span.Hours:00}h"
+            : span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes:00}m"
+            : span.TotalMinutes >= 1 ? $"{span.Minutes}m"
+            : $"{span.Seconds}s";
+    }
+
+    /// <summary>
+    /// A configured §11 interval in the words the Distillation aside states it in. Whole hours
+    /// where the value is whole, which every §11 default here is.
+    /// </summary>
+    public static string Hours(TimeSpan span) => $"{span.TotalHours:0.#} h";
+
+    /// <summary>
+    /// Where distillation actually is, for the aside. An unsealed Episode is in no queue at all —
+    /// Sealing is what enqueues (§6), while the column reads
+    /// <see cref="DistillationState.Pending"/> from the moment capture creates the row — so saying
+    /// "pending" over a live session would tell a curator it is waiting on a worker that has never
+    /// been offered it. Same rule <see cref="State"/> keeps for the list's mark, worded for a screen
+    /// that names the column.
+    /// </summary>
+    public static string DistillationPhrase(DateTimeOffset? sealedAt, DistillationState distillation)
+        => sealedAt is null
+            ? "not queued — Sealing is what enqueues"
+            : distillation.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// What the stream says about its own bound, or null when nothing is withheld and there is
+    /// nothing to say. A curator must never take a bounded stream for the whole record, so the
+    /// collapsed note names both figures.
+    /// </summary>
+    public static string? StreamBoundNote(int total, bool expanded)
+        => total <= StreamBound ? null
+            : expanded ? $"All {total:N0} Events."
+            : $"The first {StreamBound} of {total:N0} Events.";
+
+    /// <summary>
+    /// The control beside that note, or null when the stream is whole. Reversible, because a
+    /// curator who expanded a 3,000-Event stream to check one moment still wants the top of it back.
+    /// </summary>
+    public static string? StreamToggleLabel(int total, bool expanded)
+        => total <= StreamBound ? null
+            : expanded ? $"Show the first {StreamBound} only"
+            : $"Show the remaining {total - StreamBound:N0}";
+
+    /// <summary>The id prefix a §8.1 Provenance link anchors an Event by.</summary>
+    private const string EventAnchor = "event-";
+
+    /// <summary>
+    /// The Event a URL anchors, or null where it names none. §8.1's Provenance links land here as
+    /// <c>projects/{p}/episodes/{e}#event-{eventId}</c>, which is the only fragment this surface
+    /// writes an id into.
+    /// </summary>
+    public static Guid? AnchoredEvent(string uri)
+    {
+        var hash = uri.LastIndexOf('#');
+        if (hash < 0)
+        {
+            return null;
+        }
+
+        var fragment = uri[(hash + 1)..];
+        return fragment.StartsWith(EventAnchor, StringComparison.Ordinal)
+            && Guid.TryParse(fragment[EventAnchor.Length..], out var eventId)
+                ? eventId
+                : null;
+    }
+
+    /// <summary>
+    /// Whether the bound has to give way for the URL's anchor: a Provenance link opens the Episode
+    /// <em>at the Event itself</em> (§8.1), so an anchor the bound would withhold has to open the
+    /// stream whole or the link lands on an element that is not in the page at all. An anchor
+    /// inside the bound changes nothing, and neither does a URL carrying none.
+    /// </summary>
+    public static bool AnchorIsPastTheBound(IEnumerable<Guid> eventIds, string uri)
+        => AnchoredEvent(uri) is { } anchored && eventIds.Skip(StreamBound).Contains(anchored);
 
     /// <summary>
     /// An unsealed Episode is live whatever its Distillation column says: Sealing is what enqueues

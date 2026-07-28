@@ -1,0 +1,42 @@
+/* The §8.2 confirmation, on Nocturne's tokens (#95). Danger is the one hue Mimir adds to the
+   system and it is reserved for exactly this and for Orphaned — the same two rules WisdomSurface
+   states for its own Delete, restated here because scoped CSS cannot be shared. */
+
+.confirm-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.confirm-prompt {
+    font-size: 12px;
+    color: var(--color-danger);
+}
+
+/* The per-Event affordance at rest: present on hover and reachable by keyboard, but not a red mark
+   on all fifty rows. Its confirmation is the ordinary one. */
+.is-subtle {
+    padding: 0 6px;
+    border-color: transparent;
+    font-size: 10px;
+    color: color-mix(in srgb, var(--color-text) 40%, transparent);
+}
+
+.is-subtle:hover,
+.is-subtle:focus-visible {
+    border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+    color: var(--color-danger);
+    background: transparent;
+}
+
+.danger-outline {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+}
+
+.danger-fill {
+    color: var(--color-bg);
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+}

@@ -144,6 +144,154 @@ public sealed class EpisodeDisplayTests
         EpisodeDisplay.Stamp(at).ShouldBe("2026-07-26 14:20 UTC");
     }
 
+    [Theory]
+    [InlineData(0, 0, 42, "42s")]
+    [InlineData(0, 45, 0, "45m")]
+    [InlineData(0, 59, 44, "59m")]
+    [InlineData(1, 0, 0, "1h 00m")]
+    [InlineData(1, 30, 0, "1h 30m")]
+    [InlineData(23, 59, 0, "23h 59m")]
+    // §4 crash-Seals only after a day idle, so the swept session — the common unsealed outcome —
+    // is over a day long and must not come out as a three-digit hour count.
+    [InlineData(25, 6, 0, "1d 01h")]
+    [InlineData(73, 30, 0, "3d 01h")]
+    public void ADuration_ReadsInTheLargestUnitItFills(int hours, int minutes, int seconds, string expected)
+    {
+        var started = new DateTimeOffset(2026, 7, 26, 9, 0, 0, TimeSpan.Zero);
+
+        EpisodeDisplay.Duration(started, started.AddHours(hours).AddMinutes(minutes).AddSeconds(seconds))
+            .ShouldBe(expected);
+    }
+
+    [Fact]
+    public void AnUnsealedEpisode_HasNoDurationToState()
+    {
+        // The session has not ended, so there is no span to report — the aside says so in words
+        // rather than quietly counting up to now, which would be a figure nothing recorded.
+        EpisodeDisplay.Duration(Sealed.AddHours(-1), sealedAt: null).ShouldBeNull();
+    }
+
+    [Fact]
+    public void ASealStampedBeforeItsStart_ReadsAsNoTime_RatherThanNegative()
+    {
+        // Two hosts' clocks write these two columns, so skew is possible and a "-3s" would be a
+        // reading of the clocks, not of the session.
+        EpisodeDisplay.Duration(Sealed, Sealed.AddSeconds(-3)).ShouldBe("0s");
+    }
+
+    [Fact]
+    public void AnUnsealedEpisode_IsNotInTheQueueAtAll_WhateverItsColumnSays()
+    {
+        // Capture creates the row Pending; Sealing is what enqueues (§6). Reading the column out
+        // loud here would tell a curator a live session is waiting on a worker.
+        EpisodeDisplay.DistillationPhrase(sealedAt: null, DistillationState.Pending)
+            .ShouldBe("not queued — Sealing is what enqueues");
+    }
+
+    [Theory]
+    [InlineData(DistillationState.Pending, "pending")]
+    [InlineData(DistillationState.Running, "running")]
+    [InlineData(DistillationState.Done, "done")]
+    [InlineData(DistillationState.Failed, "failed")]
+    public void ASealedEpisode_NamesItsDistillationColumn(DistillationState state, string expected)
+    {
+        EpisodeDisplay.DistillationPhrase(Sealed, state).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void AStreamInsideTheBound_IsWholeAndSaysNothingAboutIt()
+    {
+        // Nothing is withheld, so there is no bound to state and no control to offer.
+        EpisodeDisplay.StreamBoundNote(EpisodeDisplay.StreamBound, expanded: false).ShouldBeNull();
+        EpisodeDisplay.StreamToggleLabel(EpisodeDisplay.StreamBound, expanded: false).ShouldBeNull();
+    }
+
+    [Fact]
+    public void ABoundedStream_SaysHowManyItIsShowingOfHowMany()
+    {
+        var total = EpisodeDisplay.StreamBound + 262;
+
+        EpisodeDisplay.StreamBoundNote(total, expanded: false)
+            .ShouldBe($"The first {EpisodeDisplay.StreamBound} of {total:N0} Events.");
+        EpisodeDisplay.StreamToggleLabel(total, expanded: false).ShouldBe("Show the remaining 262");
+    }
+
+    [Fact]
+    public void AnExpandedStream_SaysItIsWhole_AndOffersTheBoundBack()
+    {
+        var total = EpisodeDisplay.StreamBound + 262;
+
+        EpisodeDisplay.StreamBoundNote(total, expanded: true).ShouldBe($"All {total:N0} Events.");
+        EpisodeDisplay.StreamToggleLabel(total, expanded: true)
+            .ShouldBe($"Show the first {EpisodeDisplay.StreamBound} only");
+    }
+
+    [Fact]
+    public void OneEventPastTheBound_IsStillBounded()
+    {
+        // The straddling case: the bound holds at the first Event it actually withholds, not one
+        // short of it, so a stream of bound+1 must not render whole and unannounced.
+        EpisodeDisplay.StreamBoundNote(EpisodeDisplay.StreamBound + 1, expanded: false).ShouldNotBeNull();
+        EpisodeDisplay.StreamToggleLabel(EpisodeDisplay.StreamBound + 1, expanded: false)
+            .ShouldBe("Show the remaining 1");
+    }
+
+    [Theory]
+    [InlineData(6, "6 h")]
+    [InlineData(1, "1 h")]
+    public void AConfiguredInterval_ReadsInWholeHours(int hours, string expected)
+    {
+        EpisodeDisplay.Hours(TimeSpan.FromHours(hours)).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void AnUrlWithNoEventAnchor_AnchorsNothing()
+    {
+        EpisodeDisplay.AnchoredEvent("http://localhost/projects/p/episodes/e").ShouldBeNull();
+        EpisodeDisplay.AnchoredEvent("http://localhost/projects/p/episodes/e#top").ShouldBeNull();
+        EpisodeDisplay.AnchoredEvent("http://localhost/projects/p/episodes/e#event-nonsense").ShouldBeNull();
+    }
+
+    [Fact]
+    public void AProvenanceLink_AnchorsTheEventItNames()
+    {
+        // The shape WisdomSurface writes for §8.1's "open the Episode at the Event itself".
+        var eventId = Guid.NewGuid();
+
+        EpisodeDisplay.AnchoredEvent($"http://localhost/projects/p/episodes/e#event-{eventId}")
+            .ShouldBe(eventId);
+    }
+
+    [Fact]
+    public void AnAnchorTheBoundWouldWithhold_OpensTheStreamWhole()
+    {
+        // Otherwise the Provenance link lands on an element that is not in the page at all.
+        var events = Enumerable.Range(0, EpisodeDisplay.StreamBound + 3).Select(_ => Guid.NewGuid()).ToList();
+
+        EpisodeDisplay.AnchorIsPastTheBound(events, $"http://x/#event-{events[^1]}").ShouldBeTrue();
+    }
+
+    [Fact]
+    public void AnAnchorInsideTheBound_LeavesTheStreamAsItIs()
+    {
+        var events = Enumerable.Range(0, EpisodeDisplay.StreamBound + 3).Select(_ => Guid.NewGuid()).ToList();
+
+        EpisodeDisplay.AnchorIsPastTheBound(events, $"http://x/#event-{events[EpisodeDisplay.StreamBound - 1]}")
+            .ShouldBeFalse();
+        EpisodeDisplay.AnchorIsPastTheBound(events, "http://x/projects/p/episodes/e").ShouldBeFalse();
+        EpisodeDisplay.AnchorIsPastTheBound(events, $"http://x/#event-{Guid.NewGuid()}").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ASealWithoutAReason_IsWordedTheSameWayEverywhere()
+    {
+        // The aside states the Seal reason on its own line; the row states it inside MetaLine. One
+        // phrase, so the two screens cannot drift.
+        EpisodeDisplay.SealPhrase(sealReason: null).ShouldBe("no reason");
+        EpisodeDisplay.MetaLine(Summary(sealReason: null))
+            .ShouldContain(EpisodeDisplay.SealPhrase(sealReason: null));
+    }
+
     private static readonly DateTimeOffset Sealed = new(2026, 7, 26, 14, 20, 0, TimeSpan.Zero);
 
     /// <summary>A Sealed summary; the one live case unseals it with a <c>with</c> expression.</summary>

@@ -1,21 +1,32 @@
 @* Spec §8.2: every hard delete is confirmed. Two-phase, inline, no JS — arming swaps the button
-   for the consequence and an explicit choice. *@
+   for the consequence and an explicit choice. On Nocturne's buttons since #95, so the two hard
+   deletes on this surface look like the Wisdom surface's own. *@
 @if (_armed)
 {
     <span class="confirm-delete" role="alertdialog" aria-label="Confirm deletion">
         <span class="confirm-prompt">@Prompt</span>
-        <button class="button danger" @onclick="ConfirmAsync">Delete forever</button>
-        <button class="button" @onclick="() => _armed = false">Cancel</button>
+        <button class="btn danger-fill" @onclick="ConfirmAsync">Delete forever</button>
+        <button class="btn btn-secondary" @onclick="() => _armed = false">Cancel</button>
     </span>
 }
 else
 {
-    <button class="button danger-outline" @onclick="() => _armed = true">@Label</button>
+    <button class="btn btn-secondary @(Subtle ? "is-subtle" : "danger-outline")"
+            @onclick="() => _armed = true">@Label</button>
 }
 
 @code {
     [Parameter, EditorRequired]
     public string Label { get; set; } = "";
+
+    /// <summary>
+    /// Whether the resting button stays out of the way. Arming is reversible, so it is not itself
+    /// the destructive act, and the Event stream draws one of these per Event: in danger's hue they
+    /// would out-shout the salience mark that stream exists to show. The armed state is red either
+    /// way, which is where the permanence actually is (#95).
+    /// </summary>
+    [Parameter]
+    public bool Subtle { get; set; }
 
     [Parameter, EditorRequired]
     public string Prompt { get; set; } = "";
