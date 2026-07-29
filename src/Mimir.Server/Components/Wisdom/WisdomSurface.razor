@@ -377,10 +377,15 @@
 
     private string DetailHref(Guid wisdomId) => WisdomRoute.Detail(ProjectId, wisdomId, Lens);
 
-    /// <summary>The §8.1 drill to the underlying Event: its Episode page, anchored on the Event.</summary>
+    /// <summary>
+    /// The §8.1 drill to the underlying Event: its Episode page, anchored on the Event. The
+    /// fragment is <see cref="EpisodeDisplay.EventAnchorHref"/>'s, which is also what the stream
+    /// writes its ids from and what opens the stream's bound on arrival — spelling it here a second
+    /// time is how the link silently stops landing.
+    /// </summary>
     private static string EpisodeHref(ProvenanceEntry link)
         => $"projects/{link.EpisodeProjectId}/episodes/{link.EpisodeId}"
-            + (link.EventId is { } eventId ? $"#event-{eventId}" : "");
+            + (link.EventId is { } eventId ? EpisodeDisplay.EventAnchorHref(eventId) : "");
 
     /// <summary>What the lens is called and what its emptiness means — one switch, so the two
     /// can never describe different lenses.</summary>

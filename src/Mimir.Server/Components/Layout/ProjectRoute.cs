@@ -34,15 +34,6 @@ internal static class ProjectRoute
     }
 
     /// <summary>
-    /// Whether the route names a surface's own screen rather than a drill-down beneath it. The tab
-    /// segment alone cannot answer it: Episodes' list is ported to panes while the Event stream
-    /// under it is not (#94; #95 ports that), and both read as <c>episodes</c> to
-    /// <see cref="Parse"/>. Wisdom needs no such distinction — #91 made its detail part of the one
-    /// screen — so this is asked per surface, not of every route.
-    /// </summary>
-    public static bool IsSurfaceRoot(string relativePath) => Segments(relativePath).Length <= 3;
-
-    /// <summary>
     /// ToBaseRelativePath keeps the query string and fragment; strip them before segmenting so a
     /// pasted "?highlight=…" or "#anchor" doesn't get parsed as (or corrupt) the tab segment.
     /// </summary>

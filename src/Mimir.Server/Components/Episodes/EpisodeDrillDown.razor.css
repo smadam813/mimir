@@ -1,0 +1,208 @@
+/* The §8.2 drill-down's own pane (#95), on Nocturne's tokens. The pane's frame, scrolling and
+   footer come from EpisodeSurface, which draws the same three classes for its placeholder. */
+
+.episode-detail {
+    max-width: 78ch;
+}
+
+.detail-kicker {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-accent-400);
+}
+
+.detail-title {
+    margin: 6px 0 var(--space-2);
+    font-size: 21px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Session id and cwd — monospace, because both are machine strings. */
+.detail-meta {
+    margin: 0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 57%, transparent);
+    overflow-wrap: anywhere;
+}
+
+.detail-heading {
+    margin: var(--space-8) 0 var(--space-3);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.detail-note {
+    margin: var(--space-3) 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.detail-note code {
+    font-size: 11px;
+}
+
+/* ── What it produced ─────────────────────────────────────────────────────────────────────── */
+
+.produced-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 calc(var(--space-4) * -1);
+}
+
+.produced-row {
+    display: block;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    color: inherit;
+    text-decoration: none;
+}
+
+.produced-row:hover {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.produced-text {
+    display: block;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.produced-facts {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+    font-size: 10.5px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* ── The Event stream ─────────────────────────────────────────────────────────────────────── */
+
+.event-stream {
+    list-style: none;
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+/* A timeline: the rail runs down the left of every Event, with the dot marking its moment. */
+.event-item {
+    position: relative;
+    padding-left: var(--space-6);
+}
+
+.event-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: calc(var(--space-4) * -1);
+    width: 1px;
+    background: var(--color-divider);
+}
+
+.event-item:last-child::before {
+    bottom: auto;
+    height: 8px;
+}
+
+.event-item::after {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 6px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-neutral-500);
+}
+
+.event-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.event-seq {
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.event-type {
+    font-size: 12.5px;
+}
+
+.event-badge {
+    padding: 0 5px;
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-sm);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+    white-space: nowrap;
+}
+
+/* The one salience §3 records: an explicit save, which outranks the Distiller's inferred kind. */
+.event-badge.salient {
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.event-badge.truncated {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+}
+
+.event-at {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.event-payload {
+    margin: 6px 0 0;
+    padding: var(--space-3) var(--space-4);
+    max-height: 260px;
+    overflow: auto;
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-text) 3%, transparent);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 72%, transparent);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* What the stream is withholding, and the control that hands it over. */
+.stream-bound {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    box-shadow: inset 0 1px 0 var(--color-divider);
+    font-size: 11.5px;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+/* Delete takes the record entire, so it is set apart from the per-Event delete above (§8.2). */
+.detail-danger {
+    margin-top: var(--space-8);
+    padding-top: var(--space-4);
+    box-shadow: inset 0 1px 0 var(--color-divider);
+}

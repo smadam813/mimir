@@ -1,0 +1,188 @@
+@using Mimir.Server.Components.Wisdom
+@using Mimir.Server.Storage.Entities
+@using Mimir.Server.Ui
+@inject NavigationManager Nav
+
+@* Spec §8.2 (#95): one session, read as the record it is — what it produced, crossing from the raw
+   tier to the durable one, and then the Event stream itself in arrival order. A long stream is
+   bounded on arrival and says so, because a curator must never take the first fifty Events for the
+   whole session. *@
+<main class="pane-detail">
+    <div class="pane-detail-body">
+        <article class="episode-detail">
+            <span class="detail-kicker">@EpisodeDisplay.StateLabel(Episode.SealedAt, Episode.SealReason)</span>
+            <h3 class="detail-title">@EpisodeDisplay.Stamp(Episode.StartedAt)</h3>
+            <p class="detail-meta">
+                session @Episode.SessionId · @Episode.Cwd
+            </p>
+
+            <h6 class="detail-heading">What it produced</h6>
+            @if (Detail.Produced.Count == 0)
+            {
+                <p class="detail-note">
+                    @EpisodeDisplay.NothingProducedNote(Episode.SealedAt, Episode.Distillation)
+                </p>
+            }
+            else
+            {
+                <div class="produced-list">
+                    @foreach (var wisdom in Detail.Produced)
+                    {
+                        @* Into this Project's Wisdom surface, never the Wisdom's own Scope: a Global
+                           line produced here belongs to the list being browsed (WisdomRoute). *@
+                        <a class="produced-row" @key="wisdom.Id"
+                           href="@WisdomRoute.Detail(ProjectId, wisdom.Id, WisdomLens.Active)">
+                            <span class="produced-text">@wisdom.Text</span>
+                            <span class="produced-facts">
+                                <KindGlyph Kind="wisdom.Kind" />
+                                @wisdom.Kind.ToString().ToLowerInvariant()
+                                · @(wisdom.IsGlobal ? "Global" : "this project")
+                                · ×@wisdom.Reinforcement
+                            </span>
+                        </a>
+                    }
+                </div>
+                <p class="detail-note">
+                    Wisdom this Episode is Provenance for and that still stands — admitted from it,
+                    or confirmed by it, since the Merge Gate unions provenance onto the line it
+                    reinforces (§6.3). Retired lines drop out, so this agrees with the count on the
+                    row you came from.
+                </p>
+            }
+
+            <h6 class="detail-heading">Event stream</h6>
+            @if (Detail.Events.Count == 0)
+            {
+                <p class="detail-note">
+                    No Events captured yet. Session start and end are not Events (§3) — an Episode
+                    exists from the first hook onwards whether or not anything has happened in it.
+                </p>
+            }
+            else
+            {
+                <p class="detail-note">
+                    Arrival order, oldest first. A <span class="event-badge salient">salient</span>
+                    Event is a deliberate save — <code>mimir_remember</code> writes one (§4) — and a
+                    Wisdom with one in its Provenance outranks the rest in Recall for it (§7). That
+                    explicit mark is the only salience recorded: the Distiller's own selectivity is
+                    v1's inferred salience, and it leaves no column to mark here.
+                </p>
+
+                <ol class="event-stream">
+                    @foreach (var evt in Visible)
+                    {
+                        @* The id anchors Provenance drill-downs (§8.1) straight to the Event; the
+                           link that writes it and the reader that opens the bound for it take the
+                           same spelling from EpisodeDisplay. *@
+                        <li class="event-item" id="@EpisodeDisplay.EventAnchorId(evt.Id)" @key="evt.Id">
+                            <div class="event-head">
+                                <span class="event-seq">#@evt.Seq</span>
+                                <span class="event-type">@evt.Type</span>
+                                @if (evt.Salient)
+                                {
+                                    <span class="event-badge salient"
+                                          title="Explicitly saved via mimir_remember (§4)">salient</span>
+                                }
+                                @if (EventPayload.IsTruncated(evt.Payload))
+                                {
+                                    <span class="event-badge truncated"
+                                          title="Stored truncated per §4; the marker in the payload shows where.">
+                                        truncated · full @evt.PayloadFullSize bytes
+                                    </span>
+                                }
+                                <span class="event-at">@EpisodeDisplay.Stamp(evt.At)</span>
+                                <ConfirmDelete Label="Delete" Subtle
+                                               Prompt="@($"Hard-delete Event #{evt.Seq} forever?")"
+                                               OnConfirm="() => OnDeleteEvent.InvokeAsync(evt.Id)" />
+                            </div>
+                            <pre class="event-payload">@EventPayload.Pretty(evt.Payload)</pre>
+                        </li>
+                    }
+                </ol>
+
+                @if (EpisodeDisplay.StreamToggleLabel(Detail.Events.Count, _expanded) is { } toggle)
+                {
+                    <div class="stream-bound">
+                        <span>@EpisodeDisplay.StreamBoundNote(Detail.Events.Count, _expanded)</span>
+                        <button class="btn btn-secondary" @onclick="() => _expanded = !_expanded">
+                            @toggle
+                        </button>
+                    </div>
+                }
+            }
+
+            @* Spec §8.2: hard delete of the whole Episode for sensitive content; its Events go with
+               it. Set apart from the per-Event delete above — this one takes the record entire. *@
+            <div class="detail-danger">
+                <ConfirmDelete Label="Delete Episode"
+                               Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
+                               OnConfirm="() => OnDeleteEpisode.InvokeAsync()" />
+            </div>
+        </article>
+    </div>
+
+    <div class="pane-detail-footer">
+        <p>
+            An Episode <strong>is</strong> a session, keyed by its session id (ADR-0003) — not a
+            record about one. A resumed session reopens this same Episode rather than starting
+            another, and hard-deleting it takes every Event with it.
+        </p>
+    </div>
+</main>
+
+@code {
+    /// <summary>
+    /// Named for the drill-down rather than for its record, because <c>EpisodeDetail</c> is the
+    /// record: a component of that name would shadow <see cref="Mimir.Server.Ui.EpisodeDetail"/>
+    /// inside its own file.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public EpisodeDetail Detail { get; set; } = null!;
+
+    /// <summary>
+    /// The Project whose surface this is, for the "What it produced" links — never a produced
+    /// Wisdom's own Scope, which may be Global.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<Guid> OnDeleteEvent { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback OnDeleteEpisode { get; set; }
+
+    private bool _expanded;
+
+    /// <summary>
+    /// Which record, and which Event of it the URL anchors — the pair the expansion belongs to. The
+    /// anchor is in the key rather than read once, because two §8.1 Provenance links into the same
+    /// Episode are one navigation apart and the second may name an Event the first did not need.
+    /// </summary>
+    private (Guid EpisodeId, Guid? Anchor) _shown;
+
+    private Episode Episode => Detail.Episode;
+
+    /// <summary>
+    /// The bounded stream. A stream inside the bound is whole and unannounced; past it, the first
+    /// <see cref="EpisodeDisplay.StreamBound"/> until the curator asks for the rest.
+    /// </summary>
+    private IEnumerable<Event> Visible => _expanded
+        ? Detail.Events
+        : Detail.Events.Take(EpisodeDisplay.StreamBound);
+
+    protected override void OnParametersSet()
+    {
+        // A different record — or the same one opened at a different Event — decides the expansion
+        // afresh: it opens whole for an anchor the bound would otherwise withhold, and collapsed
+        // otherwise. Not reset on an ordinary re-render, because this component is handed a
+        // freshly-read Detail every time the feed announces a captured Event, and dropping the
+        // expansion there would collapse the stream under a curator reading a live session.
+        var anchor = EpisodeDisplay.AnchoredEvent(Nav.Uri);
+        if (_shown != (Episode.Id, anchor))
+        {
+            _shown = (Episode.Id, anchor);
+            _expanded = EpisodeDisplay.AnchorIsPastTheBound(Detail.Events.Select(e => e.Id), Nav.Uri);
+        }
+    }
+}

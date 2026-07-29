@@ -2,17 +2,6 @@
    while the rows scroll under it. The 400px and the divider are the four-pane shape's, shared with
    the Wisdom and Injection lists as each is ported. */
 
-/* The surface's root, the same shape WisdomSurface's is (#91): MainLayout gives a ported surface a
-   flush body that is a column, so the surface takes its height and lays its own panes out across
-   it. #95 adds the Event stream beside this pane. */
-.episode-surface {
-    flex: 1;
-    min-height: 0;
-    min-width: 0;
-    display: flex;
-    align-items: stretch;
-}
-
 .episode-pane {
     flex: none;
     width: 400px;
@@ -98,6 +87,14 @@
 
 .episode-row:hover {
     background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+/* The row the drill-down is open on, marked the way the Injection log marks its selected entry. */
+.episode-row.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+    box-shadow:
+        inset 2px 0 0 var(--color-accent),
+        inset 0 -1px 0 color-mix(in srgb, var(--color-text) 6%, transparent);
 }
 
 .episode-row-head {
