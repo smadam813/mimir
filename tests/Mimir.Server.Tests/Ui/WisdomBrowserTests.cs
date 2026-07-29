@@ -367,18 +367,21 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
     }
 
     /// <summary>
-    /// The head's "first version" stamp: the foot of the chain, not the row's own recency, which an
-    /// Admission moves and an edit does not. Seeded so the two differ.
+    /// Both ends of the chain, read off its rows rather than derived from how many there are: the
+    /// "first version" stamp is its foot, not the row's own recency (which an Admission moves and
+    /// an edit does not), and the version the editor is about to bump is its head. Seeded so the
+    /// recency differs from the foot, and with a gap in the chain — the gate numbers versions
+    /// <c>MAX + 1</c>, so a chain missing a row is one whose length is no longer its version.
     /// </summary>
     [Fact]
-    public async Task TheDetail_DatesTheChainFromItsOldestVersion()
+    public async Task TheDetail_ReadsBothEndsOfTheChain_OffItsRowsRatherThanItsLength()
     {
         var wisdom = await AddWisdomAsync(
             Project.GlobalId, "reworded since", lastConfirmedAt: Now.AddDays(-5));
         Context.WisdomVersions.Add(new WisdomVersion
         {
             WisdomId = wisdom.Id,
-            Version = 2,
+            Version = 3,
             Text = "reworded since",
             CreatedAt = Now,
             Cause = WisdomVersionCause.Edited,
@@ -388,7 +391,9 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         var detail = await Browser().GetAsync(wisdom.Id, Token);
 
         detail.ShouldNotBeNull();
+        detail.Versions.Count.ShouldBe(2);
         detail.FirstVersionAt.ShouldBe(Now.AddDays(-5));
+        detail.CurrentVersion.ShouldBe(3);
     }
 
     [Fact]

@@ -319,11 +319,6 @@
     color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
-.edit-explains strong {
-    font-weight: var(--font-heading-weight);
-    color: var(--color-text);
-}
-
 .detail-error {
     max-width: 44rem;
     font-size: 12px;

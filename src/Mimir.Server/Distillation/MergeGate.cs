@@ -22,6 +22,22 @@ internal sealed record WisdomCandidate(
     IReadOnlyList<Guid>? EventIds = null);
 
 /// <summary>
+/// Why an edit would change nothing — <see cref="MergeGate.EditAsync"/>'s no-op set, exactly
+/// three and named so a caller can say which one it hit rather than infer it from a silent return.
+/// </summary>
+internal enum WisdomEditNoOp
+{
+    /// <summary>The draft is blank once trimmed.</summary>
+    Blank,
+
+    /// <summary>No Wisdom answers to the id.</summary>
+    Unknown,
+
+    /// <summary>The trimmed draft is what the Wisdom already says.</summary>
+    Unchanged,
+}
+
+/// <summary>
 /// The Merge Gate (§6) — the single entry point to the Wisdom tier. Mechanically: embed,
 /// hybrid-search existing non-Retired Wisdom, insert on no match. On a match (cosine ≥ 0.80) the
 /// <see cref="IMergeArbiter"/> rules: agreement merges the pair into a rewrite (reinforcement+1,
@@ -145,7 +161,11 @@ internal sealed class MergeGate(
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
     {
         var trimmed = text.Trim();
-        if (trimmed.Length == 0)
+
+        // Blank is settled before the row is read, since it is the one arm that needs no row —
+        // hence the null current, which leaves the other two undecidable and is why only this
+        // arm is acted on here.
+        if (NoOpOf(trimmed, current: null) is WisdomEditNoOp.Blank)
         {
             return;
         }
@@ -160,7 +180,7 @@ internal sealed class MergeGate(
             .Where(w => w.Id == wisdomId)
             .Select(w => w.Text)
             .FirstOrDefaultAsync(cancellationToken);
-        if (current is null || current == trimmed)
+        if (NoOpOf(trimmed, current) is not null)
         {
             return;
         }
@@ -177,7 +197,9 @@ internal sealed class MergeGate(
         // Read again under the lock: an edit that raced a batch would otherwise reword text the
         // batch is in the middle of replacing, and number its version off a chain about to grow.
         var wisdom = await db.Wisdom.FirstOrDefaultAsync(w => w.Id == wisdomId, cancellationToken);
-        if (wisdom is null || wisdom.Text == trimmed)
+        // The null arm is the compiler's, not the rule's: NoOpOf calls a missing row Unknown all
+        // the same, but RewriteAsync below takes a non-null one.
+        if (wisdom is null || NoOpOf(trimmed, wisdom.Text) is not null)
         {
             return;
         }
@@ -186,6 +208,28 @@ internal sealed class MergeGate(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Whether saving <paramref name="text"/> over <paramref name="current"/> would change nothing,
+    /// and which of <see cref="EditAsync"/>'s three no-ops it would be — null when the edit lands.
+    /// The one statement of that set: <see cref="EditAsync"/> settles it here at each of its three
+    /// decision points, and <c>WisdomDisplay.UnsavableReason</c> words the two a curator can see
+    /// coming in front of the Save button rather than after it. The pair restated the set
+    /// independently before, which is how the doc comment in #71 went stale.
+    /// </summary>
+    /// <param name="current">
+    /// What the Wisdom says now, as stored — <see langword="null"/> for an id no Wisdom answers to,
+    /// and for a caller that has not read the row yet, which can therefore only act on
+    /// <see cref="WisdomEditNoOp.Blank"/>. Deliberately compared untrimmed: only the edit path
+    /// trims what it writes, so a merged text carrying whitespace has an edit that would land.
+    /// </param>
+    internal static WisdomEditNoOp? NoOpOf(string text, string? current) => text.Trim() switch
+    {
+        { Length: 0 } => WisdomEditNoOp.Blank,
+        _ when current is null => WisdomEditNoOp.Unknown,
+        var trimmed when trimmed == current => WisdomEditNoOp.Unchanged,
+        _ => null,
+    };
 
     /// <summary>
     /// Takes the gate-wide lock as the first statement of an already-open transaction. Both entry

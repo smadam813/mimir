@@ -1,3 +1,5 @@
+using Mimir.Server.Distillation;
+
 namespace Mimir.Server.Ui;
 
 /// <summary>
@@ -28,22 +30,34 @@ public static class WisdomDisplay
         => Math.Clamp(reinforcement, 0, ReinforcementBarSegments);
 
     /// <summary>
-    /// Why saving the editor's draft would change nothing, or null when it would land. Two of
-    /// <see cref="Distillation.MergeGate.EditAsync"/>'s three no-ops — blank text, and text
-    /// unchanged from what is current — worded for the curator in front of the button rather than
-    /// discovered by pressing it. The gate still owns the rule and still decides; this is a
-    /// courtesy in front of it, which is why the third no-op (an id nothing answers to) is absent:
-    /// the detail could not have rendered.
+    /// Why saving the editor's draft would change nothing, or null when it would land: two of
+    /// <see cref="MergeGate"/>'s three no-ops worded for the curator in front of the
+    /// button rather than discovered by pressing it. Which two is
+    /// <see cref="MergeGate.NoOpOf"/>'s to decide, not this method's — a second
+    /// statement of that set is the drift #71 was, and here it would gate a button rather than sit
+    /// in a comment. The third (an id nothing answers to) has no wording because the detail could
+    /// not have rendered; unworded, Save stays enabled and the gate decides, as it does anyway.
     /// </summary>
-    public static string? UnsavableReason(string draft, string current) => draft.Trim() switch
-    {
-        { Length: 0 } => "Empty — a Wisdom's words cannot be blank.",
-        // The gate compares its trimmed draft against the stored text as stored, and only the edit
-        // path trims what it writes — so trimming this side too would disable Save over a Wisdom
-        // whose merged text carries whitespace the edit would legitimately strip.
-        var trimmed when trimmed == current => "Unchanged — this is what it already says.",
-        _ => null,
-    };
+    public static string? UnsavableReason(string draft, string current)
+        => MergeGate.NoOpOf(draft, current) switch
+        {
+            WisdomEditNoOp.Blank => "Empty — a Wisdom's words cannot be blank.",
+            WisdomEditNoOp.Unchanged => "Unchanged — this is what it already says.",
+            _ => null,
+        };
+
+    /// <summary>
+    /// What Save will do, in the curator's words beside the button that does it (§8.1's own
+    /// criterion). It states <see cref="Distillation.MergeGate.EditAsync"/>'s mechanics, so it
+    /// lives here where a test can hold it to them rather than in markup nothing renders in this
+    /// suite: change the gate's version numbering, its cause, or what it leaves Reinforcement and
+    /// recency doing, and this sentence is the other place to change.
+    /// </summary>
+    public static string EditExplanation(int nextVersion, int reinforcement)
+        => $"Saving goes through the Merge Gate: it appends v{nextVersion} · cause=edited, "
+            + "re-embeds the new text, and waits behind any in-flight Admission batch. "
+            + $"Reinforcement stays ×{reinforcement:N0} and recency does not move — an edit "
+            + "rewords, it does not confirm (§6).";
 
     /// <summary>
     /// The editor's live length. It is a count of what a session will receive, not of what is
@@ -65,9 +79,11 @@ public static class WisdomDisplay
     public static string RecallNote(WisdomRecall recall)
         => recall.Injections == 0
             ? "No injection has carried this line yet, so nothing here has judged it."
-            : $"Across every Project that recalled it, whole history; {recall.Unmarked:N0} of those "
-                + "entries are unmarked. A mark is left on an injection as a whole (§9), so the two "
-                + "figures count entries this line rode in rather than verdicts on the line itself.";
+            : $"{recall.Injections:N0} {(recall.Injections == 1 ? "injection has" : "injections have")} "
+                + "carried this line, across every Project that recalled it, whole history; "
+                + $"{recall.Unmarked:N0} still unmarked. A mark is left on an injection as a whole "
+                + "(§9), so the two figures above count entries this line rode in rather than "
+                + "verdicts on the line itself.";
 
     /// <summary>
     /// What Retire is, beside the button that does it: reversible, and about standing rather than

@@ -149,7 +149,7 @@
                 {
                     <div class="text-head">
                         <h6 class="text-title is-editing">
-                            The text · editing v@(detail.Versions.Count) → v@(detail.Versions.Count + 1)
+                            The text · editing v@(detail.CurrentVersion) → v@(detail.CurrentVersion + 1)
                         </h6>
                         <span class="text-count">@WisdomDisplay.CharacterCount(_draft.Length)</span>
                     </div>
@@ -170,14 +170,10 @@
                     </div>
 
                     @* §8.1's own acceptance criterion: what saving does, on the screen rather than
-                       in the spec. It restates MergeGate.EditAsync — change that rule and change
-                       this sentence with it. *@
+                       in the spec. The sentence itself lives in WisdomDisplay, where a test holds
+                       it to the gate it describes — markup nothing renders holds it to nothing. *@
                     <p class="edit-explains">
-                        Saving goes through the <strong>Merge Gate</strong>: it appends
-                        <strong>v@(detail.Versions.Count + 1) · cause=edited</strong>, re-embeds the
-                        new text, and waits behind any in-flight Admission batch. Reinforcement stays
-                        <strong>×@entry.Reinforcement</strong> and recency does not move — an edit
-                        rewords, it does not confirm (§6).
+                        @WisdomDisplay.EditExplanation(detail.CurrentVersion + 1, entry.Reinforcement)
                     </p>
                 }
                 else
@@ -465,9 +461,20 @@
     private static string Pressed(bool active) => active ? "true" : "false";
 
     private void OnSearchChanged()
-        => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
+        => _debounce?.Schedule(() => InvokeAsync(() => RefreshAsync(reloadDetail: false)));
 
-    private async Task RefreshAsync()
+    /// <summary>The whole surface: the list, and the detail beside it.</summary>
+    private Task RefreshAsync() => RefreshAsync(reloadDetail: true);
+
+    /// <summary>
+    /// Re-reads the surface. <paramref name="reloadDetail"/> is false for the two triggers that
+    /// cannot have changed it: <see cref="WisdomBrowser.GetAsync"/> takes neither the search term
+    /// nor the Kind, so a keystroke and a chip narrow the list beside the detail and nothing else.
+    /// That matters more than the duplicate read it saves — the aside's recall figures are an
+    /// aggregate over every logged injection, by far the most expensive read on this surface, and
+    /// a debounced burst would otherwise re-run it per burst with a row selected.
+    /// </summary>
+    private async Task RefreshAsync(bool reloadDetail)
     {
         var generation = ++_generation;
 
@@ -477,7 +484,7 @@
         var project = _project ?? await Chassis.GetProjectAsync(ProjectId, CancellationToken.None);
         var listing = await Browser.ListAsync(
             new WisdomQuery(ProjectId, Search.Term, _kind, Lens), CancellationToken.None);
-        var detail = SelectedId is { } selected
+        var detail = reloadDetail && SelectedId is { } selected
             ? await Browser.GetAsync(selected, CancellationToken.None)
             : null;
 
@@ -491,7 +498,14 @@
 
         _project = project;
         _listing = listing;
-        _detail = detail;
+
+        // Left alone, not assigned null, when this refresh did not read it: a list-only refresh
+        // that raced the first load would otherwise win the generation check and blank a detail
+        // that was still on its way.
+        if (reloadDetail)
+        {
+            _detail = detail;
+        }
 
         StateHasChanged();
     }
@@ -499,7 +513,7 @@
     private async Task SetKindAsync(WisdomKind? kind)
     {
         _kind = kind;
-        await RefreshAsync();
+        await RefreshAsync(reloadDetail: false);
     }
 
     private void BeginEdit(WisdomListEntry entry)

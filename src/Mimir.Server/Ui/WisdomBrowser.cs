@@ -129,6 +129,14 @@ public sealed record WisdomDetail(
     /// schema does not allow while the Wisdom stands.
     /// </summary>
     public DateTimeOffset? FirstVersionAt => Versions.Count == 0 ? null : Versions[^1].CreatedAt;
+
+    /// <summary>
+    /// What the chain stands at, read off its head row rather than counted from its length: the
+    /// gate numbers the next version <c>MAX(version) + 1</c>, so a count agrees only while nothing
+    /// has ever removed a row from the middle of a chain. Nothing does today, which is exactly why
+    /// the editor's "v4 → v5" would be silently wrong the day something does.
+    /// </summary>
+    public int CurrentVersion => Versions.Count == 0 ? 0 : Versions[0].Version;
 }
 
 /// <summary>
@@ -306,8 +314,10 @@ internal sealed class WisdomBrowser(
     /// Admission batch, the same acceptance <c>mimir_remember</c> makes.
     ///
     /// The editor states all of this on the screen beside the Save button (§8.1's own criterion),
-    /// so this rule is now written down three times — here, in the gate, and in
-    /// <c>WisdomSurface</c>'s markup. Change it in the gate and grep for the other two.
+    /// so this rule is written down twice — here in prose, and in
+    /// <see cref="WisdomDisplay.EditExplanation"/>, which a test holds to it. The no-op set is not
+    /// among the restatements: <see cref="MergeGate.NoOpOf"/> is its one statement and both the
+    /// gate and the Save button read it from there.
     /// </summary>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
         => await gate.EditAsync(wisdomId, text, cancellationToken);

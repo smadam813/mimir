@@ -107,9 +107,17 @@ public sealed class WisdomDisplayTests
 
         recalled.Injections.ShouldBe(6);
         recalled.Unmarked.ShouldBe(3);
-        var note = WisdomDisplay.RecallNote(recalled);
-        note.ShouldContain("3 of those entries are unmarked");
-        note.ShouldContain("as a whole");
+
+        // Whole, not a phrase out of it: the sentence has to name the total it is a remainder of,
+        // or "still unmarked" is a figure with nothing behind it.
+        WisdomDisplay.RecallNote(recalled).ShouldBe(
+            "6 injections have carried this line, across every Project that recalled it, whole "
+            + "history; 3 still unmarked. A mark is left on an injection as a whole (§9), so the "
+            + "two figures above count entries this line rode in rather than verdicts on the line "
+            + "itself.");
+
+        WisdomDisplay.RecallNote(new WisdomRecall([new LaneCount(InjectionLane.Brief, 1)], 1, 0))
+            .ShouldStartWith("1 injection has carried this line");
 
         WisdomDisplay.RecallNote(
                 new WisdomRecall([new LaneCount(InjectionLane.Brief, 0)], 0, 0))
@@ -162,6 +170,22 @@ public sealed class WisdomDisplayTests
             "the current wording").ShouldNotBeNull("the gate trims the draft before it compares");
         WisdomDisplay.UnsavableReason("a new wording", "the current wording").ShouldBeNull();
         WisdomDisplay.UnsavableReason("the current wording", "the current wording  ").ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The paragraph beside the Save button says what the gate will do, so it is pinned to the
+    /// gate's own terms: the version it appends, the cause it appends it under, and the two things
+    /// it leaves alone. Held here rather than in markup for the reason the class doc gives.
+    /// </summary>
+    [Fact]
+    public void TheEditorExplains_WhatTheGateWillDo_InTheGatesOwnTerms()
+    {
+        var explained = WisdomDisplay.EditExplanation(nextVersion: 5, reinforcement: 3);
+
+        explained.ShouldBe(
+            "Saving goes through the Merge Gate: it appends v5 · cause=edited, re-embeds the new "
+            + "text, and waits behind any in-flight Admission batch. Reinforcement stays ×3 and "
+            + "recency does not move — an edit rewords, it does not confirm (§6).");
     }
 
     private static ProvenanceEntry FromEvent() => new(
