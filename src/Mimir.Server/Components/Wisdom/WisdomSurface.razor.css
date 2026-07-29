@@ -335,8 +335,10 @@
     color: var(--color-danger);
 }
 
+/* The type only — .chain-head owns the spacing around the one heading this is left on, so a margin
+   here would be a second statement of it that never applies. */
 .detail-section {
-    margin: var(--space-8) 0 var(--space-3);
+    margin: 0;
     font-size: 13px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -351,10 +353,6 @@
     justify-content: space-between;
     gap: var(--space-4);
     margin: var(--space-8) 0 var(--space-4);
-}
-
-.chain-head .detail-section {
-    margin: 0;
 }
 
 .version-total {
@@ -390,6 +388,13 @@
 
 .chain-view:hover {
     background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* Inside the toggle's own clip, so the ring survives it: Nocturne draws :focus-visible at
+   outline-offset 2px, which .chain-toggle's overflow would cut away entirely — the same reason
+   Nocturne's own segmented control pulls its offset inward. */
+.chain-view:focus-visible {
+    outline-offset: -2px;
 }
 
 .chain-view.is-active {

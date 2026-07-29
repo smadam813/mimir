@@ -105,9 +105,10 @@ public static class WisdomDisplay
             + "rewords, it does not confirm (§6).";
 
     /// <summary>
-    /// The editor's live length. It is a count of what a session will receive, not of what is
-    /// stored: a lane fills its §11 char budget out of these, so the figure moves as the curator
-    /// types rather than when they save.
+    /// How long a text is, in the unit a lane fills its §11 char budget out of — so the figure is a
+    /// count of what a session would receive rather than of anything stored on disk. Two callers
+    /// with different tenses read it: over the editor it is the draft's live length and moves as the
+    /// curator types, and in the chain's full-text view it is one saved version's, fixed.
     /// </summary>
     public static string CharacterCount(int length)
         => length == 1 ? "1 character" : $"{length:N0} characters";

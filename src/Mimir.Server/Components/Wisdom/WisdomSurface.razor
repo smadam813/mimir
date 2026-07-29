@@ -233,7 +233,13 @@
                         @foreach (var version in WisdomDisplay.WithPendingEdit(
                             _chain, entry.Text, _mode is DetailMode.Editing ? _draft : null))
                         {
-                            <li class="version-row @(version.Pending ? "is-pending" : null)">
+                            @* Keyed on the version, because this is the one list on the surface that
+                               grows at its head: the first keystroke that parts the draft from the
+                               stored text inserts the pending row, and positionally Blazor would
+                               re-patch every row below it — each one's badge, stamp and whole run
+                               tree — rather than the one node that arrived. *@
+                            <li @key="version.Version"
+                                class="version-row @(version.Pending ? "is-pending" : null)">
                                 <span class="version-rail" aria-hidden="true">
                                     <i class="version-dot"></i>
                                     <i class="version-line"></i>
@@ -257,15 +263,20 @@
                                     </div>
                                     @if (_chainView is VersionChainView.Changed)
                                     {
+                                        @* The roles are each element's own implicit one, spelled out
+                                           because browsers largely do not expose it otherwise: bare
+                                           del and ins, a screen reader reads straight through, and
+                                           the row becomes the old wording and the new one spoken as
+                                           one sentence no version ever said. *@
                                         <p class="version-text">@foreach (var run in version.Changed)
                                             {
                                                 @if (run.Change is TextChange.Removed)
                                                 {
-                                                    <del>@run.Text</del>
+                                                    <del role="deletion">@run.Text</del>
                                                 }
                                                 else if (run.Change is TextChange.Added)
                                                 {
-                                                    <ins>@run.Text</ins>
+                                                    <ins role="insertion">@run.Text</ins>
                                                 }
                                                 else
                                                 {
@@ -321,9 +332,14 @@
 
             @* What the chain's badges mean, on the screen rather than looked up (§8.1). Pinned under
                the pane it explains, and only beside a Wisdom — over the unselected placeholder it
-               would be a glossary for badges that are not there. Its four entries are the enum's, so
-               a cause §3 gains cannot go missing from it. *@
-            @if (_detail is not null)
+               would be a glossary for badges that are not there. Its entries are the enum's, so a
+               cause §3 gains cannot go missing from it.
+
+               The condition is the chain's own, both halves: a list-only refresh deliberately leaves
+               _detail alone, so one that wins the generation check over a navigation to the listing
+               route leaves a detail standing under a null selection. _detail alone would draw the
+               legend over the placeholder there. *@
+            @if (SelectedId is not null && _detail is not null)
             {
                 <footer class="cause-legend">
                     <p>
