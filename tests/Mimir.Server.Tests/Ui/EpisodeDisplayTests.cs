@@ -263,6 +263,60 @@ public sealed class EpisodeDisplayTests
     }
 
     [Fact]
+    public void TheAnchorTheLinkWrites_IsTheOneTheStreamCarries_AndTheReaderOpens()
+    {
+        // The round trip the three sites used to spell separately: WisdomSurface's href, the
+        // stream's DOM id, and this reader. A mismatch never fails to build — the link just stops
+        // landing — so the loop is closed here instead. The literal shape stays pinned above.
+        var eventId = Guid.NewGuid();
+
+        EpisodeDisplay.EventAnchorHref(eventId)
+            .ShouldBe("#" + EpisodeDisplay.EventAnchorId(eventId));
+        EpisodeDisplay.AnchoredEvent(
+            $"http://localhost/projects/p/episodes/e{EpisodeDisplay.EventAnchorHref(eventId)}")
+            .ShouldBe(eventId);
+    }
+
+    [Fact]
+    public void AFailedDistillation_SaysItWasAttempted_NotThatItNeverRan()
+    {
+        // The aside beside this note reads "failed" and promises a re-queue. Saying "has not been
+        // distilled" here would leave one Episode described two ways on one screen.
+        var note = EpisodeDisplay.NothingProducedNote(Sealed, DistillationState.Failed);
+
+        note.ShouldContain("failed");
+        note.ShouldContain("re-queues");
+        note.ShouldNotContain("has not been distilled");
+    }
+
+    [Fact]
+    public void ADoneEpisodeThatProducedNothing_SaysTheEmptinessIsSettled()
+    {
+        // §6 prefers no candidate to a weak one, so this is an outcome rather than a wait.
+        EpisodeDisplay.NothingProducedNote(Sealed, DistillationState.Done)
+            .ShouldContain("no candidate over a weak one");
+    }
+
+    [Theory]
+    [InlineData(DistillationState.Pending)]
+    [InlineData(DistillationState.Running)]
+    public void AnEpisodeStillOwedDistillation_SaysTheFigureIsNotInYet(DistillationState state)
+    {
+        EpisodeDisplay.NothingProducedNote(Sealed, state).ShouldContain("Nothing yet");
+    }
+
+    [Fact]
+    public void AnUnsealedEpisode_IsNotDescribedByItsColumn_HereEither()
+    {
+        // Routed through State, the one rule: the column reads Pending from the moment capture
+        // creates the row, so a live session must not read as a distillation that ran.
+        EpisodeDisplay.NothingProducedNote(sealedAt: null, DistillationState.Done)
+            .ShouldContain("Nothing yet");
+        EpisodeDisplay.NothingProducedNote(sealedAt: null, DistillationState.Failed)
+            .ShouldContain("Nothing yet");
+    }
+
+    [Fact]
     public void AnAnchorTheBoundWouldWithhold_OpensTheStreamWhole()
     {
         // Otherwise the Provenance link lands on an element that is not in the page at all.

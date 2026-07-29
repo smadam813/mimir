@@ -33,51 +33,47 @@
         {
             <EpisodeDrillDown Detail="detail" ProjectId="ProjectId"
                               OnDeleteEvent="DeleteEventAsync" OnDeleteEpisode="DeleteEpisodeAsync" />
-        }
-        else if (_loadedId == SelectedId)
-        {
-            <main class="pane-detail">
-                <div class="pane-detail-body">
-                    <p class="pane-placeholder">
-                        This Episode does not exist — most likely it was hard-deleted (§8.2), which
-                        takes its Events with it.
-                    </p>
-                </div>
-            </main>
-        }
 
-        @* Only alongside a session: the aside is one Episode's numbers, so with nothing selected
-           there is nothing for it to carry and an empty ruled column would read as a fault. *@
-        @if (_detail is { } aside)
-        {
+            @* The aside is this same Episode's numbers, so it renders from the branch that already
+               has it rather than re-asking whether there is one. Two conditions for one fact would
+               let the panes disagree — and nothing renders markup in a test here, so the drift
+               would land on a curator rather than on CI. *@
             <aside class="pane-aside">
                 <div>
                     <h6>This session</h6>
                     <div class="aside-figure">
-                        <span class="aside-figure-value">@aside.Events.Count.ToString("N0")</span>
+                        <span class="aside-figure-value">@detail.Events.Count.ToString("N0")</span>
                         <span class="aside-figure-unit">
-                            @(aside.Events.Count == 1 ? "Event" : "Events"),
-                            @aside.PromptCount.ToString("N0")
-                            @(aside.PromptCount == 1 ? "prompt" : "prompts")
+                            @(detail.Events.Count == 1 ? "Event" : "Events"),
+                            @detail.PromptCount.ToString("N0")
+                            @(detail.PromptCount == 1 ? "prompt" : "prompts")
                         </span>
                     </div>
                     <dl class="aside-rows">
                         <dt>Duration</dt>
                         <dd class="is-strong">
-                            @(EpisodeDisplay.Duration(aside.Episode.StartedAt, aside.Episode.SealedAt)
+                            @(EpisodeDisplay.Duration(detail.Episode.StartedAt, detail.Episode.SealedAt)
                                 ?? "still open")
                         </dd>
                         <dt>Wisdom produced</dt>
-                        <dd class="is-accent">@aside.Produced.Count.ToString("N0")</dd>
+                        <dd class="is-accent">@detail.Produced.Count.ToString("N0")</dd>
+                        @* The moment itself, not only the span to it: Duration reads in the largest
+                           unit it fills, so a curator correlating a session against an outside
+                           timeline cannot recover the Seal from StartedAt plus "3d 04h". *@
+                        @if (detail.Episode.SealedAt is { } sealedAt)
+                        {
+                            <dt>Sealed</dt>
+                            <dd>@EpisodeDisplay.Stamp(sealedAt)</dd>
+                        }
                         <dt>Seal reason</dt>
                         <dd>
-                            @(aside.Episode.SealedAt is null
+                            @(detail.Episode.SealedAt is null
                                 ? "not sealed"
-                                : EpisodeDisplay.SealPhrase(aside.Episode.SealReason))
+                                : EpisodeDisplay.SealPhrase(detail.Episode.SealReason))
                         </dd>
                     </dl>
                     <p class="aside-note">
-                        @(aside.Episode.SealedAt is null
+                        @(detail.Episode.SealedAt is null
                             ? "Unsealed: the session is live, or it crashed. The sweep Seals one"
                               + $" whose Events stopped over {EpisodeDisplay.Hours(Sweep.CrashSealIdleAfter)} ago"
                               + $" as {Episode.CrashSweptReason} (§4)."
@@ -91,7 +87,7 @@
                     <h6>Distillation</h6>
                     <p class="aside-state">
                         @EpisodeDisplay.DistillationPhrase(
-                            aside.Episode.SealedAt, aside.Episode.Distillation)
+                            detail.Episode.SealedAt, detail.Episode.Distillation)
                     </p>
                     @* The four elements the design drew here and #86 dropped are absent rather than
                        stubbed: the claiming model, the candidate count and the chunk count are
@@ -105,12 +101,23 @@
                         never distilled again: a second pass would re-merge the same lessons and
                         inflate their Reinforcement.
                     </p>
-                    @if (aside.Episode.DistilledAt is { } distilledAt)
+                    @if (detail.Episode.DistilledAt is { } distilledAt)
                     {
                         <p class="aside-note">Last distilled @EpisodeDisplay.Stamp(distilledAt).</p>
                     }
                 </div>
             </aside>
+        }
+        else if (_loadedId == SelectedId)
+        {
+            <main class="pane-detail">
+                <div class="pane-detail-body">
+                    <p class="pane-placeholder">
+                        This Episode does not exist — most likely it was hard-deleted (§8.2), which
+                        takes its Events with it.
+                    </p>
+                </div>
+            </main>
         }
     </div>
 </div>
@@ -138,6 +145,14 @@
     /// </summary>
     private Guid? _loadedId;
 
+    /// <summary>
+    /// Which id the last read was <em>asked</em> for, as against <see cref="_loadedId"/>'s "answered
+    /// for". Set before the await, so a parameter set naming the Episode already on screen — a
+    /// second §8.1 Provenance link into it, one fragment apart — costs nothing rather than three
+    /// more queries. The feed's refresh does not come through here.
+    /// </summary>
+    private Guid? _requestedId;
+
     private IDisposable? _subscription;
     private Debouncer? _debounce;
     private int _generation;
@@ -162,12 +177,26 @@
         });
     }
 
-    protected override Task OnParametersSetAsync() => RefreshAsync();
+    protected override Task OnParametersSetAsync()
+    {
+        // The router reuses this instance across both routes and re-sets the parameters on every
+        // navigation, fragment-only ones included, so the same Episode arrives here repeatedly.
+        if (_requestedId == SelectedId)
+        {
+            return Task.CompletedTask;
+        }
+
+        _requestedId = SelectedId;
+        return RefreshAsync();
+    }
 
     private async Task RefreshAsync()
     {
         if (SelectedId is not { } episodeId)
         {
+            // Counts as a read: a query still in flight for the Episode just left would otherwise
+            // pass the generation check below and paint its detail over the cleared pane.
+            _generation++;
             (_detail, _loadedId) = (null, null);
             return;
         }

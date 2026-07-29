@@ -94,6 +94,29 @@ public static class EpisodeDisplay
             : distillation.ToString().ToLowerInvariant();
 
     /// <summary>
+    /// Why "What it produced" is empty. Read through <see cref="State"/> rather than off the
+    /// Distillation column, so the drill-down and the aside beside it never describe one Episode
+    /// two ways: a <see cref="EpisodeState.Failed"/> session <em>was</em> distilled and errored, and
+    /// telling a curator it "has not been distilled" while the aside says <c>failed</c> and promises
+    /// a re-queue is the same row disagreeing with itself. Only <see cref="EpisodeState.Done"/>
+    /// means the emptiness is settled; the other two say the figure is not in yet.
+    /// </summary>
+    public static string NothingProducedNote(DateTimeOffset? sealedAt, DistillationState distillation)
+        => State(sealedAt, distillation) switch
+        {
+            EpisodeState.Done =>
+                "Distillation drew no durable memory from this session — §6 prefers no candidate"
+                + " over a weak one, so a quiet Episode is the ordinary outcome.",
+            EpisodeState.Failed =>
+                "Distillation was attempted on this session and failed, so nothing was admitted."
+                + " §6 parks a failure rather than dropping it: the sweep re-queues it, and this is"
+                + " not the last word on what the session produced.",
+            _ =>
+                "Nothing yet: this Episode has not been distilled, so no Wisdom carries it as"
+                + " Provenance.",
+        };
+
+    /// <summary>
     /// What the stream says about its own bound, or null when nothing is withheld and there is
     /// nothing to say. A curator must never take a bounded stream for the whole record, so the
     /// collapsed note names both figures.
@@ -114,6 +137,18 @@ public static class EpisodeDisplay
 
     /// <summary>The id prefix a §8.1 Provenance link anchors an Event by.</summary>
     private const string EventAnchor = "event-";
+
+    /// <summary>
+    /// The DOM id the stream puts on one Event, and the other half of the round trip
+    /// <see cref="EventAnchorHref"/> writes. Both live here with <see cref="AnchoredEvent"/> because
+    /// the three used to be spelled independently in three files: a link-writer, a stream, and this
+    /// reader. A mismatch between them does not fail to build — the reader simply returns null and
+    /// the §8.1 link quietly stops opening the stream at its Event.
+    /// </summary>
+    public static string EventAnchorId(Guid eventId) => $"{EventAnchor}{eventId}";
+
+    /// <summary>The fragment a §8.1 Provenance link appends to reach that Event.</summary>
+    public static string EventAnchorHref(Guid eventId) => $"#{EventAnchorId(eventId)}";
 
     /// <summary>
     /// The Event a URL anchors, or null where it names none. §8.1's Provenance links land here as

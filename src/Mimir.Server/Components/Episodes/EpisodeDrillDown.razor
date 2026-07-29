@@ -20,11 +20,7 @@
             @if (Detail.Produced.Count == 0)
             {
                 <p class="detail-note">
-                    @(Episode.Distillation == DistillationState.Done
-                        ? "Distillation drew no durable memory from this session — §6 prefers no"
-                          + " candidate over a weak one, so a quiet Episode is the ordinary outcome."
-                        : "Nothing yet: this Episode has not been distilled, so no Wisdom carries it"
-                          + " as Provenance.")
+                    @EpisodeDisplay.NothingProducedNote(Episode.SealedAt, Episode.Distillation)
                 </p>
             }
             else
@@ -75,8 +71,10 @@
                 <ol class="event-stream">
                     @foreach (var evt in Visible)
                     {
-                        @* The id anchors Provenance drill-downs (§8.1) straight to the Event. *@
-                        <li class="event-item" id="event-@evt.Id" @key="evt.Id">
+                        @* The id anchors Provenance drill-downs (§8.1) straight to the Event; the
+                           link that writes it and the reader that opens the bound for it take the
+                           same spelling from EpisodeDisplay. *@
+                        <li class="event-item" id="@EpisodeDisplay.EventAnchorId(evt.Id)" @key="evt.Id">
                             <div class="event-head">
                                 <span class="event-seq">#@evt.Seq</span>
                                 <span class="event-type">@evt.Type</span>
