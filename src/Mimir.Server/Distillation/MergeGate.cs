@@ -212,10 +212,13 @@ internal sealed class MergeGate(
     /// <summary>
     /// Whether saving <paramref name="text"/> over <paramref name="current"/> would change nothing,
     /// and which of <see cref="EditAsync"/>'s three no-ops it would be — null when the edit lands.
-    /// The one statement of that set: <see cref="EditAsync"/> settles it here at each of its three
-    /// decision points, and <c>WisdomDisplay.UnsavableReason</c> words the two a curator can see
-    /// coming in front of the Save button rather than after it. The pair restated the set
-    /// independently before, which is how the doc comment in #71 went stale.
+    /// The one statement of that set, and the §8.1 screen reads it twice over:
+    /// <see cref="EditAsync"/> settles it here at each of its three decision points,
+    /// <c>WisdomDisplay.UnsavableReason</c> words the two a curator can see coming in front of the
+    /// Save button rather than after it, and <c>WisdomDisplay.WithPendingEdit</c> asks the same
+    /// question to decide whether the version chain grows a pending row — which is what keeps that
+    /// row and that button from disagreeing about whether there is an edit here at all. They
+    /// restated the set independently before, which is how the doc comment in #71 went stale.
     /// </summary>
     /// <param name="current">
     /// What the Wisdom says now, as stored — <see langword="null"/> for an id no Wisdom answers to,

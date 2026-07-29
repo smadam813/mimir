@@ -94,155 +94,267 @@
     </section>
 
     <div class="detail-frame">
-        <main class="detail-pane">
-            @if (SelectedId is null)
-            {
-                <p class="pane-note detail-empty">
-                    Pick a Wisdom to read it, edit its words, or retire it. The list beside this is
-                    everything a session in this repository recalls (§7).
-                </p>
-            }
-            else if (_detail is not { } detail)
-            {
-                <p class="pane-note detail-empty">
-                    Nothing lives at this id — most likely it was deleted with its chain (§10).
-                    <a href="@ListHref">Back to the list</a>
-                </p>
-            }
-            else
-            {
-                var entry = detail.Entry;
-
-                <div class="detail-head">
-                    <span class="detail-kind"><KindGlyph Kind="entry.Kind" />@entry.Kind</span>
-                    <span class="detail-sep">/</span>
-                    <span class="detail-fact">scope <strong>@entry.ScopeName</strong></span>
-                    @if (detail.FirstVersionAt is { } first)
-                    {
-                        <span class="detail-sep">/</span>
-                        <span class="detail-fact">first written @EpisodeDisplay.Stamp(first)</span>
-                    }
-                </div>
-
-                @if (entry.ContestedAt is { } contestedAt)
+        <div class="detail-column">
+            <main class="detail-pane">
+                @if (SelectedId is null)
                 {
-                    <p class="detail-state state-accent">
-                        Contested since @EpisodeDisplay.Stamp(contestedAt) — it survived an adjudication
-                        against a contradicting claim (§6.4).
+                    <p class="pane-note detail-empty">
+                        Pick a Wisdom to read it, edit its words, or retire it. The list beside this is
+                        everything a session in this repository recalls (§7).
                     </p>
                 }
-                @if (entry.RetiredAt is { } retiredAt)
+                else if (_detail is not { } detail)
                 {
-                    <p class="detail-state">
-                        Retired since @EpisodeDisplay.Stamp(retiredAt) — out of all recall and default
-                        search, reversibly (§10). Its words stay editable, and an edit never unretires it.
-                    </p>
-                }
-                @if (entry.SupersededBy is { } successor)
-                {
-                    <p class="detail-state">
-                        Superseded by <a href="@DetailHref(successor)">the ruling's survivor</a>.
-                    </p>
-                }
-
-                @if (_mode is DetailMode.Editing)
-                {
-                    <div class="text-head">
-                        <h6 class="text-title is-editing">
-                            The text · editing v@(detail.CurrentVersion) → v@(detail.CurrentVersion + 1)
-                        </h6>
-                        <span class="text-count">@WisdomDisplay.CharacterCount(_draft.Length)</span>
-                    </div>
-                    <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
-                              aria-label="Edited Wisdom text"></textarea>
-                    <div class="detail-actions">
-                        <button class="btn btn-primary"
-                                disabled="@(_saving || WisdomDisplay.UnsavableReason(_draft, entry.Text) is not null)"
-                                @onclick="SaveAsync">
-                            Save edit
-                        </button>
-                        <button class="btn btn-secondary" disabled="@_saving"
-                                @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
-                        @if (WisdomDisplay.UnsavableReason(_draft, entry.Text) is { } why)
-                        {
-                            <span class="detail-hint">@why</span>
-                        }
-                    </div>
-
-                    @* §8.1's own acceptance criterion: what saving does, on the screen rather than
-                       in the spec. The sentence itself lives in WisdomDisplay, where a test holds
-                       it to the gate it describes — markup nothing renders holds it to nothing. *@
-                    <p class="edit-explains">
-                        @WisdomDisplay.EditExplanation(detail.CurrentVersion + 1, entry.Reinforcement)
+                    <p class="pane-note detail-empty">
+                        Nothing lives at this id — most likely it was deleted with its chain (§10).
+                        <a href="@ListHref">Back to the list</a>
                     </p>
                 }
                 else
                 {
-                    <p class="detail-text @(entry.RetiredAt is not null ? "is-retired" : null)">@entry.Text</p>
-                    <div class="detail-actions">
-                        <button class="btn btn-secondary" @onclick="() => BeginEdit(entry)">Edit</button>
-                        @if (entry.RetiredAt is null)
-                        {
-                            <button class="btn btn-secondary"
-                                    title="Reversibly exclude from recall and default search (§10)"
-                                    @onclick="RetireAsync">
-                                Retire
-                            </button>
-                        }
-                        else
-                        {
-                            <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
-                        }
-                        <span class="detail-hint">@WisdomDisplay.RetireHint(entry.RetiredAt is not null)</span>
-                    </div>
-                }
-                @if (_error is not null)
-                {
-                    <p class="detail-error" role="alert">@_error</p>
-                }
+                    var entry = detail.Entry;
 
-                <h5 class="detail-section">Versions</h5>
-                <ol class="version-list">
-                    @foreach (var version in detail.Versions)
+                    <div class="detail-head">
+                        <span class="detail-kind"><KindGlyph Kind="entry.Kind" />@entry.Kind</span>
+                        <span class="detail-sep">/</span>
+                        <span class="detail-fact">scope <strong>@entry.ScopeName</strong></span>
+                        @if (detail.FirstVersionAt is { } first)
+                        {
+                            <span class="detail-sep">/</span>
+                            <span class="detail-fact">first written @EpisodeDisplay.Stamp(first)</span>
+                        }
+                    </div>
+
+                    @if (entry.ContestedAt is { } contestedAt)
                     {
-                        <li class="version-row">
-                            <span class="version-seq">v@(version.Version)</span>
-                            <span class="version-cause">@version.Cause.ToString().ToLowerInvariant()</span>
-                            <span class="version-at">@EpisodeDisplay.Stamp(version.CreatedAt)</span>
-                            <p class="version-text">@version.Text</p>
-                        </li>
+                        <p class="detail-state state-accent">
+                            Contested since @EpisodeDisplay.Stamp(contestedAt) — it survived an adjudication
+                            against a contradicting claim (§6.4).
+                        </p>
                     }
-                </ol>
+                    @if (entry.RetiredAt is { } retiredAt)
+                    {
+                        <p class="detail-state">
+                            Retired since @EpisodeDisplay.Stamp(retiredAt) — out of all recall and default
+                            search, reversibly (§10). Its words stay editable, and an edit never unretires it.
+                        </p>
+                    }
+                    @if (entry.SupersededBy is { } successor)
+                    {
+                        <p class="detail-state">
+                            Superseded by <a href="@DetailHref(successor)">the ruling's survivor</a>.
+                        </p>
+                    }
 
-                @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
-                   which is not (§10). Absent entirely while the editor is open, so "Delete forever"
-                   can never be the click that throws away a draft the curator is still typing. *@
-                @if (_mode is not DetailMode.Editing)
-                {
-                    <div class="detail-danger">
-                        @if (_mode is DetailMode.ConfirmingDelete)
-                        {
-                            <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
-                                <span class="confirm-prompt">
-                                    Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
-                                    Nothing reverses this.
-                                </span>
-                                <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
-                                <button class="btn btn-secondary"
-                                        @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
-                            </span>
-                        }
-                        else
-                        {
-                            <button class="btn btn-secondary danger-outline"
-                                    @onclick="() => _mode = DetailMode.ConfirmingDelete">
-                                Delete Wisdom…
+                    @if (_mode is DetailMode.Editing)
+                    {
+                        <div class="text-head">
+                            <h6 class="text-title is-editing">
+                                The text · editing v@(detail.CurrentVersion) → v@(detail.CurrentVersion + 1)
+                            </h6>
+                            <span class="text-count">@WisdomDisplay.CharacterCount(_draft.Length)</span>
+                        </div>
+                        <textarea class="input detail-editor" @bind="_draft" @bind:event="oninput"
+                                  aria-label="Edited Wisdom text"></textarea>
+                        <div class="detail-actions">
+                            <button class="btn btn-primary"
+                                    disabled="@(_saving || WisdomDisplay.UnsavableReason(_draft, entry.Text) is not null)"
+                                    @onclick="SaveAsync">
+                                Save edit
                             </button>
-                        }
+                            <button class="btn btn-secondary" disabled="@_saving"
+                                    @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                            @if (WisdomDisplay.UnsavableReason(_draft, entry.Text) is { } why)
+                            {
+                                <span class="detail-hint">@why</span>
+                            }
+                        </div>
+
+                        @* §8.1's own acceptance criterion: what saving does, on the screen rather than
+                           in the spec. The sentence itself lives in WisdomDisplay, where a test holds
+                           it to the gate it describes — markup nothing renders holds it to nothing. *@
+                        <p class="edit-explains">
+                            @WisdomDisplay.EditExplanation(detail.CurrentVersion + 1, entry.Reinforcement)
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="detail-text @(entry.RetiredAt is not null ? "is-retired" : null)">@entry.Text</p>
+                        <div class="detail-actions">
+                            <button class="btn btn-secondary" @onclick="() => BeginEdit(entry)">Edit</button>
+                            @if (entry.RetiredAt is null)
+                            {
+                                <button class="btn btn-secondary"
+                                        title="Reversibly exclude from recall and default search (§10)"
+                                        @onclick="RetireAsync">
+                                    Retire
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
+                            }
+                            <span class="detail-hint">@WisdomDisplay.RetireHint(entry.RetiredAt is not null)</span>
+                        </div>
+                    }
+                    @if (_error is not null)
+                    {
+                        <p class="detail-error" role="alert">@_error</p>
+                    }
+
+                    @* §8.1's version chain (#93). Two views of one list: what each version changed
+                       against the one below it, or every version whole. The choice outlives the
+                       selection deliberately — see _chainView. *@
+                    <div class="chain-head">
+                        <h5 class="detail-section">
+                            Version chain
+                            <span class="version-total">@WisdomDisplay.VersionCount(detail.Versions.Count)</span>
+                        </h5>
+                        <span class="chain-toggle" role="group" aria-label="How the version chain reads">
+                            <button type="button" class="chain-view @(_chainView is VersionChainView.Changed ? "is-active" : null)"
+                                    aria-pressed="@Pressed(_chainView is VersionChainView.Changed)"
+                                    @onclick="() => _chainView = VersionChainView.Changed">
+                                What changed
+                            </button>
+                            <button type="button" class="chain-view @(_chainView is VersionChainView.Full ? "is-active" : null)"
+                                    aria-pressed="@Pressed(_chainView is VersionChainView.Full)"
+                                    @onclick="() => _chainView = VersionChainView.Full">
+                                Full text
+                            </button>
+                        </span>
                     </div>
+                    <ol class="version-list">
+                        @* The draft rides in as the version it would become, so a curator reads their
+                           own rewording against what stands before committing it. Passed raw, beside
+                           the same text the Save button reads: whether it is a version at all is the
+                           gate's no-op set to decide, which is what keeps this row and that button
+                           from disagreeing. The chain under it was diffed when the Wisdom was read —
+                           only this row is a function of the keystroke. *@
+                        @foreach (var version in WisdomDisplay.WithPendingEdit(
+                            _chain, entry.Text, _mode is DetailMode.Editing ? _draft : null))
+                        {
+                            @* Keyed on the version, because this is the one list on the surface that
+                               grows at its head: the first keystroke that parts the draft from the
+                               stored text inserts the pending row, and positionally Blazor would
+                               re-patch every row below it — each one's badge, stamp and whole run
+                               tree — rather than the one node that arrived. *@
+                            <li @key="version.Version"
+                                class="version-row @(version.Pending ? "is-pending" : null)">
+                                <span class="version-rail" aria-hidden="true">
+                                    <i class="version-dot"></i>
+                                    <i class="version-line"></i>
+                                </span>
+                                <div class="version-body">
+                                    <div class="version-meta">
+                                        <span class="version-seq">v@(version.Version)</span>
+                                        <span class="version-cause">
+                                            @WisdomDisplay.CauseWord(version.Cause)@(version.Pending ? " · unsaved" : null)
+                                        </span>
+                                        @if (version.At is { } at)
+                                        {
+                                            <span class="version-at">@EpisodeDisplay.Stamp(at)</span>
+                                        }
+                                        @if (_chainView is VersionChainView.Full)
+                                        {
+                                            <span class="version-chars">
+                                                @WisdomDisplay.CharacterCount(version.Text.Length)
+                                            </span>
+                                        }
+                                    </div>
+                                    @if (_chainView is VersionChainView.Changed)
+                                    {
+                                        @* The roles are each element's own implicit one, spelled out
+                                           because browsers largely do not expose it otherwise: bare
+                                           del and ins, a screen reader reads straight through, and
+                                           the row becomes the old wording and the new one spoken as
+                                           one sentence no version ever said. *@
+                                        <p class="version-text">@foreach (var run in version.Changed)
+                                            {
+                                                @if (run.Change is TextChange.Removed)
+                                                {
+                                                    <del role="deletion">@run.Text</del>
+                                                }
+                                                else if (run.Change is TextChange.Added)
+                                                {
+                                                    <ins role="insertion">@run.Text</ins>
+                                                }
+                                                else
+                                                {
+                                                    @run.Text
+                                                }
+                                            }</p>
+                                    }
+                                    else
+                                    {
+                                        <p class="version-text is-full">@version.Text</p>
+                                    }
+                                    @if (version.Pending)
+                                    {
+                                        <p class="version-note">
+                                            Not yet through the Merge Gate — nothing recalls this
+                                            wording until you save.
+                                        </p>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ol>
+
+                    @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
+                       which is not (§10). Absent entirely while the editor is open, so "Delete forever"
+                       can never be the click that throws away a draft the curator is still typing. *@
+                    @if (_mode is not DetailMode.Editing)
+                    {
+                        <div class="detail-danger">
+                            @if (_mode is DetailMode.ConfirmingDelete)
+                            {
+                                <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
+                                    <span class="confirm-prompt">
+                                        Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
+                                        Nothing reverses this.
+                                    </span>
+                                    <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
+                                    <button class="btn btn-secondary"
+                                            @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
+                                </span>
+                            }
+                            else
+                            {
+                                <button class="btn btn-secondary danger-outline"
+                                        @onclick="() => _mode = DetailMode.ConfirmingDelete">
+                                    Delete Wisdom…
+                                </button>
+                            }
+                        </div>
+                    }
                 }
+            </main>
+
+            @* What the chain's badges mean, on the screen rather than looked up (§8.1). Pinned under
+               the pane it explains, and only beside a Wisdom — over the unselected placeholder it
+               would be a glossary for badges that are not there. Its entries are the enum's, so a
+               cause §3 gains cannot go missing from it.
+
+               The condition is the chain's own, both halves: a list-only refresh deliberately leaves
+               _detail alone, so one that wins the generation check over a navigation to the listing
+               route leaves a detail standing under a null selection. _detail alone would draw the
+               legend over the placeholder there. *@
+            @if (SelectedId is not null && _detail is not null)
+            {
+                <footer class="cause-legend">
+                    <p>
+                        @foreach (var gloss in WisdomDisplay.CauseLegend)
+                        {
+                            @* One flowing paragraph, so each entry ends in a real space rather than a
+                               margin: two elements with only a gap between them give the renderer
+                               nowhere to break the line. It rides in the expression because Razor
+                               trims literal whitespace between elements. *@
+                            <b>@gloss.Word</b>@($" — {gloss.Meaning} ")
+                        }
+                    </p>
+                </footer>
             }
-        </main>
+        </div>
 
         @* The numbers a curator judges by: what has confirmed this Wisdom, what Recall has done
            with it, and what it came from. Only ever beside a Wisdom — an aside of blanks over the
@@ -355,6 +467,15 @@
 
     private WisdomListing? _listing;
     private WisdomDetail? _detail;
+
+    /// <summary>
+    /// The selected Wisdom's saved version chain, diffed once when it is read rather than on every
+    /// render: the rows below the editor cannot change while a curator types, and re-diffing the
+    /// whole chain per keystroke is work the screen would only throw away. Kept in step with
+    /// <see cref="_detail"/> — the two are assigned together, and neither is touched by a refresh
+    /// that did not re-read the detail.
+    /// </summary>
+    private IReadOnlyList<VersionEntry> _chain = [];
     private Guid? _boundSelection;
     private Guid _boundProject;
     private WisdomKind? _kind;
@@ -364,6 +485,14 @@
     private bool _saving;
     private string _draft = "";
     private string? _error;
+
+    /// <summary>
+    /// How the version chain reads, and the one piece of detail state a selection deliberately
+    /// does not reset: a curator working down a list to see what a run of edits did would
+    /// otherwise re-pick it on every row. Not a URL parameter either — it is how this screen is
+    /// being read right now, not what it is showing, so it has no business in a link (§8.1).
+    /// </summary>
+    private VersionChainView _chainView;
 
     private IDisposable? _claim;
     private Debouncer? _debounce;
@@ -510,6 +639,7 @@
         if (reloadDetail)
         {
             _detail = detail;
+            _chain = detail is null ? [] : WisdomDisplay.Chain(detail.Versions);
         }
 
         StateHasChanged();

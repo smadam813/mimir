@@ -184,9 +184,19 @@
         transparent 70%);
 }
 
-.detail-pane {
+/* The pane and the cause legend pinned under it are one column, so the legend stays on the screen
+   while the chain it explains scrolls past. */
+.detail-column {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.detail-pane {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: var(--space-8) 28px;
 }
@@ -325,56 +335,233 @@
     color: var(--color-danger);
 }
 
+/* The type only — .chain-head owns the spacing around the one heading this is left on, so a margin
+   here would be a second statement of it that never applies. */
 .detail-section {
-    margin: var(--space-8) 0 var(--space-3);
+    margin: 0;
     font-size: 13px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
+/* ── The version chain ────────────────────────────────────────────────────────────────────── */
+
+.chain-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin: var(--space-8) 0 var(--space-4);
+}
+
+.version-total {
+    margin-left: var(--space-2);
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.chain-toggle {
+    flex: none;
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-sm);
+}
+
+.chain-view {
+    border: 0;
+    padding: 3px 9px;
+    background: none;
+    font: inherit;
+    font-size: 11px;
+    line-height: 1.3;
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+    cursor: pointer;
+}
+
+.chain-view + .chain-view {
+    border-left: 1px solid var(--color-divider);
+}
+
+.chain-view:hover {
+    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* Inside the toggle's own clip, so the ring survives it: Nocturne draws :focus-visible at
+   outline-offset 2px, which .chain-toggle's overflow would cut away entirely — the same reason
+   Nocturne's own segmented control pulls its offset inward. */
+.chain-view:focus-visible {
+    outline-offset: -2px;
+}
+
+.chain-view.is-active {
+    color: var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* A timeline rather than a stack of cards: the rail is what makes a chain read as one line's
+   history rather than as five unrelated paragraphs. */
 .version-list {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
 }
 
 .version-row {
+    display: grid;
+    grid-template-columns: 15px 1fr;
+    column-gap: var(--space-4);
+    align-items: stretch;
+}
+
+.version-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.version-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    margin-top: 4px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.version-line {
+    flex: 1;
+    width: 1px;
+    margin-top: 4px;
+    background: color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+/* The foot of the chain: nothing came before it, so the rail stops and the dot recedes. */
+.version-row:last-child .version-line {
+    display: none;
+}
+
+.version-row:last-child .version-dot {
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 22%, transparent);
+}
+
+/* The draft the gate has not seen — accent, this design's one colour for "wanting you" (#86). */
+.version-row.is-pending .version-dot {
+    background: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.version-body {
+    min-width: 0;
+    padding-bottom: var(--space-6);
+}
+
+.version-meta {
     display: flex;
     align-items: baseline;
     gap: var(--space-3);
     flex-wrap: wrap;
-    padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--space-2);
 }
 
 .version-seq {
     font-variant-numeric: tabular-nums;
-    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+    font-size: 12px;
+    color: color-mix(in srgb, var(--color-text) 70%, transparent);
 }
 
 .version-cause {
     font-size: 9.5px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
+    padding: 1px 7px;
+    border: 1px solid color-mix(in srgb, var(--color-text) 18%, transparent);
+    border-radius: 5px;
+    color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.version-row.is-pending .version-cause {
     color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .version-at {
-    margin-left: auto;
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
     color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
+.version-chars {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
 .version-text {
-    flex-basis: 100%;
     margin: 0;
     font-size: 13px;
+    line-height: 1.6;
     color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+/* What went and what arrived, told apart without reading: struck and faded against marked and
+   lit. The .3 floor is the one place this design goes below its own legibility floor, because
+   removed text is the one thing that is deliberately no longer being read (#86). */
+.version-text del {
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--color-text) 30%, transparent);
+    color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+
+.version-text ins {
+    padding: 0 3px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    color: var(--color-accent-300);
+    text-decoration: none;
+}
+
+/* Full text reads as a quotation of the version, ruled rather than marked. */
+.version-text.is-full {
+    padding-left: var(--space-4);
+    box-shadow: inset 1px 0 0 color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+.version-row.is-pending .version-text.is-full {
+    box-shadow: inset 1px 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
+    color: color-mix(in srgb, var(--color-text) 85%, transparent);
+}
+
+.version-note {
+    margin: var(--space-2) 0 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* ── The cause legend ─────────────────────────────────────────────────────────────────────── */
+
+.cause-legend {
+    flex: none;
+    padding: var(--space-4) 28px var(--space-6);
+    box-shadow: inset 0 1px 0 var(--color-divider);
+}
+
+.cause-legend p {
+    max-width: 64ch;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.cause-legend b {
+    font-weight: inherit;
+    color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
 
 /* ── The aside ────────────────────────────────────────────────────────────────────────────── */
