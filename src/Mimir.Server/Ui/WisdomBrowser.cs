@@ -70,26 +70,74 @@ public sealed record WisdomListEntry(
 
 /// <summary>
 /// One Provenance row resolved for display (§8.1): ids to link with, plus the words a human
-/// recognizes the referenced record by. Every referenced record still exists — hard deletes
-/// cascade the Provenance rows that pointed at them (§3) — so the display fields are non-null
-/// wherever the matching id is.
+/// recognizes the referenced record by — the moment itself and where the session ran, not the ids
+/// underneath. Every referenced record still exists — hard deletes cascade the Provenance rows that
+/// pointed at them (§3) — so the display fields are non-null wherever the matching id is.
+/// <see cref="WisdomDisplay"/> turns one of these into the two lines the aside renders.
 /// </summary>
 public sealed record ProvenanceEntry(
     Guid Id,
     Guid? EpisodeId,
     Guid? EpisodeProjectId,
-    string? SessionId,
+    string? EpisodeCwd,
+    DateTimeOffset? EpisodeStartedAt,
     Guid? EventId,
     int? EventSeq,
     EventType? EventType,
+    DateTimeOffset? EventAt,
     Guid? HarvestedItemId,
     string? HarvestedPath);
 
-/// <summary>The §8.1 detail: current state, the full version chain (newest first), Provenance.</summary>
+/// <summary>
+/// What Recall has done with one Wisdom (§8.1's aside): how many logged injections carried it, by
+/// lane, and how §9's marks fell on the entries that did. Whole-install and whole-history, not the
+/// Project on screen — a Global Wisdom is recalled from every repository that has one, so figures
+/// narrowed to the sidebar's selection would make the same line's worth change with a click.
+///
+/// A mark is per entry and not per line (§3), so <see cref="MarkedUseful"/> and
+/// <see cref="MarkedNoise"/> count the entries this Wisdom rode in rather than judgements of it;
+/// the aside says so. <see cref="Lanes"/> carries every lane in the enum's own order, zeros
+/// included — a lane dropped at zero reads as "this lane cannot recall it" rather than "it never
+/// has", the same rule the §8.3 chips keep.
+/// </summary>
+public sealed record WisdomRecall(
+    IReadOnlyList<LaneCount> Lanes,
+    int MarkedUseful,
+    int MarkedNoise)
+{
+    /// <summary>Every logged injection that carried this Wisdom, across the three lanes.</summary>
+    public int Injections => Lanes.Sum(l => l.Entries);
+
+    /// <summary>How many of those entries nobody has judged yet (§9).</summary>
+    public int Unmarked => Injections - MarkedUseful - MarkedNoise;
+}
+
+/// <summary>
+/// The §8.1 detail: current state, the full version chain (newest first), Provenance, and what
+/// Recall has done with it.
+/// </summary>
 public sealed record WisdomDetail(
     WisdomListEntry Entry,
     IReadOnlyList<WisdomVersion> Versions,
-    IReadOnlyList<ProvenanceEntry> Provenance);
+    IReadOnlyList<ProvenanceEntry> Provenance,
+    WisdomRecall Recall)
+{
+    /// <summary>
+    /// When this Wisdom's words were first written down — the foot of the chain, which is a
+    /// different date from <see cref="WisdomListEntry.LastConfirmedAt"/> the moment anything has
+    /// reworded or confirmed it since. Null only for a chain that has lost its rows, which the
+    /// schema does not allow while the Wisdom stands.
+    /// </summary>
+    public DateTimeOffset? FirstVersionAt => Versions.Count == 0 ? null : Versions[^1].CreatedAt;
+
+    /// <summary>
+    /// What the chain stands at, read off its head row rather than counted from its length: the
+    /// gate numbers the next version <c>MAX(version) + 1</c>, so a count agrees only while nothing
+    /// has ever removed a row from the middle of a chain. Nothing does today, which is exactly why
+    /// the editor's "v4 → v5" would be silently wrong the day something does.
+    /// </summary>
+    public int CurrentVersion => Versions.Count == 0 ? 0 : Versions[0].Version;
+}
 
 /// <summary>
 /// The read-and-curate surface behind the Wisdom browser (§8.1), listing one Project's
@@ -179,23 +227,63 @@ internal sealed class WisdomBrowser(
                 p.EventId,
                 Event = db.Events
                     .Where(e => e.Id == p.EventId)
-                    .Select(e => new { e.Seq, e.Type, e.EpisodeId }).FirstOrDefault(),
+                    .Select(e => new { e.Seq, e.Type, e.At, e.EpisodeId }).FirstOrDefault(),
                 EpisodeId = p.EpisodeId
                     ?? db.Events.Where(e => e.Id == p.EventId).Select(e => (Guid?)e.EpisodeId).FirstOrDefault(),
+            })
+            .Select(p => new
+            {
+                p.Id,
+                p.HarvestedItemId,
+                p.Path,
+                p.EventId,
+                p.Event,
+                p.EpisodeId,
+                // One projection of the Episode rather than a subquery per column: the aside names
+                // a link by where the session ran as well as when, and four correlated reads of the
+                // same row is three too many.
+                Episode = db.Episodes
+                    .Where(e => e.Id == p.EpisodeId)
+                    .Select(e => new { e.ProjectId, e.Cwd, e.StartedAt })
+                    .FirstOrDefault(),
             })
             .Select(p => new ProvenanceEntry(
                 p.Id,
                 p.EpisodeId,
-                db.Episodes.Where(e => e.Id == p.EpisodeId).Select(e => (Guid?)e.ProjectId).FirstOrDefault(),
-                db.Episodes.Where(e => e.Id == p.EpisodeId).Select(e => e.SessionId).FirstOrDefault(),
+                p.Episode != null ? p.Episode.ProjectId : null,
+                p.Episode != null ? p.Episode.Cwd : null,
+                p.Episode != null ? p.Episode.StartedAt : null,
                 p.EventId,
                 p.Event != null ? p.Event.Seq : null,
                 p.Event != null ? p.Event.Type : null,
+                p.Event != null ? p.Event.At : null,
                 p.HarvestedItemId,
                 p.Path))
             .ToListAsync(cancellationToken);
 
-        return new WisdomDetail(entry, versions, provenance);
+        return new WisdomDetail(entry, versions, provenance, await RecallOfAsync(db, wisdomId, cancellationToken));
+    }
+
+    /// <summary>
+    /// The aside's recall figures (§8.1), aggregated over the injected-items payload: an EXISTS over
+    /// the entry's jsonb items, grouped by lane and mark in one read so a mark can never be counted
+    /// against an entry the lane figures did not see. Deliberately unscoped by Project — see
+    /// <see cref="WisdomRecall"/> for why the sidebar's selection must not move these.
+    /// </summary>
+    private static async Task<WisdomRecall> RecallOfAsync(
+        MimirDbContext db, Guid wisdomId, CancellationToken cancellationToken)
+    {
+        var counted = await db.Injections.AsNoTracking()
+            .Where(i => i.Items.Any(x => x.WisdomId == wisdomId))
+            .GroupBy(i => new { i.Lane, i.Verdict })
+            .Select(g => new { g.Key.Lane, g.Key.Verdict, Entries = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return new WisdomRecall(
+            [.. Enum.GetValues<InjectionLane>().Select(lane => new LaneCount(
+                lane, counted.Where(c => c.Lane == lane).Sum(c => c.Entries)))],
+            counted.Where(c => c.Verdict == InjectionVerdict.Useful).Sum(c => c.Entries),
+            counted.Where(c => c.Verdict == InjectionVerdict.Noise).Sum(c => c.Entries));
     }
 
     /// <summary>
@@ -224,6 +312,12 @@ internal sealed class WisdomBrowser(
     /// unchanged text is a no-op; a Retired one is not, since Retire changes a row's standing and
     /// not its words — see the gate for the full set. The edit can wait behind an in-flight
     /// Admission batch, the same acceptance <c>mimir_remember</c> makes.
+    ///
+    /// The editor states all of this on the screen beside the Save button (§8.1's own criterion),
+    /// so this rule is written down twice — here in prose, and in
+    /// <see cref="WisdomDisplay.EditExplanation"/>, which a test holds to it. The no-op set is not
+    /// among the restatements: <see cref="MergeGate.NoOpOf"/> is its one statement and both the
+    /// gate and the Save button read it from there.
     /// </summary>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
         => await gate.EditAsync(wisdomId, text, cancellationToken);

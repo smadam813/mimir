@@ -102,4 +102,18 @@ public static class EpisodeDisplay
     }
 
     public static string EventsLabel(int count) => count == 1 ? "1 Event" : $"{count} Events";
+
+    /// <summary>
+    /// What one Event was, in words rather than the hook's own name — a curator reading a Wisdom's
+    /// Provenance (§8.1) is being told where a lesson came from, and <c>PostToolUse</c> is the name
+    /// of a hook, not of a moment. The four words are CONTEXT.md's own, from the Event entry:
+    /// "a prompt, tool activity, an assistant message, or a deliberate save".
+    /// </summary>
+    public static string EventWord(EventType type) => type switch
+    {
+        EventType.UserPromptSubmit => "a prompt",
+        EventType.PostToolUse => "tool activity",
+        EventType.Stop => "an assistant message",
+        _ => "a deliberate save",
+    };
 }
