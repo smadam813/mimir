@@ -85,9 +85,282 @@ public sealed class WisdomDisplayTests
         WisdomDisplay.CharacterCount(1_580).ShouldBe("1,580 characters");
         WisdomDisplay.ReinforcementUnit(1).ShouldBe("confirmation");
         WisdomDisplay.ReinforcementUnit(4).ShouldBe("confirmations");
+        WisdomDisplay.VersionCount(1).ShouldBe("1 version");
+        WisdomDisplay.VersionCount(5).ShouldBe("5 versions");
         WisdomDisplay.RetireHint(retired: false).ShouldContain("reversible");
         WisdomDisplay.RetireHint(retired: true).ShouldContain("Unretire");
     }
+
+    /// <summary>
+    /// The badge names the Admission outcome, the enum names the text operation the gate performed,
+    /// and <c>Merged</c> is the one place the two want different words (#93). Every other cause
+    /// reads as its own member name, so the mapping is a mapping of one rather than a table that
+    /// can fall out of step with §3.
+    /// </summary>
+    [Fact]
+    public void TheCauseBadge_ReadsMergedAsReinforced_AndEveryOtherCauseAsItself()
+    {
+        WisdomDisplay.CauseWord(WisdomVersionCause.Merged).ShouldBe("reinforced");
+        WisdomDisplay.CauseWord(WisdomVersionCause.Distilled).ShouldBe("distilled");
+        WisdomDisplay.CauseWord(WisdomVersionCause.Adjudicated).ShouldBe("adjudicated");
+        WisdomDisplay.CauseWord(WisdomVersionCause.Edited).ShouldBe("edited");
+    }
+
+    /// <summary>
+    /// The legend claims to define the badges above it, so it is built from the enum rather than
+    /// listed: every cause §3 has, in §3's own order, each with words of its own. The drawn design
+    /// named three — this is the pin that keeps <c>adjudicated</c> from going missing again.
+    /// </summary>
+    [Fact]
+    public void TheLegend_DefinesEveryCauseTheDomainHas()
+    {
+        WisdomDisplay.CauseLegend.Select(gloss => gloss.Word)
+            .ShouldBe(["distilled", "reinforced", "adjudicated", "edited"]);
+        WisdomDisplay.CauseLegend.Select(gloss => gloss.Meaning).Distinct()
+            .Count().ShouldBe(WisdomDisplay.CauseLegend.Count);
+    }
+
+    /// <summary>
+    /// What the chain's default view is for: one reworded clause marked inside a version that is
+    /// otherwise the version below it. The two texts share a prefix and a suffix that each occur
+    /// once, and the words that move share none of their spelling with the words that stay, so
+    /// nothing but the diff itself can produce this list — the substitution is the only term the
+    /// fixture leaves free to move. Removed before added, because the pair reads as one rewording
+    /// rather than as a deletion beside an unrelated arrival.
+    /// </summary>
+    [Fact]
+    public void TheDiff_MarksTheWordsThatWent_AndThenTheWordsThatArrived()
+    {
+        var runs = WisdomDisplay.Diff(
+            "so a cascaded delete skips interceptors.",
+            "so a cascaded delete never fires SaveChanges interceptors.");
+
+        runs.ShouldBe([
+            new TextRun(TextChange.Kept, "so a cascaded delete "),
+            new TextRun(TextChange.Removed, "skips "),
+            new TextRun(TextChange.Added, "never fires SaveChanges "),
+            new TextRun(TextChange.Kept, "interceptors."),
+        ]);
+    }
+
+    /// <summary>
+    /// A row draws its own version's words, so what it draws has to be exactly those words: a diff
+    /// that dropped or invented a character would show a curator a text no version ever said, and
+    /// the whitespace is as much of that text as the letters. The removed runs are held to the
+    /// other side the same way, word for word. Four shapes plus both empties, because a
+    /// substitution, a pure insertion, a pure deletion and a wholesale rewrite take four different
+    /// paths through the walk.
+    /// </summary>
+    [Theory]
+    [InlineData("alpha beta gamma", "alpha delta gamma")]
+    [InlineData("alpha gamma", "alpha beta beta gamma")]
+    [InlineData("alpha beta gamma", "alpha")]
+    [InlineData("alpha beta", "gamma delta")]
+    [InlineData("", "alpha beta")]
+    [InlineData("alpha beta", "")]
+    public void TheDiff_DrawsExactlyTheNewText_AndAccountsForEveryWordOfTheOld(
+        string previous, string current)
+    {
+        var runs = WisdomDisplay.Diff(previous, current);
+
+        string.Concat(runs.Where(r => r.Change is not TextChange.Removed).Select(r => r.Text))
+            .ShouldBe(current);
+        BareWords(string.Concat(runs.Where(r => r.Change is not TextChange.Added).Select(r => r.Text)))
+            .ShouldBe(BareWords(previous));
+    }
+
+    /// <summary>
+    /// A struck run has to stay clear of the words beside it: a word carries the whitespace after
+    /// it, so a removal inside a text separates itself, but one at either edge of the row's own
+    /// text has nothing between it and its neighbour and renders as one fused word. All three
+    /// edges, because each takes the separator from a different side — a substitution ending both
+    /// texts, a deletion opening the old one, and a deletion running off the end of the new one.
+    /// </summary>
+    [Fact]
+    public void TheDiff_KeepsAStruckRunClearOfTheWordsBesideIt()
+    {
+        WisdomDisplay.Diff("alpha gamma", "alpha delta").ShouldBe([
+            new TextRun(TextChange.Kept, "alpha "),
+            new TextRun(TextChange.Removed, "gamma "),
+            new TextRun(TextChange.Added, "delta"),
+        ]);
+
+        WisdomDisplay.Diff("beta alpha", "alpha").ShouldBe([
+            new TextRun(TextChange.Removed, "beta "),
+            new TextRun(TextChange.Kept, "alpha"),
+        ]);
+
+        WisdomDisplay.Diff("alpha beta gamma", "alpha").ShouldBe([
+            new TextRun(TextChange.Kept, "alpha"),
+            new TextRun(TextChange.Removed, " beta gamma"),
+        ]);
+    }
+
+    /// <summary>
+    /// The foot of the chain has nothing to be different from, so it reads plain: drawn as
+    /// wholesale arrival it would tell a curator a model added words to something, when what it
+    /// did was write the line.
+    /// </summary>
+    [Fact]
+    public void TheFirstVersion_HasNothingToDifferFrom_AndReadsPlain()
+    {
+        WisdomDisplay.Diff(previous: null, "the first wording")
+            .ShouldBe([new TextRun(TextChange.Kept, "the first wording")]);
+    }
+
+    /// <summary>
+    /// Past the bound the diff says the text changed rather than how. The walk is quadratic in the
+    /// two texts and the pane draws one per version, so a single pathological Wisdom would
+    /// otherwise take the render down with it. Both sides of the constant, because a bound that
+    /// fires early is a chain that stops explaining itself: at exactly the bound the words are
+    /// still marked one by one.
+    /// </summary>
+    [Fact]
+    public void TheDiff_PastItsWordBound_SaysTheWholeTextChanged()
+    {
+        var words = Enumerable.Range(0, WisdomDisplay.DiffWordBound)
+            .Select(word => $"w{word}").ToArray();
+        var atBound = string.Join(' ', words);
+        var reworded = string.Join(' ', words[..^1].Append("reworded"));
+
+        WisdomDisplay.Diff(atBound, reworded).ShouldBe([
+            new TextRun(TextChange.Kept, string.Join(' ', words[..^1]) + " "),
+            new TextRun(TextChange.Removed, words[^1] + " "),
+            new TextRun(TextChange.Added, "reworded"),
+        ]);
+
+        var pastBound = atBound + " overrun";
+        WisdomDisplay.Diff(pastBound, reworded + " overrun").ShouldBe([
+            new TextRun(TextChange.Removed, pastBound + " "),
+            new TextRun(TextChange.Added, reworded + " overrun"),
+        ]);
+    }
+
+    /// <summary>
+    /// Newest first, and the chain's own doing rather than its caller's ORDER BY: each row is
+    /// diffed against the row below it, so a chain handed back the other way up draws every
+    /// version's arrivals as departures, silently and on every screen. Seeded oldest-first — the
+    /// order this must not return — so a dropped sort cannot pass by accident.
+    /// </summary>
+    [Fact]
+    public void TheChain_ReadsNewestFirst_AndDiffsEachVersionAgainstTheOneBelowIt()
+    {
+        var chain = WisdomDisplay.Chain(
+            [
+                Version(1, "alpha beta", WisdomVersionCause.Distilled),
+                Version(2, "alpha gamma", WisdomVersionCause.Merged),
+                Version(3, "alpha delta", WisdomVersionCause.Edited),
+            ]);
+
+        chain.Select(v => (v.Version, v.Cause)).ShouldBe([
+            (3, WisdomVersionCause.Edited),
+            (2, WisdomVersionCause.Merged),
+            (1, WisdomVersionCause.Distilled),
+        ]);
+        chain.ShouldAllBe(v => !v.Pending && v.At != null);
+
+        chain[0].Changed.ShouldBe([
+            new TextRun(TextChange.Kept, "alpha "),
+            new TextRun(TextChange.Removed, "gamma "),
+            new TextRun(TextChange.Added, "delta"),
+        ]);
+        chain[1].Changed.ShouldBe([
+            new TextRun(TextChange.Kept, "alpha "),
+            new TextRun(TextChange.Removed, "beta "),
+            new TextRun(TextChange.Added, "gamma"),
+        ]);
+        chain[2].Changed.ShouldBe([new TextRun(TextChange.Kept, "alpha beta")]);
+    }
+
+    /// <summary>
+    /// The draft in the editor is drawn as the version it would become, above the head, so a
+    /// curator reads their own rewording against what stands without saving to see it. It carries
+    /// no timestamp, because the gate has written none, and it carries the trimmed text, because
+    /// trimmed is what the gate would write.
+    /// </summary>
+    [Fact]
+    public void AnUnsavedDraft_HeadsTheChain_AsTheVersionItWouldBecome()
+    {
+        var chain = WisdomDisplay.WithPendingEdit(
+            WisdomDisplay.Chain([Version(4, "alpha beta", WisdomVersionCause.Merged)]),
+            current: "alpha beta",
+            draft: "  alpha gamma  ");
+
+        chain.Select(v => (v.Version, v.Pending)).ShouldBe([(5, true), (4, false)]);
+        chain[0].At.ShouldBeNull();
+        chain[0].Cause.ShouldBe(WisdomVersionCause.Edited);
+        chain[0].Text.ShouldBe("alpha gamma");
+        chain[0].Changed.ShouldBe([
+            new TextRun(TextChange.Kept, "alpha "),
+            new TextRun(TextChange.Removed, "beta "),
+            new TextRun(TextChange.Added, "gamma"),
+        ]);
+    }
+
+    /// <summary>
+    /// Which text the pending row is measured against: the one the caller hands in — the same row
+    /// the Save button reads — and not the head version's, which only says the same thing because
+    /// every rewrite goes through the gate. The fixture parts the two to say so, and the state it
+    /// describes is one production does not reach.
+    /// </summary>
+    [Fact]
+    public void AnUnsavedDraft_IsMeasuredAgainstWhatTheWisdomSays_NotAgainstItsHeadVersion()
+    {
+        var chain = WisdomDisplay.WithPendingEdit(
+            WisdomDisplay.Chain([Version(4, "the head version's words", WisdomVersionCause.Merged)]),
+            current: "what the Wisdom says",
+            draft: "what the Wisdom said");
+
+        chain[0].Changed.ShouldBe([
+            new TextRun(TextChange.Kept, "what the Wisdom "),
+            new TextRun(TextChange.Removed, "says "),
+            new TextRun(TextChange.Added, "said"),
+        ]);
+
+        // And the same for whether there is an edit here at all: a draft already saying what the
+        // Wisdom says is a no-op, whatever the head version happens to hold.
+        WisdomDisplay.WithPendingEdit(
+                WisdomDisplay.Chain(
+                    [Version(4, "the head version's words", WisdomVersionCause.Merged)]),
+                current: "what the Wisdom says",
+                draft: "what the Wisdom says")
+            .ShouldAllBe(version => !version.Pending);
+    }
+
+    /// <summary>
+    /// A draft that would save nothing is not a version. The gate's own no-op set decides, the
+    /// same single statement the Save button beside the chain reads, so the pending row and the
+    /// enabled button can never disagree about whether there is an edit here at all.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("alpha beta")]
+    [InlineData("  alpha beta  ")]
+    public void ADraftThatWouldSaveNothing_IsNotAVersion(string draft)
+    {
+        WisdomDisplay.WithPendingEdit(
+                WisdomDisplay.Chain([Version(4, "alpha beta", WisdomVersionCause.Merged)]),
+                current: "alpha beta",
+                draft)
+            .Select(v => v.Version).ShouldBe([4]);
+    }
+
+    private static readonly Guid WisdomId = Guid.NewGuid();
+
+    private static WisdomVersion Version(int version, string text, WisdomVersionCause cause)
+        => new()
+        {
+            WisdomId = WisdomId,
+            Version = version,
+            Text = text,
+            CreatedAt = EpisodeAt.AddHours(version),
+            Cause = cause,
+        };
+
+    /// <summary>The words of a text, whitespace discarded — what a run must still account for.</summary>
+    private static string[] BareWords(string text)
+        => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
     /// <summary>
     /// The Recall note carries the unmarked remainder and says what a mark is left on, because the
