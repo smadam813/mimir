@@ -20,24 +20,20 @@
     align-items: stretch;
 }
 
+/* The body itself draws nothing: the first-run panel wants its accent wash at the pane's own
+   edges (#90) and the pages that are not surfaces want a prose column, neither of which a gutter
+   here can give. Whoever renders into it brings its own padding (#97). */
 .app-body {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
-    padding: var(--space-8);
 }
 
-/* A ported surface fills the body flush and scrolls its own panes instead (#91). */
+/* A surface fills the body flush and scrolls its own panes instead of this one scrolling (#91). */
 .app-body.is-flush {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 0;
-}
-
-/* The first-run body draws its own padding and its own accent wash to the pane's edges (#90). */
-.app-body.is-bare {
-    padding: 0;
 }
 
 #blazor-error-ui {

@@ -73,25 +73,29 @@
     private bool ShowFirstRun => IsFirstRun is true;
 
     /// <summary>
-    /// How the body sits in the frame. First run draws its own padding and accent wash to the
-    /// pane's edges (#90); otherwise a ported surface fills the body flush and scrolls its own
-    /// panes, while every surface still on the old stylesheet keeps the padded, single-scroll body
-    /// the frame used to give all of them (#91). The two never apply at once — first run replaces
-    /// <c>Body</c> outright, so no surface is rendering to be flush.
+    /// How the body sits in the frame. A surface fills it flush and scrolls its own panes (#91);
+    /// first run replaces <c>Body</c> outright with a panel that scrolls as one document, and so
+    /// do the routes that are not surfaces — the home page and the two error pages — which is the
+    /// unmodified body (#97).
     /// </summary>
-    private string? BodyFit => ShowFirstRun
-        ? "is-bare"
-        : IsPortedSurface ? "is-flush" : null;
-
-    /// <summary>
+    /// <remarks>
     /// Read from the URL, the same way the sidebar and tab strip read it (#89); the layout
-    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. All three
-    /// surfaces are ported now, drill-downs included — Episodes' Event stream is a pane on its own
-    /// screen rather than a page one segment deeper (#95) — so what is left on the old stylesheet
-    /// is the handful of pages that are not surfaces at all, and they go with it (#97).
-    /// </summary>
-    private bool IsPortedSurface
-        => ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri))?.Tab is "wisdom" or "episodes" or "injections";
+    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. A
+    /// <c>projects/{id}</c> URL always names one of the three surfaces — <c>ProjectRoute</c>
+    /// folds a missing or unrecognised tab onto Episodes — so the surface routes are exactly the
+    /// ones it parses, drill-downs included.
+    /// <para>
+    /// Which is why the fit is the URL's answer and not the page's: <c>ProjectPage</c> and
+    /// <c>EpisodePage</c> both render <c>UnknownProject</c> when the id resolves to nothing, and
+    /// that notice is on a surface route, so it lands in the flush body — where it has to draw
+    /// its own padding and shrink-and-scroll rather than clip, which is what <c>.page-notice</c>
+    /// is for. That consequence is stated here and pointed at from the two places it lands,
+    /// rather than derived a third time in each of them.
+    /// </para>
+    /// </remarks>
+    private string? BodyFit => !ShowFirstRun && ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri)) is not null
+        ? "is-flush"
+        : null;
 
     private IDisposable? _subscription;
     private bool _rechecking;

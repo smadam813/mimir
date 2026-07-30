@@ -1,7 +1,9 @@
 /* Spec §8.3 on the Nocturne look (#96): the surface's three panes — a 400px session-grouped list,
-   the detail's frame, and the 283px aside — each scrolling on its own inside the chassis. The
-   opt-out from MainLayout's padded body lives in wwwroot/nocturne/mimir.css, because it spans two
-   components and scoped CSS cannot. */
+   the detail's frame, and the 283px aside — each scrolling on its own inside the chassis. The body
+   it sits in is the flush one MainLayout.BodyFit hands a surface route — a column drawing no
+   gutter — so the panes lay themselves out across its height. This comment used to name a global
+   opt-out from the padded body in wwwroot/nocturne/mimir.css; there is no such rule there, and
+   since #97 there is no padded body to opt out of. */
 .surface-panes {
     flex: 1;
     min-width: 0;

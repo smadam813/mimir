@@ -21,8 +21,8 @@
 
     @* One box, whichever surface is on screen: it narrows that surface's list rather than opening a
        results screen of its own (§8). A surface claims it on mount and releases on leaving, so an
-       unclaimed box — an unported surface, or Global's Episodes tab, which has no Episodes to
-       narrow — says so instead of pretending to search (#91, #94). *@
+       unclaimed box — a route that is not a surface at all, or Global's Episodes tab, which has no
+       Episodes to narrow — says so instead of pretending to search (#91, #94). *@
     <label class="app-search">
         <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
             <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z" />
@@ -30,7 +30,7 @@
         <input class="input" aria-label="Search"
                placeholder="@(Search.Placeholder ?? "Search…")"
                disabled="@(!Search.IsClaimed)"
-               title="@(Search.IsClaimed ? null : "Nothing here claims search — it narrows whichever list is on screen, once that surface is ported.")"
+               title="@(Search.IsClaimed ? null : "Nothing here claims search — it narrows whichever surface's list is on screen, and this screen has none.")"
                value="@Search.Term" @oninput="OnSearchInput" />
     </label>
 

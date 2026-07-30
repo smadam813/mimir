@@ -1,5 +1,5 @@
-/* The first-run body (#90). It owns its own padding — MainLayout drops .app-body's while this is
-   showing — so the accent wash starts at the pane's own top edge rather than inside a gutter. */
+/* The first-run body (#90). It owns its own padding, which is why .app-body draws none (#97): the
+   accent wash starts at the pane's own top edge rather than inside a gutter. */
 .first-run {
     padding: 56px 56px 44px;
     background: radial-gradient(110% 60% at 30% 0%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 65%);
