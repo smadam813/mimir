@@ -73,15 +73,15 @@
 }
 
 /* The routes that are not surfaces (#97): the home page, /Error, /not-found, and the
-   unknown-Project branch the two surface pages fall back to. One column of prose rather than the
+   unknown-Project notice the two surface pages fall back to. One column of prose rather than the
    four-pane shape — the last thing the pre-#86 stylesheet was still being linked for, since its
    .lede is what these read before. Nocturne's own .text-muted is what the paragraphs wear now.
 
-   The padding is the notice's because .app-body no longer draws one, and the overflow is because
-   two of the four land in the flush body: MainLayout decides the fit from the URL, so a
-   /projects/{id} route has already been given a surface's fit by the time the page discovers the
-   id resolves to no Project. In the plain body the rule is inert — the body is what scrolls
-   there, and a block of auto height never overflows itself. */
+   The padding is the notice's because .app-body draws none for anybody. The overflow is for the
+   one caller of the four that renders inside a surface's flush body — UnknownProject, for the
+   reason MainLayout.BodyFit's doc comment gives — where the notice is a flex item that has to
+   shrink and scroll rather than clip. On the other three it is inert: the body is what scrolls
+   there, and the notice's own height is its content's. */
 .page-notice {
   max-width: 44rem;
   padding: var(--space-8);

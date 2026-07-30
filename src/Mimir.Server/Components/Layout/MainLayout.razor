@@ -87,7 +87,10 @@
     /// <para>
     /// Which is why the fit is the URL's answer and not the page's: <c>ProjectPage</c> and
     /// <c>EpisodePage</c> both render <c>UnknownProject</c> when the id resolves to nothing, and
-    /// that notice is on a surface route, so it lands in the flush body and draws its own padding.
+    /// that notice is on a surface route, so it lands in the flush body — where it has to draw
+    /// its own padding and shrink-and-scroll rather than clip, which is what <c>.page-notice</c>
+    /// is for. That consequence is stated here and pointed at from the two places it lands,
+    /// rather than derived a third time in each of them.
     /// </para>
     /// </remarks>
     private string? BodyFit => !ShowFirstRun && ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri)) is not null
