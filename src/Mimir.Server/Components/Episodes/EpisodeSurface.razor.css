@@ -2,8 +2,8 @@
    own file), the drill-down's frame, and the 283px aside — each scrolling on its own inside the
    chassis. The shape is the Injection surface's, because #86 gives all three surfaces one. */
 
-/* MainLayout gives a ported surface a flush body that is a column, so the surface takes its height
-   and lays its own panes out across it (#91). */
+/* MainLayout gives a surface a flush body that is a column, so the surface takes its height and
+   lays its own panes out across it (#91). */
 .episode-surface {
     flex: 1;
     min-height: 0;

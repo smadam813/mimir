@@ -1,0 +1,12 @@
+@* Both surface pages resolve their Project asynchronously and both can be handed an id that
+   resolves to nothing — a deleted Project, or a pasted guid that never was one. Said once rather
+   than in each page's null branch, because the two are word-for-word the same notice and nothing
+   renders markup in a test to catch them drifting apart (#97).
+
+   It is a route on a surface, so MainLayout has already decided the body is flush by the time the
+   page discovers there is no Project to draw: .page-notice brings the padding the surface would
+   otherwise have drawn itself. *@
+<div class="page-notice">
+    <h1>Unknown Project</h1>
+    <p class="text-muted">Nothing lives at this id — the Project may have been deleted.</p>
+</div>

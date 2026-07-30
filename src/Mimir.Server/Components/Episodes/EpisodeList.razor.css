@@ -1,6 +1,6 @@
 /* The §8.2 list pane (#94), on Nocturne's tokens: a fixed 400px column whose head holds still
    while the rows scroll under it. The 400px and the divider are the four-pane shape's, shared with
-   the Wisdom and Injection lists as each is ported. */
+   the Wisdom and Injection lists. */
 
 .episode-pane {
     flex: none;

@@ -19,9 +19,11 @@
      the four from the css2 API (family=Inter:wght@400;500;600;700) rather than assuming drift. */
 
 /* Inter, vendored locally (ADR-0001: fully offline, so no Google Fonts fetch at render time).
-   Latin subset, all four weights Nocturne's own @import requested — styles.css leaves several
-   rules at the UA default bold (700) or an explicit 600 (see wwwroot/app.css and any <strong>),
-   so 400/500 alone left those synthesizing a faux bold instead of rendering Inter's real faces.
+   Latin subset, all four weights Nocturne's own @import requested — the vendored file names no
+   weight above its own 500, so anything the UA renders bold (every <strong> and <b> on the
+   surfaces) would synthesize a faux bold off 500 rather than render Inter's real face. The four
+   stay because the @import asked for four: which of them a rule happens to reach for today is
+   not what the provenance above is a record of.
    Licensed under the SIL Open Font License 1.1; see fonts/OFL.txt. */
 @font-face {
   font-family: "Inter";
@@ -68,6 +70,22 @@
      each re-state this on their own min-width, since they must track one another exactly for the
      frame to scroll as one below it — one token, not three copies of the same literal. */
   --chassis-min-width: 1380px;
+}
+
+/* The routes that are not surfaces (#97): the home page, /Error, /not-found, and the
+   unknown-Project branch the two surface pages fall back to. One column of prose rather than the
+   four-pane shape — the last thing the pre-#86 stylesheet was still being linked for, since its
+   .lede is what these read before. Nocturne's own .text-muted is what the paragraphs wear now.
+
+   The padding is the notice's because .app-body no longer draws one, and the overflow is because
+   two of the four land in the flush body: MainLayout decides the fit from the URL, so a
+   /projects/{id} route has already been given a surface's fit by the time the page discovers the
+   id resolves to no Project. In the plain body the rule is inert — the body is what scrolls
+   there, and a block of auto height never overflows itself. */
+.page-notice {
+  max-width: 44rem;
+  padding: var(--space-8);
+  overflow-y: auto;
 }
 
 /* Keeps an element in the accessibility tree (e.g. FocusOnNavigate's h1 target) without giving it
