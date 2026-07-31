@@ -106,21 +106,15 @@
 
    §8's three surfaces are one shape (#86): a 400px list, the detail's frame with the accent wash
    behind it, and a 283px aside carrying the selected row's numbers. Everything below is the part
-   Wisdom, Episodes and Injections draw identically. It lived as three hand-synced copies in their
-   scoped .razor.css files until #119, which is a home a shared look cannot actually have —
-   per-component CSS is scoped, so "shared" there means copied, and the copies had already drifted
-   in three places nobody had decided.
+   Wisdom, Episodes and Injections draw identically, hoisted here (#119) out of three hand-synced
+   copies in their scoped .razor.css files.
 
-   Where a surface does differ, the difference stays in that surface's own .razor.css: the scoped
-   bundle is linked after this file and every scoped rule carries an extra attribute selector, so
-   an override there beats what is written here without any ordering trick. Which side a variant
-   belongs on is decided by its children — a variant whose children are shared becomes a modifier
-   here (.aside-rows.is-prose), and one whose children are that surface's own stays beside them
-   (the Injection log's .aside-link grid, which exists to place .aside-link-text and
-   .aside-link-count). Splitting a layout from the children it lays out is the thing to avoid.
-
-   A wrapper component was the live alternative and lost: a <SurfaceAside> would work, but it makes
-   ::deep load-bearing in a new place, where hoisting removes ::deep from the codebase entirely. */
+   Where a surface does differ, the difference stays in that surface's own .razor.css, and it beats
+   what is written here with no ordering trick: the scoped bundle is linked after this file and
+   every scoped rule carries an extra attribute selector. Which side a variant belongs on, and why
+   a <SurfaceAside> wrapper was not the answer, is CLAUDE.md's stylesheet section — stated there
+   once rather than restated here, since it is a rule about the repo and not about this file.
+   SurfaceChassisTests is what fails when either is broken. */
 
 /* The detail and its aside share one frame, so the accent wash behind them is one wash rather than
    two that meet at a seam. No align-items: the Wisdom copy carried an explicit stretch and the
