@@ -93,7 +93,7 @@
                                 <span class="event-at">@EpisodeDisplay.Stamp(evt.At)</span>
                                 <ConfirmDelete Label="Delete" Subtle SubjectKey="evt.Id"
                                                Prompt="@($"Hard-delete Event #{evt.Seq} forever?")"
-                                               OnConfirm="() => OnDeleteEvent.InvokeAsync(evt.Id)" />
+                                               OnConfirm="OnDeleteEvent" />
                             </div>
                             <pre class="event-payload">@EventPayload.Pretty(evt.Payload)</pre>
                         </li>
@@ -116,7 +116,7 @@
             <div class="pane-danger">
                 <ConfirmDelete Label="Delete Episode" SubjectKey="Detail.Episode.Id"
                                Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
-                               OnConfirm="() => OnDeleteEpisode.InvokeAsync()" />
+                               OnConfirm="OnDeleteEpisode" />
             </div>
         </article>
     </div>
@@ -150,7 +150,7 @@
     public EventCallback<Guid> OnDeleteEvent { get; set; }
 
     [Parameter, EditorRequired]
-    public EventCallback OnDeleteEpisode { get; set; }
+    public EventCallback<Guid> OnDeleteEpisode { get; set; }
 
     private bool _expanded;
 

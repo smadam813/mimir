@@ -68,6 +68,25 @@ public class ConfirmArmingTests
     }
 
     /// <summary>
+    /// What a confirmation hands back is the record it was armed against, so a host cannot delete
+    /// one Wisdom off a prompt that described another. The latch is the only thing that knows which
+    /// that is once the host's own selection has moved on.
+    /// </summary>
+    [Fact]
+    public void TheSubjectConfirmed_IsTheOneBound()
+    {
+        var arming = new ConfirmArming();
+        arming.Bind(RecordA);
+        arming.Arm();
+
+        arming.Subject.ShouldBe(RecordA);
+
+        arming.Bind(RecordB);
+
+        arming.Subject.ShouldBe(RecordB);
+    }
+
+    /// <summary>
     /// Confirming is a one-shot: the host re-reads and the same component may well be pointed at the
     /// same record again, and it must come back resting rather than still armed.
     /// </summary>

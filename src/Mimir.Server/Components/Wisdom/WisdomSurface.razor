@@ -302,11 +302,16 @@
 
                     @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
                        which is not (§10). Absent entirely while the editor is open, so "Delete forever"
-                       can never be the click that throws away a draft the curator is still typing. *@
+                       can never be the click that throws away a draft the curator is still typing.
+
+                       Keyed and captioned off the detail on screen rather than off SelectedId, which
+                       moves the moment a row is clicked while this read is still in flight: one id
+                       behind the prompt, the arming and the delete, so the Wisdom named is the one
+                       taken (#106). *@
                     @if (_mode is not DetailMode.Editing)
                     {
                         <div class="pane-danger">
-                            <ConfirmDelete Label="Delete Wisdom…" SubjectKey="SelectedId!.Value"
+                            <ConfirmDelete Label="Delete Wisdom…" SubjectKey="detail.Entry.Id"
                                            Prompt="@($"Hard-delete this Wisdom and its {detail.Versions.Count}-version chain forever? Nothing reverses this.")"
                                            OnConfirm="DeleteAsync" />
                         </div>
@@ -697,12 +702,20 @@
         }
     }
 
-    private async Task DeleteAsync()
+    /// <summary>
+    /// Takes the Wisdom the confirmation was armed against, passed back by the component that armed
+    /// it rather than re-read from <see cref="SelectedId"/> here. The two disagree in the window
+    /// between a click on another row and its detail landing — the parameter is set at once, the
+    /// read is not — and in that window the pane still shows the outgoing Wisdom, its prompt still
+    /// names that one's version count, and reading the selection would delete the incoming one
+    /// instead. One id, from the record on screen, all the way through (#106).
+    /// </summary>
+    private async Task DeleteAsync(Guid wisdomId)
     {
         _error = null;
         try
         {
-            await Browser.DeleteAsync(SelectedId!.Value, CancellationToken.None);
+            await Browser.DeleteAsync(wisdomId, CancellationToken.None);
         }
         catch (Exception ex)
         {

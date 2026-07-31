@@ -22,6 +22,14 @@ internal sealed class ConfirmArming
     internal bool Armed { get; private set; }
 
     /// <summary>
+    /// The record a confirmation right now would take. Read back out rather than left for the host
+    /// to re-derive: a host's own notion of what is selected can already have moved on to the row
+    /// whose read has not landed yet, while what the curator is looking at — and what the prompt
+    /// they are agreeing to describes — is still this one.
+    /// </summary>
+    internal Guid Subject => _subject;
+
+    /// <summary>
     /// Points this at <paramref name="subject"/>, disarming if that is a different record from the
     /// one the arming was against. Called on every parameter set, so it must be idempotent for an
     /// unchanged subject: a re-render while the curator reads the consequence is not a reason to

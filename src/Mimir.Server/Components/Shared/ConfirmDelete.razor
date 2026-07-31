@@ -45,8 +45,15 @@ else
     [Parameter, EditorRequired]
     public Guid SubjectKey { get; set; }
 
+    /// <summary>
+    /// Invoked with <see cref="SubjectKey"/> — the record the confirmation was armed against, which
+    /// is what the prompt described and what the curator agreed to. A host that re-read its own
+    /// selection here instead could delete a different record from the one it just confirmed, in
+    /// the window where a row has been clicked and its detail has not landed; carrying the id back
+    /// out closes that by construction rather than by each host getting it right (#106).
+    /// </summary>
     [Parameter]
-    public EventCallback OnConfirm { get; set; }
+    public EventCallback<Guid> OnConfirm { get; set; }
 
     private readonly ConfirmArming _arming = new();
 
@@ -54,7 +61,8 @@ else
 
     private async Task ConfirmAsync()
     {
+        var subject = _arming.Subject;
         _arming.Disarm();
-        await OnConfirm.InvokeAsync();
+        await OnConfirm.InvokeAsync(subject);
     }
 }

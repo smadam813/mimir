@@ -224,13 +224,13 @@
     private Task DeleteEventAsync(Guid eventId)
         => Browser.DeleteEventAsync(eventId, CancellationToken.None);
 
-    private async Task DeleteEpisodeAsync()
+    // The id comes from the confirmation, not from SelectedId: the drill-down stays mounted while
+    // another row's read is in flight, so the selection can already name a different Episode from
+    // the one whose Event count the prompt just quoted (#106).
+    private async Task DeleteEpisodeAsync(Guid episodeId)
     {
-        if (SelectedId is { } episodeId)
-        {
-            await Browser.DeleteEpisodeAsync(episodeId, CancellationToken.None);
-            Nav.NavigateTo($"projects/{ProjectId}/episodes");
-        }
+        await Browser.DeleteEpisodeAsync(episodeId, CancellationToken.None);
+        Nav.NavigateTo($"projects/{ProjectId}/episodes");
     }
 
     public void Dispose()
