@@ -25,17 +25,17 @@
                     @(_view?.Matching == 1 ? "entry" : "entries")
                 </span>
             </div>
-            <div class="lane-chips">
-                <button class="btn btn-secondary lane-chip @(_lane is null ? "is-active" : null)"
+            <div class="chips">
+                <button class="btn btn-secondary chip @(_lane is null ? "is-active" : null)"
                         title="Every lane"
                         @onclick="() => FilterLaneAsync(null)">All</button>
                 @foreach (var lane in _view?.Lanes ?? [])
                 {
-                    <button class="btn btn-secondary lane-chip @(_lane == lane.Lane ? "is-active" : null)"
+                    <button class="btn btn-secondary chip @(_lane == lane.Lane ? "is-active" : null)"
                             @key="lane.Lane"
                             @onclick="() => FilterLaneAsync(lane.Lane)">
                         @InjectionDisplay.Name(lane.Lane)
-                        <span class="lane-chip-count">@lane.Entries</span>
+                        <span class="chip-count">@lane.Entries</span>
                     </button>
                 }
             </div>

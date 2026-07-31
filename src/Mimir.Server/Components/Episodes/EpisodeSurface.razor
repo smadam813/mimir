@@ -49,7 +49,11 @@
                             @(detail.PromptCount == 1 ? "prompt" : "prompts")
                         </span>
                     </div>
-                    <dl class="aside-rows">
+                    @* is-prose, because this is the one aside whose values are phrases rather than
+                       numerals — a formatted stamp, and a Seal reason that is the hook's own
+                       unbounded string. The modifier gives the slack to the value's column, so a
+                       long reason wraps there instead of wrapping the labels beside it. *@
+                    <dl class="aside-rows is-prose">
                         <dt>Duration</dt>
                         <dd class="is-strong">
                             @(EpisodeDisplay.Duration(detail.Episode.StartedAt, detail.Episode.SealedAt)
