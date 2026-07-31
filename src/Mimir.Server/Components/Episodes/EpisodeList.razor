@@ -23,7 +23,7 @@
            it is what "All" is mostly made of, and marks nothing on its row. *@
         @if (_episodes.Count > 0)
         {
-            <div class="state-chips">
+            <div class="chips">
                 <button type="button" class="btn btn-secondary chip @(_filter is null ? "is-active" : null)"
                         @onclick="() => Filter(null)">
                     All

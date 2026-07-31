@@ -35,28 +35,11 @@
     color: color-mix(in srgb, var(--color-text) 56%, transparent);
 }
 
-.state-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-}
-
+/* The chip cluster is hoisted (#119). These two are this list's own: EpisodeDisplay.StateWord
+   answers a lowercase state name, which no other surface's chip labels itself from, and the count
+   lights with the chip because a state's population is the thing the filter is being chosen on. */
 .chip {
-    padding: 3px 9px;
-    font-size: 11.5px;
-    color: color-mix(in srgb, var(--color-text) 65%, transparent);
     text-transform: capitalize;
-}
-
-.chip.is-active {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-}
-
-.chip-count {
-    margin-left: 4px;
-    font-variant-numeric: tabular-nums;
-    color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
 .chip.is-active .chip-count {

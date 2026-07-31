@@ -40,14 +40,14 @@
 
             @if (_listing is { } chips)
             {
-                <div class="kind-chips" role="group" aria-label="Filter by Kind">
-                    <button type="button" class="chip @(_kind is null ? "is-active" : null)"
+                <div class="chips" role="group" aria-label="Filter by Kind">
+                    <button type="button" class="btn btn-secondary chip @(_kind is null ? "is-active" : null)"
                             aria-pressed="@Pressed(_kind is null)" @onclick="() => SetKindAsync(null)">
                         All
                     </button>
                     @foreach (var chip in chips.Kinds)
                     {
-                        <button type="button" class="chip @(_kind == chip.Kind ? "is-active" : null)"
+                        <button type="button" class="btn btn-secondary chip @(_kind == chip.Kind ? "is-active" : null)"
                                 aria-pressed="@Pressed(_kind == chip.Kind)"
                                 @onclick="() => SetKindAsync(chip.Kind)">
                             @chip.Kind<span class="chip-count">@chip.Count</span>
@@ -93,7 +93,7 @@
         </div>
     </section>
 
-    <div class="detail-frame">
+    <div class="pane-detail-frame">
         <div class="detail-column">
             <main class="detail-pane">
                 @if (SelectedId is null)
@@ -361,7 +361,7 @@
            unselected placeholder would be three headings claiming nothing. *@
         @if (_detail is { } aside)
         {
-            <aside class="detail-aside">
+            <aside class="pane-aside">
                 <div>
                     <h6>Reinforcement</h6>
                     <div class="aside-figure">

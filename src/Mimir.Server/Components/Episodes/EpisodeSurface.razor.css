@@ -1,6 +1,7 @@
 /* Spec §8.2 on the Nocturne look (#95): the surface's three panes — the 400px list (EpisodeList's
    own file), the drill-down's frame, and the 283px aside — each scrolling on its own inside the
-   chassis. The shape is the Injection surface's, because #86 gives all three surfaces one. */
+   chassis. #86 gives all three surfaces one shape, and since #119 that shape is one stylesheet
+   too — wwwroot/nocturne/mimir.css — rather than this file's copy of the Injection surface's. */
 
 /* MainLayout gives a surface a flush body that is a column, so the surface takes its height and
    lays its own panes out across it (#91). */
@@ -12,116 +13,9 @@
     align-items: stretch;
 }
 
-/* ── The drill-down's frame ───────────────────────────────────────────────────────────────── */
-
-.pane-detail-frame {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    background: radial-gradient(
-        120% 70% at 50% -10%,
-        color-mix(in srgb, var(--color-accent) 9%, transparent),
-        transparent 70%);
-}
-
-/* ::deep, because the same three classes are EpisodeDrillDown's own root and body on a selected
-   Episode and this component's placeholder when nothing is selected — one pane, drawn from two
-   components, and it has to be the same pane either way. */
-.pane-detail-frame ::deep .pane-detail {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.pane-detail-frame ::deep .pane-detail-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: var(--space-8) 28px 28px;
-}
-
-.pane-detail-frame ::deep .pane-detail-footer {
-    flex: none;
-    padding: var(--space-4) 28px;
-    box-shadow: inset 0 1px 0 var(--color-divider);
-    background: var(--color-bg);
-}
-
-.pane-placeholder {
-    max-width: 44ch;
-    font-size: 13px;
-    line-height: 1.6;
-    color: color-mix(in srgb, var(--color-text) 50%, transparent);
-}
-
-/* ── The aside ────────────────────────────────────────────────────────────────────────────── */
-
-.pane-aside {
-    flex: none;
-    width: 283px;
-    padding: var(--space-8) 28px var(--space-8) var(--space-8);
-    border-left: 1px solid var(--color-divider);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-}
-
-.pane-aside h6 {
-    margin: 0 0 var(--space-3);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.aside-figure {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-}
-
-.aside-figure-value {
-    font-size: 34px;
-    font-weight: var(--font-heading-weight);
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-}
-
-.aside-figure-unit {
-    font-size: 11.5px;
-    color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.aside-rows {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px var(--space-4);
-    margin: var(--space-4) 0 0;
-    font-size: 12.5px;
-    color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.aside-rows dt,
-.aside-rows dd {
-    margin: 0;
-}
-
-.aside-rows dd {
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-
-.aside-rows dd.is-accent {
-    color: var(--color-accent-400);
-}
-
-.aside-rows dd.is-strong {
-    color: var(--color-text);
-}
+/* ── The aside ──────────────────────────────────────────────────────────────────────────────
+   The chassis is hoisted (#119), the .is-prose modifier this aside's <dl> wears included; the
+   markup says why it wears it. What is left here is the Distillation section's own two rules. */
 
 /* Where distillation is, in one word — the aside's own answer, not a badge lifted off a row. */
 .aside-state {
@@ -130,13 +24,8 @@
     color: var(--color-accent-400);
 }
 
-.aside-note {
-    margin: var(--space-3) 0 0;
-    font-size: 11.5px;
-    line-height: 1.5;
-    color: color-mix(in srgb, var(--color-text) 56%, transparent);
-}
-
+/* The Distillation note names two Episode states inline, and an <em> here is that emphasis rather
+   than the italic the UA would draw over a paragraph that is already quiet. */
 .aside-note em {
     font-style: normal;
     color: color-mix(in srgb, var(--color-text) 78%, transparent);

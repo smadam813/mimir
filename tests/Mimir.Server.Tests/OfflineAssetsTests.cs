@@ -10,7 +10,6 @@ namespace Mimir.Server.Tests;
 /// </summary>
 public class OfflineAssetsTests
 {
-    private static readonly Regex CssComment = new(@"/\*.*?\*/", RegexOptions.Singleline);
     private static readonly Regex RemoteImport =
         new("""@import\s+(url\(\s*['"]?https?://|['"]https?://)""", RegexOptions.IgnoreCase);
     private static readonly Regex RemoteUrlReference =
@@ -27,7 +26,7 @@ public class OfflineAssetsTests
 
         foreach (var file in cssFiles)
         {
-            var code = CssComment.Replace(File.ReadAllText(file), string.Empty);
+            var code = CssText.StripComments(File.ReadAllText(file));
 
             RemoteImport.IsMatch(code).ShouldBeFalse($"{file} imports a remote stylesheet");
             RemoteUrlReference.IsMatch(code).ShouldBeFalse($"{file} references a remote url()");

@@ -101,3 +101,218 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ── The surface chassis ──────────────────────────────────────────────────────────────────────
+
+   §8's three surfaces are one shape (#86): a 400px list, the detail's frame with the accent wash
+   behind it, and a 283px aside carrying the selected row's numbers. Everything below is the part
+   Wisdom, Episodes and Injections draw identically. It lived as three hand-synced copies in their
+   scoped .razor.css files until #119, which is a home a shared look cannot actually have —
+   per-component CSS is scoped, so "shared" there means copied, and the copies had already drifted
+   in three places nobody had decided.
+
+   Where a surface does differ, the difference stays in that surface's own .razor.css: the scoped
+   bundle is linked after this file and every scoped rule carries an extra attribute selector, so
+   an override there beats what is written here without any ordering trick. Which side a variant
+   belongs on is decided by its children — a variant whose children are shared becomes a modifier
+   here (.aside-rows.is-prose), and one whose children are that surface's own stays beside them
+   (the Injection log's .aside-link grid, which exists to place .aside-link-text and
+   .aside-link-count). Splitting a layout from the children it lays out is the thing to avoid.
+
+   A wrapper component was the live alternative and lost: a <SurfaceAside> would work, but it makes
+   ::deep load-bearing in a new place, where hoisting removes ::deep from the codebase entirely. */
+
+/* The detail and its aside share one frame, so the accent wash behind them is one wash rather than
+   two that meet at a seam. No align-items: the Wisdom copy carried an explicit stretch and the
+   other two never did, and stretch is what a flex container's initial normal already computes to,
+   so the three agree by dropping it rather than by spreading it. */
+.pane-detail-frame {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  background: radial-gradient(
+    120% 70% at 50% -10%,
+    color-mix(in srgb, var(--color-accent) 9%, transparent),
+    transparent 70%);
+}
+
+/* Descendants of the frame rather than rules on a component's own root, because these three
+   classes are the drill-down component's root, body and footer on a selection and the surface's
+   own placeholder markup when there is none — one pane, drawn from two components, and it has to
+   be the same pane either way. Scoped, that needed ::deep in two files; hoisted, it is a plain
+   descendant selector. Wisdom writes its detail inline instead of as a child component, so nothing
+   there matches these — expected, not a gap. */
+.pane-detail-frame .pane-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-detail-frame .pane-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-8) 28px 28px;
+}
+
+.pane-detail-frame .pane-detail-footer {
+  flex: none;
+  padding: var(--space-4) 28px;
+  box-shadow: inset 0 1px 0 var(--color-divider);
+  background: var(--color-bg);
+}
+
+/* What the pane says with nothing selected: a sentence naming what picking a row would show. */
+.pane-placeholder {
+  max-width: 44ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+/* ── The aside ────────────────────────────────────────────────────────────────────────────────
+   Scrolls on its own, so the numbers stay put while the detail beside them moves. */
+
+.pane-aside {
+  flex: none;
+  width: 283px;
+  padding: var(--space-8) 28px var(--space-8) var(--space-8);
+  border-left: 1px solid var(--color-divider);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.pane-aside h6 {
+  margin: 0 0 var(--space-3);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* The one number a section leads on, big enough to read without looking for it. */
+.aside-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.aside-figure-value {
+  font-size: 34px;
+  font-weight: var(--font-heading-weight);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.aside-figure-unit {
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.aside-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--space-4);
+  margin: 0;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+/* The gap is structural, not per-surface: a <dl> that follows the section's h6 needs none, because
+   the h6 already draws its own bottom margin, and one that follows a figure needs the whole step.
+   Stated as the adjacency rather than as two different margins in two files, which is what it read
+   as while the copies were separate (#119). */
+.aside-figure + .aside-rows {
+  margin-top: var(--space-4);
+}
+
+/* Numerals against phrases. The default gives the slack to the label, because a right-aligned
+   column of figures wants to be exactly as wide as its widest figure. An aside whose <dd> carries
+   prose — a formatted stamp, or a Seal reason that is the hook's own unbounded string — takes the
+   modifier instead, so the labels never wrap and the long value wraps in its own column. */
+.aside-rows.is-prose {
+  grid-template-columns: auto 1fr;
+}
+
+.aside-rows dt,
+.aside-rows dd {
+  margin: 0;
+}
+
+.aside-rows dd {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.aside-rows dd.is-accent {
+  color: var(--color-accent-400);
+}
+
+.aside-rows dd.is-strong {
+  color: var(--color-text);
+}
+
+.aside-note {
+  margin: var(--space-3) 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+/* Pulled out to the aside's own padding edge, so a hovered row reads as a row of the aside rather
+   than as a box drawn inside it. */
+.aside-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 calc(var(--space-3) * -1);
+}
+
+.aside-link {
+  display: block;
+  padding: 7px var(--space-3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+
+/* The a. is load-bearing: a surface may render a .aside-link that is not an anchor, for a record
+   with nothing to open — the Injection log's .aside-link.is-gone, for a Wisdom deleted since — and
+   a hover fill there would promise a click that does not exist. */
+a.aside-link:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+/* ── The list head's chips ────────────────────────────────────────────────────────────────────
+   A filter row above a list pane. Each chip composes Nocturne's own button — class="btn
+   btn-secondary chip" — so what is written here is only the delta: smaller, quieter, and lit by
+   the accent when it is the one filtering. Before #119 the Wisdom chip hand-rolled a hover fill
+   byte-identical to .btn-secondary's instead. */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+
+.chip.is-active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.chip-count {
+  margin-left: var(--space-1);
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}

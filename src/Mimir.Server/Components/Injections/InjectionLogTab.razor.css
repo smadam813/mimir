@@ -44,29 +44,6 @@
     color: color-mix(in srgb, var(--color-text) 56%, transparent);
 }
 
-.lane-chips {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-}
-
-.lane-chip {
-    font-size: 11.5px;
-    padding: 3px 9px;
-    color: color-mix(in srgb, var(--color-text) 65%, transparent);
-}
-
-.lane-chip.is-active {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-}
-
-.lane-chip-count {
-    margin-left: 4px;
-    font-variant-numeric: tabular-nums;
-    color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-
 .pane-list-body {
     flex: 1;
     min-height: 0;
@@ -201,144 +178,16 @@
     color: color-mix(in srgb, var(--color-text) 40%, transparent);
 }
 
-/* ── The detail's frame ───────────────────────────────────────────────────────────────────── */
+/* ── The aside ──────────────────────────────────────────────────────────────────────────────
+   The chassis is hoisted (#119); what is left here is this aside's own "most recalled" row. */
 
-.pane-detail-frame {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    background: radial-gradient(
-        120% 70% at 50% -10%,
-        color-mix(in srgb, var(--color-accent) 9%, transparent),
-        transparent 70%);
-}
-
-/* ::deep, because the same three classes are the InjectionDetail component's own root and body on
-   a selected entry and this component's placeholder when nothing is selected — one pane, drawn
-   from two components, and it has to be the same pane either way. */
-.pane-detail-frame ::deep .pane-detail {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.pane-detail-frame ::deep .pane-detail-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: var(--space-8) 28px 28px;
-}
-
-.pane-detail-frame ::deep .pane-detail-footer {
-    flex: none;
-    padding: var(--space-4) 28px var(--space-4);
-    box-shadow: inset 0 1px 0 var(--color-divider);
-    background: var(--color-bg);
-}
-
-.pane-placeholder {
-    max-width: 44ch;
-    font-size: 13px;
-    line-height: 1.6;
-    color: color-mix(in srgb, var(--color-text) 50%, transparent);
-}
-
-/* ── The aside ────────────────────────────────────────────────────────────────────────────── */
-
-.pane-aside {
-    flex: none;
-    width: 283px;
-    padding: var(--space-8) 28px var(--space-8) var(--space-8);
-    border-left: 1px solid var(--color-divider);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-}
-
-.pane-aside h6 {
-    margin: 0 0 var(--space-3);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.aside-figure {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-}
-
-.aside-figure-value {
-    font-size: 34px;
-    font-weight: var(--font-heading-weight);
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-}
-
-.aside-figure-unit {
-    font-size: 11.5px;
-    color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.aside-rows {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px var(--space-4);
-    margin: var(--space-4) 0 0;
-    font-size: 12.5px;
-    color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.aside-rows dt,
-.aside-rows dd {
-    margin: 0;
-}
-
-.aside-rows dd {
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-
-.aside-rows dd.is-accent {
-    color: var(--color-accent-400);
-}
-
-.aside-rows dd.is-strong {
-    color: var(--color-text);
-}
-
-.aside-note {
-    margin: var(--space-3) 0 0;
-    font-size: 11.5px;
-    line-height: 1.5;
-    color: color-mix(in srgb, var(--color-text) 56%, transparent);
-}
-
-.aside-links {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0 calc(var(--space-3) * -1);
-}
-
+/* A grid rather than the hoisted block, and the override stays here because the two children it
+   places are this surface's: a clamped line of Wisdom text beside its recall count. */
 .aside-link {
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: center;
     gap: var(--space-3);
-    padding: 7px var(--space-3);
-    border-radius: var(--radius-sm);
-    text-decoration: none;
-    color: inherit;
-}
-
-a.aside-link:hover {
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .aside-link-text {
