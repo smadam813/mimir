@@ -2,18 +2,18 @@
    for the consequence and an explicit choice. The one component that draws a §8.2 confirmation
    anywhere in the app (#106): the Wisdom surface, the Episode drill-down and each of its Events
    all host this one, so a hard delete looks and behaves the same wherever it is offered. *@
-@if (_armed)
+@if (_arming.Armed)
 {
     <span class="confirm-delete" role="alertdialog" aria-label="Confirm deletion">
         <span class="confirm-prompt">@Prompt</span>
         <button class="btn danger-fill" @onclick="ConfirmAsync">Delete forever</button>
-        <button class="btn btn-secondary" @onclick="() => _armed = false">Cancel</button>
+        <button class="btn btn-secondary" @onclick="_arming.Disarm">Cancel</button>
     </span>
 }
 else
 {
     <button class="btn btn-secondary @(Subtle ? "is-subtle" : "danger-outline")"
-            @onclick="() => _armed = true">@Label</button>
+            @onclick="_arming.Arm">@Label</button>
 }
 
 @code {
@@ -39,7 +39,8 @@ else
     /// otherwise paint the incoming record with "Delete forever" one click away. Disarming on a
     /// change of subject is therefore this component's contract rather than each host's discipline
     /// — the host that had to remember it is the one that forgot (#106). <c>EditorRequired</c>
-    /// makes a call site that omits the key a build failure rather than a latent leak.
+    /// raises RZ2012 at a call site that omits the key, and this repo builds with
+    /// <c>TreatWarningsAsErrors</c>, so forgetting it fails the build rather than leaking quietly.
     /// </summary>
     [Parameter, EditorRequired]
     public Guid SubjectKey { get; set; }
@@ -47,21 +48,13 @@ else
     [Parameter]
     public EventCallback OnConfirm { get; set; }
 
-    private Guid _boundSubject;
-    private bool _armed;
+    private readonly ConfirmArming _arming = new();
 
-    protected override void OnParametersSet()
-    {
-        if (_boundSubject != SubjectKey)
-        {
-            _boundSubject = SubjectKey;
-            _armed = false;
-        }
-    }
+    protected override void OnParametersSet() => _arming.Bind(SubjectKey);
 
     private async Task ConfirmAsync()
     {
-        _armed = false;
+        _arming.Disarm();
         await OnConfirm.InvokeAsync();
     }
 }
