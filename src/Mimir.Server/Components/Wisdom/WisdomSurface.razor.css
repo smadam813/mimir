@@ -282,12 +282,6 @@
     color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
-.detail-error {
-    max-width: 44rem;
-    font-size: 12px;
-    color: var(--color-danger);
-}
-
 /* The type only — .chain-head owns the spacing around the one heading this is left on, so a margin
    here would be a second statement of it that never applies. */
 .detail-section {
@@ -576,34 +570,4 @@
     font-size: 11.5px;
     line-height: 1.5;
     color: var(--color-danger);
-}
-
-/* Delete is the permanent act: set apart from the reversible Retire above, and confirmed (§10). */
-.detail-danger {
-    margin-top: var(--space-8);
-    padding-top: var(--space-4);
-    box-shadow: inset 0 1px 0 var(--color-divider);
-}
-
-.confirm {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-3);
-    flex-wrap: wrap;
-}
-
-.confirm-prompt {
-    font-size: 12px;
-    color: var(--color-danger);
-}
-
-.danger-outline {
-    color: var(--color-danger);
-    border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
-}
-
-.danger-fill {
-    color: var(--color-bg);
-    background: var(--color-danger);
-    border-color: var(--color-danger);
 }

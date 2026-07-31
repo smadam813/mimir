@@ -91,9 +91,9 @@
                                     </span>
                                 }
                                 <span class="event-at">@EpisodeDisplay.Stamp(evt.At)</span>
-                                <ConfirmDelete Label="Delete" Subtle
+                                <ConfirmDelete Label="Delete" Subtle SubjectKey="evt.Id"
                                                Prompt="@($"Hard-delete Event #{evt.Seq} forever?")"
-                                               OnConfirm="() => OnDeleteEvent.InvokeAsync(evt.Id)" />
+                                               OnConfirm="OnDeleteEvent" />
                             </div>
                             <pre class="event-payload">@EventPayload.Pretty(evt.Payload)</pre>
                         </li>
@@ -113,10 +113,14 @@
 
             @* Spec §8.2: hard delete of the whole Episode for sensitive content; its Events go with
                it. Set apart from the per-Event delete above — this one takes the record entire. *@
-            <div class="detail-danger">
-                <ConfirmDelete Label="Delete Episode"
+            <div class="pane-danger">
+                <ConfirmDelete Label="Delete Episode" SubjectKey="Detail.Episode.Id"
                                Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
-                               OnConfirm="() => OnDeleteEpisode.InvokeAsync()" />
+                               OnConfirm="OnDeleteEpisode" />
+                @if (Error is { } failure)
+                {
+                    <p class="pane-error" role="alert">@failure</p>
+                }
             </div>
         </article>
     </div>
@@ -150,7 +154,14 @@
     public EventCallback<Guid> OnDeleteEvent { get; set; }
 
     [Parameter, EditorRequired]
-    public EventCallback OnDeleteEpisode { get; set; }
+    public EventCallback<Guid> OnDeleteEpisode { get; set; }
+
+    /// <summary>
+    /// A delete that did not land, said here rather than thrown. The surface owns the text because
+    /// it owns the call; this component owns where it sits, which is under the button that failed.
+    /// </summary>
+    [Parameter]
+    public string? Error { get; set; }
 
     private bool _expanded;
 

@@ -199,10 +199,3 @@
     font-size: 11.5px;
     color: color-mix(in srgb, var(--color-text) 56%, transparent);
 }
-
-/* Delete takes the record entire, so it is set apart from the per-Event delete above (§8.2). */
-.detail-danger {
-    margin-top: var(--space-8);
-    padding-top: var(--space-4);
-    box-shadow: inset 0 1px 0 var(--color-divider);
-}

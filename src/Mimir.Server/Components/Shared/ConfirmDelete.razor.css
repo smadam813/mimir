@@ -1,6 +1,8 @@
 /* The §8.2 confirmation, on Nocturne's tokens (#95). Danger is the one hue Mimir adds to the
-   system and it is reserved for exactly this and for Orphaned — the same two rules WisdomSurface
-   states for its own Delete, restated here because scoped CSS cannot be shared. */
+   system and it is reserved for exactly this and for Orphaned. Single-owner since #106 folded
+   WisdomSurface's copy of the confirmation into this component, so these stay scoped here rather
+   than hoisting: the danger-zone wrapper both surfaces draw is the shared one, and it is
+   .pane-danger in mimir.css. */
 
 .confirm-delete {
     display: inline-flex;

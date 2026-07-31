@@ -33,7 +33,9 @@ public class SurfaceChassisTests
     /// The chassis, exactly as the hoisted rules spell it. Two tiers: what all three surfaces draw
     /// (the aside, the frame, the chips) and what only the two whose detail is a child component
     /// draw (the detail plumbing and the placeholder) — Wisdom writes its detail inline, so those
-    /// simply do not match there.
+    /// simply do not match there. <c>.pane-danger</c> and <c>.pane-error</c> are a third case: the
+    /// §8.2 danger zone and the inline failure above it, drawn by the two surfaces that offer a
+    /// hard delete and by no others (#106).
     /// </summary>
     private static readonly string[] HoistedSelectors =
     [
@@ -41,6 +43,8 @@ public class SurfaceChassisTests
         ".pane-detail-frame .pane-detail",
         ".pane-detail-frame .pane-detail-body",
         ".pane-detail-frame .pane-detail-footer",
+        ".pane-danger",
+        ".pane-error",
         ".pane-placeholder",
         ".pane-aside",
         ".pane-aside h6",

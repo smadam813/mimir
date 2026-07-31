@@ -1,0 +1,78 @@
+@* Spec §8.2: every hard delete is confirmed. Two-phase, inline, no JS — arming swaps the button
+   for the consequence and an explicit choice. The one component that draws a §8.2 confirmation
+   anywhere in the app (#106): the Wisdom surface, the Episode drill-down and each of its Events
+   all host this one, so a hard delete looks and behaves the same wherever it is offered. *@
+@if (_arming.Armed)
+{
+    <span class="confirm-delete" role="alertdialog" aria-label="Confirm deletion">
+        <span class="confirm-prompt">@Prompt</span>
+        <button class="btn danger-fill" @onclick="ConfirmAsync">Delete forever</button>
+        <button class="btn btn-secondary" @onclick="_arming.Disarm">Cancel</button>
+    </span>
+}
+else
+{
+    <button class="btn btn-secondary @(Subtle ? "is-subtle" : "danger-outline")"
+            @onclick="_arming.Arm">@Label</button>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = "";
+
+    /// <summary>
+    /// Whether the resting button stays out of the way. Arming is reversible, so it is not itself
+    /// the destructive act, and the Event stream draws one of these per Event: in danger's hue they
+    /// would out-shout the salience mark that stream exists to show. The armed state is red either
+    /// way, which is where the permanence actually is (#95).
+    /// </summary>
+    [Parameter]
+    public bool Subtle { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Prompt { get; set; } = "";
+
+    /// <summary>
+    /// The id of the record this delete would take — the Wisdom, the Episode, the Event. Selecting
+    /// another row must not carry an armed Delete onto it: the confirmation names what it is about
+    /// to destroy, and a host that keeps this component mounted across a selection change would
+    /// otherwise paint the incoming record with "Delete forever" one click away. Disarming on a
+    /// change of subject is therefore this component's contract rather than each host's discipline
+    /// — the host that had to remember it is the one that forgot (#106). <c>EditorRequired</c>
+    /// raises RZ2012 at a call site that omits the key, and this repo builds with
+    /// <c>TreatWarningsAsErrors</c>, so forgetting it fails the build rather than leaking quietly.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Guid SubjectKey { get; set; }
+
+    /// <summary>
+    /// Invoked with <see cref="SubjectKey"/> — the record the prompt described and the curator
+    /// agreed to.
+    ///
+    /// This is the one statement of why the id travels with the callback, and every host that takes
+    /// it points back here rather than restating it. A surface's own notion of what is selected
+    /// moves the instant a row is clicked, while the read that will replace the detail is still in
+    /// flight; for that stretch the pane, and the prompt being agreed to, still describe the
+    /// outgoing record. A host that re-read its selection in its handler would delete the incoming
+    /// one off the outgoing one's prompt. Carrying the id out closes that for every host at once,
+    /// rather than leaving each to get it right (#106).
+    /// </summary>
+    [Parameter]
+    public EventCallback<Guid> OnConfirm { get; set; }
+
+    private readonly ConfirmArming _arming = new();
+
+    protected override void OnParametersSet() => _arming.Bind(SubjectKey);
+
+    /// <summary>
+    /// Asks rather than assumes: a click can reach a disarmed confirmation, and
+    /// <see cref="ConfirmArming.TryConfirm"/> says why and answers false there.
+    /// </summary>
+    private async Task ConfirmAsync()
+    {
+        if (_arming.TryConfirm())
+        {
+            await OnConfirm.InvokeAsync(SubjectKey);
+        }
+    }
+}
