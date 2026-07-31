@@ -46,11 +46,16 @@ else
     public Guid SubjectKey { get; set; }
 
     /// <summary>
-    /// Invoked with <see cref="SubjectKey"/> — the record the confirmation was armed against, which
-    /// is what the prompt described and what the curator agreed to. A host that re-read its own
-    /// selection here instead could delete a different record from the one it just confirmed, in
-    /// the window where a row has been clicked and its detail has not landed; carrying the id back
-    /// out closes that by construction rather than by each host getting it right (#106).
+    /// Invoked with <see cref="SubjectKey"/> — the record the prompt described and the curator
+    /// agreed to.
+    ///
+    /// This is the one statement of why the id travels with the callback, and every host that takes
+    /// it points back here rather than restating it. A surface's own notion of what is selected
+    /// moves the instant a row is clicked, while the read that will replace the detail is still in
+    /// flight; for that stretch the pane, and the prompt being agreed to, still describe the
+    /// outgoing record. A host that re-read its selection in its handler would delete the incoming
+    /// one off the outgoing one's prompt. Carrying the id out closes that for every host at once,
+    /// rather than leaving each to get it right (#106).
     /// </summary>
     [Parameter]
     public EventCallback<Guid> OnConfirm { get; set; }
@@ -59,10 +64,15 @@ else
 
     protected override void OnParametersSet() => _arming.Bind(SubjectKey);
 
+    /// <summary>
+    /// Asks rather than assumes: a click can reach a disarmed confirmation, and
+    /// <see cref="ConfirmArming.TryConfirm"/> says why and answers false there.
+    /// </summary>
     private async Task ConfirmAsync()
     {
-        var subject = _arming.Subject;
-        _arming.Disarm();
-        await OnConfirm.InvokeAsync(subject);
+        if (_arming.TryConfirm())
+        {
+            await OnConfirm.InvokeAsync(SubjectKey);
+        }
     }
 }

@@ -186,20 +186,20 @@
                             {
                                 <button class="btn btn-secondary"
                                         title="Reversibly exclude from recall and default search (§10)"
-                                        @onclick="RetireAsync">
+                                        @onclick="() => RetireAsync(entry.Id)">
                                     Retire
                                 </button>
                             }
                             else
                             {
-                                <button class="btn btn-secondary" @onclick="UnretireAsync">Unretire</button>
+                                <button class="btn btn-secondary" @onclick="() => UnretireAsync(entry.Id)">Unretire</button>
                             }
                             <span class="detail-hint">@WisdomDisplay.RetireHint(entry.RetiredAt is not null)</span>
                         </div>
                     }
-                    @if (_error is not null)
+                    @if (FailureFor(entry.Id) is { } failure)
                     {
-                        <p class="detail-error" role="alert">@_error</p>
+                        <p class="pane-error" role="alert">@failure</p>
                     }
 
                     @* §8.1's version chain (#93). Two views of one list: what each version changed
@@ -304,10 +304,8 @@
                        which is not (§10). Absent entirely while the editor is open, so "Delete forever"
                        can never be the click that throws away a draft the curator is still typing.
 
-                       Keyed and captioned off the detail on screen rather than off SelectedId, which
-                       moves the moment a row is clicked while this read is still in flight: one id
-                       behind the prompt, the arming and the delete, so the Wisdom named is the one
-                       taken (#106). *@
+                       Keyed and captioned off the detail on screen rather than off SelectedId, for
+                       the reason ConfirmDelete.OnConfirm gives. *@
                     @if (_mode is not DetailMode.Editing)
                     {
                         <div class="pane-danger">
@@ -474,7 +472,13 @@
     private DetailMode _mode;
     private bool _saving;
     private string _draft = "";
-    private string? _error;
+    /// <summary>
+    /// A curation action that did not land, and the Wisdom it did not land on. The pair rather than
+    /// the text alone: an action confirmed on the Wisdom still on screen can fail after the curator
+    /// has clicked another row, and bare, its "this Wisdom is untouched" would render under that
+    /// row's detail as a claim about it.
+    /// </summary>
+    private (Guid Subject, string Text)? _failure;
 
     /// <summary>
     /// How the version chain reads, and the one piece of detail state a selection deliberately
@@ -547,7 +551,7 @@
         {
             _boundSelection = SelectedId;
             _mode = DetailMode.Viewing;
-            _error = null;
+            _failure = null;
         }
 
         // Landing in another Project re-anchors the list on its universe, the way the tab this
@@ -645,27 +649,32 @@
     private void BeginEdit(WisdomListEntry entry)
     {
         _draft = entry.Text;
-        _error = null;
+        _failure = null;
         _mode = DetailMode.Editing;
     }
 
     private async Task SaveAsync()
     {
         _saving = true;
-        _error = null;
+        _failure = null;
+
+        // The one action left that may read SelectedId: the editor is dropped by the selection
+        // reset above before the window's first frame, so it can only be open while the selection
+        // and the record on screen still agree.
+        var wisdomId = SelectedId!.Value;
         try
         {
             // The edit re-embeds the new text (§8.1), so this is the one curation action that
             // needs Ollama up; the failure stays inline and the draft stays editable.
-            await Browser.EditAsync(SelectedId!.Value, _draft, CancellationToken.None);
+            await Browser.EditAsync(wisdomId, _draft, CancellationToken.None);
             _mode = DetailMode.Viewing;
             await RefreshAsync();
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Wisdom edit failed");
-            _error = "The edit did not save: the new text must re-embed and persist. "
-                + "Check the Health pill — Ollama and Postgres both have to be reachable.";
+            _failure = (wisdomId, "The edit did not save: the new text must re-embed and persist. "
+                + "Check the Health pill — Ollama and Postgres both have to be reachable.");
         }
         finally
         {
@@ -673,12 +682,19 @@
         }
     }
 
-    private Task RetireAsync() => CurateAsync(
-        () => Browser.RetireAsync(SelectedId!.Value, CancellationToken.None),
+    // Both take the Wisdom whose row drew the button, never SelectedId: which of the two renders is
+    // chosen by the on-screen record's RetiredAt, and in the window SelectedId already names a row
+    // the curator has not seen — see ConfirmDelete.OnConfirm for that window. Retire is reversible
+    // where Delete is not, but a reversal still has to be found first, on a record nobody knew was
+    // touched.
+    private Task RetireAsync(Guid wisdomId) => CurateAsync(
+        wisdomId,
+        () => Browser.RetireAsync(wisdomId, CancellationToken.None),
         "The retire did not land — Postgres has to be reachable. Check the Health pill.");
 
-    private Task UnretireAsync() => CurateAsync(
-        () => Browser.UnretireAsync(SelectedId!.Value, CancellationToken.None),
+    private Task UnretireAsync(Guid wisdomId) => CurateAsync(
+        wisdomId,
+        () => Browser.UnretireAsync(wisdomId, CancellationToken.None),
         "The unretire did not land — Postgres has to be reachable. Check the Health pill.");
 
     /// <summary>
@@ -687,9 +703,9 @@
     /// circuit down with it — the whole page reloads and the curator loses their place, over a
     /// blipped connection that a banner above a stale row would have ridden out.
     /// </summary>
-    private async Task CurateAsync(Func<Task> curate, string failure)
+    private async Task CurateAsync(Guid wisdomId, Func<Task> curate, string failure)
     {
-        _error = null;
+        _failure = null;
         try
         {
             await curate();
@@ -698,21 +714,27 @@
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Wisdom curation failed");
-            _error = failure;
+            _failure = (wisdomId, failure);
         }
     }
 
+    /// <summary>The failure to say above <paramref name="onScreen"/>, if it is that one's.</summary>
+    private string? FailureFor(Guid onScreen)
+        => _failure is { } failed && failed.Subject == onScreen ? failed.Text : null;
+
     /// <summary>
-    /// Takes the Wisdom the confirmation was armed against, passed back by the component that armed
-    /// it rather than re-read from <see cref="SelectedId"/> here. The two disagree in the window
-    /// between a click on another row and its detail landing — the parameter is set at once, the
-    /// read is not — and in that window the pane still shows the outgoing Wisdom, its prompt still
-    /// names that one's version count, and reading the selection would delete the incoming one
-    /// instead. One id, from the record on screen, all the way through (#106).
+    /// Takes the Wisdom <see cref="ConfirmDelete.OnConfirm"/> named, never <see cref="SelectedId"/>
+    /// — see that callback for the window the two disagree in.
+    ///
+    /// The navigation is conditional on them agreeing for the same reason. Deleting the Wisdom the
+    /// route names leaves the route pointing at a dead record, so the surface has to leave; deleting
+    /// the one still on screen after the curator clicked elsewhere does not, and navigating anyway
+    /// would throw away the selection they just made. Either way the list has to be re-read, since
+    /// nothing announces a Wisdom delete on the feed.
     /// </summary>
     private async Task DeleteAsync(Guid wisdomId)
     {
-        _error = null;
+        _failure = null;
         try
         {
             await Browser.DeleteAsync(wisdomId, CancellationToken.None);
@@ -721,12 +743,18 @@
         {
             // Nothing was deleted, so the row is still there to try again on — say so and stay.
             Logger.LogWarning(ex, "Wisdom delete failed");
-            _error = "The delete did not land — Postgres has to be reachable. "
-                + "Check the Health pill; this Wisdom is untouched.";
+            _failure = (wisdomId, "The delete did not land — Postgres has to be reachable. "
+                + "Check the Health pill; this Wisdom is untouched.");
             return;
         }
 
-        Nav.NavigateTo(ListHref);
+        if (SelectedId == wisdomId)
+        {
+            Nav.NavigateTo(ListHref);
+            return;
+        }
+
+        await RefreshAsync();
     }
 
     public void Dispose()

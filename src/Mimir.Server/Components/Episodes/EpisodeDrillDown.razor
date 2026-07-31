@@ -117,6 +117,10 @@
                 <ConfirmDelete Label="Delete Episode" SubjectKey="Detail.Episode.Id"
                                Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
                                OnConfirm="OnDeleteEpisode" />
+                @if (Error is { } failure)
+                {
+                    <p class="pane-error" role="alert">@failure</p>
+                }
             </div>
         </article>
     </div>
@@ -151,6 +155,13 @@
 
     [Parameter, EditorRequired]
     public EventCallback<Guid> OnDeleteEpisode { get; set; }
+
+    /// <summary>
+    /// A delete that did not land, said here rather than thrown. The surface owns the text because
+    /// it owns the call; this component owns where it sits, which is under the button that failed.
+    /// </summary>
+    [Parameter]
+    public string? Error { get; set; }
 
     private bool _expanded;
 

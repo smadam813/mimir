@@ -282,12 +282,6 @@
     color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
-.detail-error {
-    max-width: 44rem;
-    font-size: 12px;
-    color: var(--color-danger);
-}
-
 /* The type only — .chain-head owns the spacing around the one heading this is left on, so a margin
    here would be a second statement of it that never applies. */
 .detail-section {

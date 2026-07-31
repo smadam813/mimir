@@ -22,14 +22,6 @@ internal sealed class ConfirmArming
     internal bool Armed { get; private set; }
 
     /// <summary>
-    /// The record a confirmation right now would take. Read back out rather than left for the host
-    /// to re-derive: a host's own notion of what is selected can already have moved on to the row
-    /// whose read has not landed yet, while what the curator is looking at — and what the prompt
-    /// they are agreeing to describes — is still this one.
-    /// </summary>
-    internal Guid Subject => _subject;
-
-    /// <summary>
     /// Points this at <paramref name="subject"/>, disarming if that is a different record from the
     /// one the arming was against. Called on every parameter set, so it must be idempotent for an
     /// unchanged subject: a re-render while the curator reads the consequence is not a reason to
@@ -49,4 +41,27 @@ internal sealed class ConfirmArming
     internal void Arm() => Armed = true;
 
     internal void Disarm() => Armed = false;
+
+    /// <summary>
+    /// Consumes the arming: true exactly once per <see cref="Arm"/>, false if there is nothing
+    /// armed to consume.
+    ///
+    /// The caller asks rather than checks-then-acts because a disarmed confirmation is reachable.
+    /// Blazor Server holds a disposed handler's binding until the client acknowledges the render
+    /// batch that dropped it — deliberately, since the browser can still dispatch against the DOM
+    /// it has — so a "Delete forever" click queued behind a selection change arrives after
+    /// <see cref="Bind"/> has already disarmed and repointed at the incoming record. Answering
+    /// false there is what stops that click hard-deleting a record whose prompt was never on
+    /// screen.
+    /// </summary>
+    internal bool TryConfirm()
+    {
+        if (!Armed)
+        {
+            return false;
+        }
+
+        Armed = false;
+        return true;
+    }
 }

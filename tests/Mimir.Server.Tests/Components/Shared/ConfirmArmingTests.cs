@@ -68,22 +68,50 @@ public class ConfirmArmingTests
     }
 
     /// <summary>
-    /// What a confirmation hands back is the record it was armed against, so a host cannot delete
-    /// one Wisdom off a prompt that described another. The latch is the only thing that knows which
-    /// that is once the host's own selection has moved on.
+    /// The stale-click guard. Blazor Server keeps a disposed handler's binding alive until the
+    /// client acknowledges the render batch that dropped it, so a "Delete forever" queued behind a
+    /// selection change is delivered after the latch has disarmed and repointed. Answering true
+    /// there would hard-delete a record whose prompt was never shown.
     /// </summary>
     [Fact]
-    public void TheSubjectConfirmed_IsTheOneBound()
+    public void ConfirmingWhatIsNotArmed_IsRefused()
+    {
+        var arming = new ConfirmArming();
+        arming.Bind(RecordA);
+
+        arming.TryConfirm().ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The same refusal along the path that produces it: armed against A, the selection moves to B,
+    /// and the click that was already in flight lands.
+    /// </summary>
+    [Fact]
+    public void ConfirmingAfterTheSubjectMoved_IsRefused()
     {
         var arming = new ConfirmArming();
         arming.Bind(RecordA);
         arming.Arm();
 
-        arming.Subject.ShouldBe(RecordA);
-
         arming.Bind(RecordB);
 
-        arming.Subject.ShouldBe(RecordB);
+        arming.TryConfirm().ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// And the one-shot: a double-dispatched click confirms once, not twice.
+    /// </summary>
+    [Fact]
+    public void ConfirmingWhatIsArmed_SucceedsExactlyOnce()
+    {
+        var arming = new ConfirmArming();
+        arming.Bind(RecordA);
+        arming.Arm();
+
+        arming.TryConfirm().ShouldBeTrue();
+
+        arming.Armed.ShouldBeFalse();
+        arming.TryConfirm().ShouldBeFalse();
     }
 
     /// <summary>
