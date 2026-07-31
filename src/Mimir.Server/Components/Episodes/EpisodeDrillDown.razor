@@ -91,7 +91,7 @@
                                     </span>
                                 }
                                 <span class="event-at">@EpisodeDisplay.Stamp(evt.At)</span>
-                                <ConfirmDelete Label="Delete" Subtle
+                                <ConfirmDelete Label="Delete" Subtle SubjectKey="evt.Id"
                                                Prompt="@($"Hard-delete Event #{evt.Seq} forever?")"
                                                OnConfirm="() => OnDeleteEvent.InvokeAsync(evt.Id)" />
                             </div>
@@ -113,8 +113,8 @@
 
             @* Spec §8.2: hard delete of the whole Episode for sensitive content; its Events go with
                it. Set apart from the per-Event delete above — this one takes the record entire. *@
-            <div class="detail-danger">
-                <ConfirmDelete Label="Delete Episode"
+            <div class="pane-danger">
+                <ConfirmDelete Label="Delete Episode" SubjectKey="Detail.Episode.Id"
                                Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
                                OnConfirm="() => OnDeleteEpisode.InvokeAsync()" />
             </div>

@@ -1,6 +1,7 @@
 @* Spec §8.2: every hard delete is confirmed. Two-phase, inline, no JS — arming swaps the button
-   for the consequence and an explicit choice. On Nocturne's buttons since #95, so the two hard
-   deletes on this surface look like the Wisdom surface's own. *@
+   for the consequence and an explicit choice. The one component that draws a §8.2 confirmation
+   anywhere in the app (#106): the Wisdom surface, the Episode drill-down and each of its Events
+   all host this one, so a hard delete looks and behaves the same wherever it is offered. *@
 @if (_armed)
 {
     <span class="confirm-delete" role="alertdialog" aria-label="Confirm deletion">
@@ -31,10 +32,32 @@ else
     [Parameter, EditorRequired]
     public string Prompt { get; set; } = "";
 
+    /// <summary>
+    /// The id of the record this delete would take — the Wisdom, the Episode, the Event. Selecting
+    /// another row must not carry an armed Delete onto it: the confirmation names what it is about
+    /// to destroy, and a host that keeps this component mounted across a selection change would
+    /// otherwise paint the incoming record with "Delete forever" one click away. Disarming on a
+    /// change of subject is therefore this component's contract rather than each host's discipline
+    /// — the host that had to remember it is the one that forgot (#106). <c>EditorRequired</c>
+    /// makes a call site that omits the key a build failure rather than a latent leak.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Guid SubjectKey { get; set; }
+
     [Parameter]
     public EventCallback OnConfirm { get; set; }
 
+    private Guid _boundSubject;
     private bool _armed;
+
+    protected override void OnParametersSet()
+    {
+        if (_boundSubject != SubjectKey)
+        {
+            _boundSubject = SubjectKey;
+            _armed = false;
+        }
+    }
 
     private async Task ConfirmAsync()
     {

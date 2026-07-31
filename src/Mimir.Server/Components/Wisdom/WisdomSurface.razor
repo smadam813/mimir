@@ -305,26 +305,10 @@
                        can never be the click that throws away a draft the curator is still typing. *@
                     @if (_mode is not DetailMode.Editing)
                     {
-                        <div class="detail-danger">
-                            @if (_mode is DetailMode.ConfirmingDelete)
-                            {
-                                <span class="confirm" role="alertdialog" aria-label="Confirm deletion">
-                                    <span class="confirm-prompt">
-                                        Hard-delete this Wisdom and its @(detail.Versions.Count)-version chain forever?
-                                        Nothing reverses this.
-                                    </span>
-                                    <button class="btn btn-secondary danger-fill" @onclick="DeleteAsync">Delete forever</button>
-                                    <button class="btn btn-secondary"
-                                            @onclick="() => _mode = DetailMode.Viewing">Cancel</button>
-                                </span>
-                            }
-                            else
-                            {
-                                <button class="btn btn-secondary danger-outline"
-                                        @onclick="() => _mode = DetailMode.ConfirmingDelete">
-                                    Delete Wisdom…
-                                </button>
-                            }
+                        <div class="pane-danger">
+                            <ConfirmDelete Label="Delete Wisdom…" SubjectKey="SelectedId!.Value"
+                                           Prompt="@($"Hard-delete this Wisdom and its {detail.Versions.Count}-version chain forever? Nothing reverses this.")"
+                                           OnConfirm="DeleteAsync" />
                         </div>
                     }
                 }
@@ -459,11 +443,12 @@
     public WisdomLens Lens { get; set; }
 
     /// <summary>
-    /// The detail pane's three states, one field rather than two flags because two of them must
-    /// never coexist: a "Delete forever" reachable over an open editor throws the draft away with
-    /// the row, and its prompt names a version count. An enum leaves that pair unrepresentable.
+    /// Whether the detail pane is reading or editing. The confirmation that used to be a third
+    /// state here is <see cref="Shared.ConfirmDelete"/>'s own since #106; what stays this surface's
+    /// is the gate above it — Delete is absent entirely while the editor is open, so "Delete
+    /// forever" can never be the click that throws away a draft the curator is still typing.
     /// </summary>
-    private enum DetailMode { Viewing, Editing, ConfirmingDelete }
+    private enum DetailMode { Viewing, Editing }
 
     private WisdomListing? _listing;
     private WisdomDetail? _detail;
@@ -549,9 +534,10 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        // Selecting another row must not carry the outgoing one's half-typed draft, its inline
-        // failure or an armed Delete onto it — the armed one especially, since the confirmation
-        // names a version count that is no longer the one it would take.
+        // Selecting another row must not carry the outgoing one's half-typed draft or its inline
+        // failure onto it. An armed Delete is the same rule, and it is ConfirmDelete's own to
+        // enforce off SubjectKey (#106) — every host of it gets that, not just the one that
+        // remembered to write the reset.
         if (_boundSelection != SelectedId)
         {
             _boundSelection = SelectedId;
@@ -713,7 +699,6 @@
 
     private async Task DeleteAsync()
     {
-        _mode = DetailMode.Viewing;
         _error = null;
         try
         {
