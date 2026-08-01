@@ -16,8 +16,6 @@ namespace Mimir.Server.Tests.Components.Episodes;
 /// </summary>
 public class EpisodeSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
-
     private IRenderedComponent<EpisodeSurface> RenderAt(
         Guid projectId, Guid? selectedId = null, string name = "project", bool isGlobal = false)
         => CreateRenderContext().Render<EpisodeSurface>(p => p
@@ -111,8 +109,8 @@ public class EpisodeSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTes
             () => surface.Find("div.pane-danger button"), Patience);
         await surface.SettleAsync();
 
-        await surface.InvokeAsync(() => surface.Find("div.pane-danger button").Click());
-        await surface.InvokeAsync(() => surface.Find("div.pane-danger button.danger-fill").Click());
+        await surface.ClickAsync("div.pane-danger button");
+        await surface.ClickAsync("div.pane-danger button.danger-fill");
 
         surface.WaitForAssertion(
             () => nav.Uri.ShouldEndWith($"projects/{project.Id}/episodes"), Patience);

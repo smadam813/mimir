@@ -72,7 +72,7 @@ public class EpisodeListTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         // query — and the first EF model build and Npgsql connect of a run land inside it.
         // Everything below reads the claim instead, taken synchronously ahead of that await.
         list.WaitForAssertion(
-            () => list.FindAll("a.episode-row").Count.ShouldBe(1), TimeSpan.FromSeconds(10));
+            () => list.FindAll("a.episode-row").Count.ShouldBe(1), Patience);
     }
 
     /// <summary>
@@ -189,6 +189,75 @@ public class EpisodeListTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         list.Render(p => p.Add(c => c.SelectedId, episode.Id));
 
         search.Term.ShouldBe("migrations");
+    }
+
+    /// <summary>
+    /// Every state a row can mark is a state the curator can filter to, so Running joins the drawn
+    /// chips even though it is a queue state rather than a session one. Done is the resting
+    /// majority — it is what "All" is mostly made of — so it marks nothing on its row and gets no
+    /// chip: a chip for the default is a filter that changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task TheChips_CoverEveryStateARowCanMark_AndNothingElse()
+    {
+        var project = await AddProjectAsync();
+        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
+        var (render, _) = NewCircuit();
+
+        var list = RenderAt(render, project.Id);
+
+        // The chip's own word, read off its first text node: the count renders in a span right
+        // beside it, so the whole chip's text reads "live0".
+        list.WaitForAssertion(
+            () => list.FindAll("button.chip").Select(c => c.FirstChild!.TextContent.Trim())
+                .ShouldBe(["All", "live", "pending", "running", "failed"]),
+            Patience);
+        // The seeded Episode is Done, so it is in the list and marks nothing.
+        list.FindAll("a.episode-row").Count.ShouldBe(1);
+        list.FindAll("a.episode-row span.state-word, a.episode-row span.state-pill").ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Live and Failed are the two states a curator is scanning for, so they read as words in
+    /// their own hue; the queue's own states are pills, so a row's distillation reads as a stage
+    /// rather than an alarm. Both marks in one assertion, because the rule is the contrast.
+    /// </summary>
+    [Fact]
+    public async Task AFailedRowReadsAsAWord_AndAQueuedOneAsAPill()
+    {
+        var project = await AddProjectAsync();
+        await AddEpisodeAsync(
+            project.Id, sealedAt: Now, distillation: DistillationState.Failed);
+        await AddEpisodeAsync(
+            project.Id, sealedAt: Now.AddMinutes(-1), distillation: DistillationState.Pending);
+        var (render, _) = NewCircuit();
+
+        var list = RenderAt(render, project.Id);
+
+        list.WaitForAssertion(
+            () => list.FindAll("a.episode-row").Count.ShouldBe(2), Patience);
+        list.Find("a.episode-row span.state-word").ClassList.ShouldContain("is-failed");
+        list.Find("a.episode-row span.state-pill").TextContent.Trim().ShouldBe("pending");
+    }
+
+    /// <summary>
+    /// The session id keys the Episode (ADR-0003) but it is a hash, so it rides as the row's
+    /// tooltip rather than taking a line the curator has to read past on every row.
+    /// </summary>
+    [Fact]
+    public async Task TheSessionId_RidesAsATooltipRatherThanARowLine()
+    {
+        var project = await AddProjectAsync();
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now);
+        var (render, _) = NewCircuit();
+
+        var list = RenderAt(render, project.Id);
+
+        list.WaitForAssertion(
+            () => list.FindAll("a.episode-row").Count.ShouldBe(1), Patience);
+        var row = list.Find("a.episode-row");
+        row.GetAttribute("title").ShouldBe($"session {episode.SessionId}");
+        row.TextContent.ShouldNotContain(episode.SessionId);
     }
 
     /// <summary>

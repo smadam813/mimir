@@ -58,7 +58,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
         sidebar.WaitForAssertion(
             () => sidebar.FindAll("a.sidebar-item span.sidebar-item-name")
                 .Select(n => n.TextContent).ShouldBe(["Global", "alpha"]),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -80,7 +80,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
 
         sidebar.WaitForAssertion(
             () => sidebar.FindAll("div.sidebar-group").Count.ShouldBe(2),
-            TimeSpan.FromSeconds(10));
+            Patience);
         var attention = sidebar.FindAll("div.sidebar-group")[1];
         attention.QuerySelectorAll("span.attention-dot").Length.ShouldBe(3);
         attention.QuerySelectorAll("a.sidebar-item").Length.ShouldBe(linked ? 3 : 0);
@@ -108,7 +108,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
                     $"projects/{project.Id}/wisdom?show=orphaned",
                     $"projects/{project.Id}/wisdom?show=retired",
                 ]),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
         sidebar.WaitForAssertion(
             () => sidebar.Find("p.sidebar-note").TextContent
                 .ShouldContain("appear here on their session's first hook"),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -144,7 +144,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
         sidebar.WaitForAssertion(
             () => sidebar.FindAll("h6.sidebar-heading").Select(h => h.TextContent)
                 .ShouldBe(["Projects", "Capture"]),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -162,6 +162,6 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
             () => sidebar.FindAll("a.sidebar-item.is-selected")
                 .Select(a => a.QuerySelector("span.sidebar-item-name")!.TextContent)
                 .ShouldBe(["Global"]),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 }

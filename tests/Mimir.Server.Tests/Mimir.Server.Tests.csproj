@@ -41,6 +41,10 @@
          Aliased once here rather than qualified per call site: eight files already say
          TestContext.Current, and each would break the day it needs a renderer. -->
     <Using Include="Xunit.TestContext" Alias="TestContext" />
+    <!-- RenderQuiescence.Patience is read by every Postgres-tier render test's WaitForAssertion;
+         one static using rather than a copy of the constant per class, since it is coupled to the
+         Quiet window beside it. -->
+    <Using Include="Mimir.Server.Tests.Components.RenderQuiescence" Static="true" />
   </ItemGroup>
 
 </Project>

@@ -23,8 +23,6 @@ namespace Mimir.Server.Tests.Components.Wisdom;
 /// </summary>
 public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
-
     private (BunitContext Render, SurfaceSearch Search) NewCircuit()
     {
         var render = CreateRenderContext();
@@ -51,12 +49,6 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         WaitForDetail(surface);
         await surface.SettleAsync();
     }
-
-    /// <summary>Finds and clicks in one dispatch, so no render can land between the two.</summary>
-    private static Task ClickAsync(
-        IRenderedComponent<WisdomSurface> surface, string selector, string label)
-        => surface.InvokeAsync(() => surface.FindAll(selector)
-            .Single(b => b.TextContent.Trim() == label).Click());
 
     private static void WaitForRows(IRenderedComponent<WisdomSurface> surface, int rows)
         => surface.WaitForAssertion(
@@ -303,7 +295,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         await ReadyForClicksAsync(surface);
         surface.FindComponents<ConfirmDelete>().ShouldHaveSingleItem();
 
-        await ClickAsync(surface, "div.detail-actions button", "Edit");
+        await surface.ClickAsync("div.detail-actions button", "Edit");
 
         surface.Find("textarea.detail-editor").ShouldNotBeNull();
         surface.FindComponents<ConfirmDelete>().ShouldBeEmpty();
@@ -323,7 +315,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var (render, _) = NewCircuit();
         var surface = RenderAt(render, project.Id, first.Id);
         await ReadyForClicksAsync(surface);
-        await ClickAsync(surface, "div.detail-actions button", "Edit");
+        await surface.ClickAsync("div.detail-actions button", "Edit");
         await surface.InvokeAsync(() => surface.Find("textarea.detail-editor").Input("half a rewrite"));
 
         surface.Render(p => p
@@ -349,7 +341,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var (render, _) = NewCircuit();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
-        await ClickAsync(surface, "div.detail-actions button", "Edit");
+        await surface.ClickAsync("div.detail-actions button", "Edit");
         surface.FindAll("li.version-row.is-pending").ShouldBeEmpty();
 
         await surface.InvokeAsync(() => surface.Find("textarea.detail-editor").Input("a sharper fact"));
@@ -372,7 +364,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var (render, _) = NewCircuit();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
-        await ClickAsync(surface, "div.detail-actions button", "Edit");
+        await surface.ClickAsync("div.detail-actions button", "Edit");
 
         await surface.InvokeAsync(() => surface.Find("textarea.detail-editor").Input("a fact"));
 
@@ -393,7 +385,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var (render, _) = NewCircuit();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
-        await ClickAsync(surface, "div.detail-actions button", "Edit");
+        await surface.ClickAsync("div.detail-actions button", "Edit");
 
         await surface.InvokeAsync(() => surface.Find("textarea.detail-editor").Input("a sharper fact"));
 
@@ -419,7 +411,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var surface = RenderAt(render, project.Id, first.Id);
         await ReadyForClicksAsync(surface);
 
-        await ClickAsync(surface, "button.chain-view", "Full text");
+        await surface.ClickAsync("button.chain-view", "Full text");
 
         surface.FindAll("p.version-text.is-full").ShouldNotBeEmpty();
         surface.Find("a.wisdom-row").GetAttribute("href").ShouldNotBeNull().ShouldNotContain("chain");
@@ -467,8 +459,10 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var surface = RenderAt(render, outgoing.Id);
         WaitForRows(surface, 1);
         await surface.SettleAsync();
+        // Not ClickAsync's exact-label overload: a chip's text is its Kind and its count run
+        // together ("Lesson1"), so the match has to be on the prefix.
         await surface.InvokeAsync(() => surface.FindAll("button.chip")
-            .Single(c => c.TextContent.Contains("Lesson", StringComparison.Ordinal)).Click());
+            .First(c => c.TextContent.Trim().StartsWith("Lesson", StringComparison.Ordinal)).Click());
         search.Set("outgoing");
 
         surface.Render(p => p.Add(c => c.ProjectId, incoming.Id));
@@ -501,8 +495,8 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         await ReadyForClicksAsync(surface);
         surface.FindComponents<ConfirmDelete>().ShouldHaveSingleItem();
 
-        await surface.InvokeAsync(() => surface.Find("div.pane-danger button").Click());
-        await surface.InvokeAsync(() => surface.Find("div.pane-danger button.danger-fill").Click());
+        await surface.ClickAsync("div.pane-danger button");
+        await surface.ClickAsync("div.pane-danger button.danger-fill");
 
         surface.WaitForAssertion(
             () => nav.Uri.ShouldEndWith($"projects/{project.Id}/wisdom?show=retired"), Patience);

@@ -13,8 +13,6 @@ namespace Mimir.Server.Tests.Components.Injections;
 /// </summary>
 public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
-
     private (BunitContext Render, SurfaceSearch Search) NewCircuit()
     {
         var render = CreateRenderContext();
@@ -87,7 +85,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         WaitForRows(tab, 1);
         await tab.SettleAsync();
 
-        await tab.InvokeAsync(() => tab.Find("button.entry-row").Click());
+        await tab.ClickAsync("button.entry-row");
 
         tab.FindComponents<InjectionDetail>().ShouldHaveSingleItem();
         tab.FindAll("button.entry-row").Count.ShouldBe(1);
@@ -111,7 +109,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         var tab = RenderAt(render, project.Id);
         WaitForRows(tab, 1);
         await tab.SettleAsync();
-        await tab.InvokeAsync(() => tab.Find("button.entry-row").Click());
+        await tab.ClickAsync("button.entry-row");
 
         await tab.InvokeAsync(() => tab.FindAll("button")
             .First(b => b.TextContent.Contains("Useful", StringComparison.OrdinalIgnoreCase)).Click());
@@ -144,7 +142,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         var tab = RenderAt(render, outgoing.Id);
         WaitForRows(tab, 1);
         await tab.SettleAsync();
-        await tab.InvokeAsync(() => tab.Find("button.entry-row").Click());
+        await tab.ClickAsync("button.entry-row");
         await tab.InvokeAsync(() => tab.FindAll("button.chip")
             .Single(c => c.TextContent.Contains("Brief", StringComparison.Ordinal)).Click());
 

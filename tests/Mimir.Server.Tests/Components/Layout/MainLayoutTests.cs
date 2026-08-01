@@ -44,7 +44,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
 
         shell.WaitForAssertion(
             () => shell.FindComponents<FirstRunPanel>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
         shell.FindComponents<SurfaceTabStrip>().ShouldBeEmpty();
         shell.FindAll($"#{BodyMarker}").ShouldBeEmpty();
         shell.FindComponents<AppHeader>().ShouldHaveSingleItem();
@@ -65,7 +65,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
 
         shell.WaitForAssertion(
             () => shell.FindAll($"#{BodyMarker}").ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
         shell.FindComponents<FirstRunPanel>().ShouldBeEmpty();
         shell.FindComponents<SurfaceTabStrip>().ShouldHaveSingleItem();
     }
@@ -91,7 +91,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
 
         shell.WaitForAssertion(
             () => shell.Find("main.app-body").ClassList.Contains("is-flush").ShouldBe(flush),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
 
         shell.WaitForAssertion(
             () => shell.Find("main.app-body").ClassList.ShouldContain("is-flush"),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -133,6 +133,6 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
                 shell.FindComponents<FirstRunPanel>().ShouldHaveSingleItem();
                 shell.Find("main.app-body").ClassList.ShouldNotContain("is-flush");
             },
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 }

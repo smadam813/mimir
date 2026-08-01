@@ -137,8 +137,6 @@
             return;
         }
 
-        // Released first, because the claim is held by identity: disposing a stale token after the
-        // re-claim would hand the box back out from under it.
         if (_shown.ProjectId != ProjectId)
         {
             _filter = null;
@@ -148,8 +146,6 @@
 
         _shown = (ProjectId, IsGlobal);
 
-        // The direct refresh below paints the incoming Project without a debounce's wait; the two
-        // the claim's own Changed schedules collapse into one duplicate query a moment later.
         UpdateClaim();
         await RefreshAsync();
     }

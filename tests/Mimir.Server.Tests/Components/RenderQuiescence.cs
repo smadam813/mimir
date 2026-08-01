@@ -1,4 +1,5 @@
 using Bunit;
+using Microsoft.AspNetCore.Components;
 
 namespace Mimir.Server.Tests.Components;
 
@@ -27,11 +28,19 @@ internal static class RenderQuiescence
     private static readonly TimeSpan Quiet = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
+    /// How long a Postgres-tier render test waits for rows. Seconds rather than milliseconds
+    /// because what it is usually waiting on is the *second* query — the claim taken on mount
+    /// supersedes the first — plus the run's first EF model build and Npgsql connect. Beside
+    /// <see cref="Quiet"/> because the two are the same measurement seen from either end.
+    /// </summary>
+    internal static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Returns once <paramref name="component"/> has gone <see cref="Quiet"/> without rendering.
     /// Anything that dispatches an event — a click, a keystroke — wants this first.
     /// </summary>
     internal static async Task SettleAsync<TComponent>(this IRenderedComponent<TComponent> component)
-        where TComponent : Microsoft.AspNetCore.Components.IComponent
+        where TComponent : IComponent
     {
         var renders = -1;
         while (renders != component.RenderCount)
@@ -40,4 +49,22 @@ internal static class RenderQuiescence
             await Task.Delay(Quiet, TestContext.Current.CancellationToken);
         }
     }
+
+    /// <summary>
+    /// Finds and clicks the one element matching <paramref name="selector"/> whose trimmed text is
+    /// <paramref name="label"/>, both inside one dispatch so no render can land between them —
+    /// which is the other half of the fix, since a handler id captured by an earlier <c>Find</c>
+    /// is exactly what goes stale.
+    /// </summary>
+    internal static Task ClickAsync<TComponent>(
+        this IRenderedComponent<TComponent> component, string selector, string label)
+        where TComponent : IComponent
+        => component.InvokeAsync(() => component.FindAll(selector)
+            .Single(e => e.TextContent.Trim() == label).Click());
+
+    /// <summary>Same dispatch guarantee, for the sole element matching <paramref name="selector"/>.</summary>
+    internal static Task ClickAsync<TComponent>(
+        this IRenderedComponent<TComponent> component, string selector)
+        where TComponent : IComponent
+        => component.InvokeAsync(() => component.Find(selector).Click());
 }

@@ -31,7 +31,7 @@ public class ProjectPageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
 
         page.WaitForAssertion(
             () => page.FindComponents<InjectionLogTab>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
         page.FindComponents<EpisodeSurface>().ShouldBeEmpty();
     }
 
@@ -48,7 +48,7 @@ public class ProjectPageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
 
         page.WaitForAssertion(
             () => page.FindComponents<EpisodeSurface>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class ProjectPageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
 
         page.WaitForAssertion(
             () => page.FindComponents<EpisodeSurface>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
         page.FindComponents<InjectionLogTab>().ShouldBeEmpty();
     }
 
@@ -82,7 +82,7 @@ public class ProjectPageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
 
         page.WaitForAssertion(
             () => page.Find("div.page-notice h1").TextContent.ShouldBe("Unknown Project"),
-            TimeSpan.FromSeconds(10));
+            Patience);
         page.FindComponents<EpisodeSurface>().ShouldBeEmpty();
         page.FindComponents<InjectionLogTab>().ShouldBeEmpty();
     }

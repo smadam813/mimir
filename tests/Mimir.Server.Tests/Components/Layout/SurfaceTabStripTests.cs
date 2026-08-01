@@ -52,7 +52,7 @@ public class SurfaceTabStripTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         strip.WaitForAssertion(
             () => strip.FindAll("a.tab").Select(t => t.TextContent.Trim())
                 .ShouldBe(["Wisdom2", "Episodes1", "Injections0"]),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 
     /// <summary>
@@ -80,6 +80,6 @@ public class SurfaceTabStripTests(ThrowawayDatabaseFixture fixture) : PostgresTe
                 current.TextContent.Trim().ShouldStartWith(expected);
                 current.GetAttribute("aria-current").ShouldBe("page");
             },
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 }

@@ -232,8 +232,6 @@
         await RefreshAsync();
     }
 
-    // Released first, because the claim is held by identity: disposing a stale token after the
-    // re-claim would hand the box back out from under it.
     private void AnchorOnProject()
     {
         _loadedProject = ProjectId;

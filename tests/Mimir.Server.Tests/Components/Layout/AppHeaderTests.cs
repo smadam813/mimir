@@ -53,7 +53,9 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
         var (render, _) = NewCircuit();
 
         var header = RenderUnder(render, isFirstRun: null);
-        await Task.Delay(TimeSpan.FromSeconds(1), Token);
+        // Settled rather than asserted straight away: the claim under test is that a query the
+        // header could have run did not run, so the wait has to outlast the one it would have.
+        await header.SettleAsync();
 
         header.FindAll("div.pipeline").ShouldBeEmpty();
         header.FindComponents<ModelPullChip>().ShouldBeEmpty();

@@ -36,7 +36,7 @@ public class EpisodePageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         page.WaitForAssertion(
             () => page.Find("div.page-notice").TextContent
                 .ShouldBe(alone.Find("div.page-notice").TextContent),
-            TimeSpan.FromSeconds(10));
+            Patience);
         page.FindComponents<EpisodeSurface>().ShouldBeEmpty();
     }
 
@@ -59,7 +59,7 @@ public class EpisodePageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         var page = RenderAt(project.Id);
         page.WaitForAssertion(
             () => page.FindComponents<EpisodeSurface>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
 
         await Context.Episodes.Where(e => e.Id == episode.Id).ExecuteDeleteAsync(Token);
         await Context.Projects.Where(p => p.Id == project.Id).ExecuteDeleteAsync(Token);
@@ -86,12 +86,12 @@ public class EpisodePageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         var page = RenderAt(outgoing.Id);
         page.WaitForAssertion(
             () => page.FindComponents<EpisodeSurface>().ShouldHaveSingleItem(),
-            TimeSpan.FromSeconds(10));
+            Patience);
 
         page.Render(p => p.Add(c => c.ProjectId, Guid.CreateVersion7()));
 
         page.WaitForAssertion(
             () => page.Find("div.page-notice h1").TextContent.ShouldBe("Unknown Project"),
-            TimeSpan.FromSeconds(10));
+            Patience);
     }
 }
