@@ -3,9 +3,6 @@
 @using Mimir.Server.Storage.Entities
 @using Mimir.Server.Ui
 
-@* Spec §8.3: one entry, read the way the session read it — the payload first, then the score that
-   put each line in it, then the §7 formula those scores came out of, and only then the §9 mark.
-   The mark is the entry's, not any line's, and the screen says so beside the buttons (#96). *@
 <main class="pane-detail">
     <div class="pane-detail-body">
         <article class="entry-detail">
@@ -164,11 +161,6 @@
     [Parameter, EditorRequired]
     public EventCallback OnPromote { get; set; }
 
-    /// <summary>
-    /// The Project whose surface this is, for the Wisdom links — never the injected Wisdom's own
-    /// scope, which may be Global and whose page is reached through whichever Project is being
-    /// browsed.
-    /// </summary>
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
@@ -176,12 +168,8 @@
     private int? _budget;
     private ScoringFormula _formula = null!;
 
-    /// <summary>
-    /// Built once per parameter change rather than once per reference. The markup reads the payload
-    /// five times in a single render — the two branch tests, the text, and both sides of the drift
-    /// compare — and a mark or a promote hands down a freshly-read entry record every time, so as
-    /// expression-bodied properties these rebuilt the whole wrapper on each of them.
-    /// </summary>
+    // Built once per parameter change, not once per reference: the markup reads the payload five
+    // times in a single render, and as expression-bodied properties these rebuilt it each time.
     protected override void OnParametersSet()
     {
         _payload = InjectionDisplay.Payload(Entry.Lane, Entry.Items);

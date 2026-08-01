@@ -7,6 +7,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
+using Mimir.Server.Health;
 using Mimir.Server.Modules;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
@@ -149,6 +150,13 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Clock);
 
     /// <summary>
+    /// Storage's §7 universe keeper over the fixture's database — the ranking below, the Brief's
+    /// own graph, and a test asserting against the ambient universe itself all want the same one.
+    /// </summary>
+    private protected WisdomSearch CreateWisdomSearch(SearchOptions? search = null)
+        => new(Context, Options.Create(search ?? new SearchOptions()));
+
+    /// <summary>
     /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
     /// the four consumers that replay a query through it all want the same graph.
     /// </summary>
@@ -157,7 +165,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         => new(
             Context,
             Embeddings,
-            new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
+            CreateWisdomSearch(search),
             // Takes its own RecallOptions rather than always the defaults: the ranking reads the
             // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
             // overrides one for the service under test has to be able to hand the same instance
@@ -189,8 +197,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
     /// Registered on top of that is what a §8 surface actually takes, and every registration comes
     /// from the app's own composition rather than a copy of it: <c>AddMimirUi</c> for the four
-    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, and <c>CaptureModule</c> for the
-    /// Episode feed. The module is constructed and asked, not restated — its <c>AddServices</c>
+    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, <c>AddMimirHealth</c> for the
+    /// snapshot the header's pill and pull chip read, and <c>CaptureModule</c> for the Episode
+    /// feed. The module is constructed and asked, not restated — its <c>AddServices</c>
     /// ignores the configuration it takes and its two other registrations are inert here, which is
     /// a small price for a line that cannot drift the day Capture decorates the feed or changes its
     /// lifetime. That drift is the class this tier exists to close (#94/#108), so the harness must
@@ -220,11 +229,26 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         var context = new BunitContext();
         AddThrowawayStorage(context.Services);
         context.Services.AddMimirUi();
+        context.Services.AddMimirHealth();
         new CaptureModule().AddServices(context.Services, new ConfigurationBuilder().Build());
         context.Services.AddSingleton<TimeProvider>(Clock);
         context.Services.AddSingleton(CreateMergeGate());
         context.Services.AddLogging();
         _renderContexts.Add(context);
+        return context;
+    }
+
+    /// <summary>
+    /// The same renderer, with one of its own services handed back beside it — the circuit-scoped
+    /// <c>SurfaceSearch</c> a surface claims through, or the <c>NavigationManager</c> a route-aware
+    /// component reads. Resolved from the renderer rather than constructed, because the whole point
+    /// of this tier is that the test drives the same instance the component was injected with.
+    /// </summary>
+    private protected BunitContext CreateRenderContext<TService>(out TService service)
+        where TService : notnull
+    {
+        var context = CreateRenderContext();
+        service = context.Services.GetRequiredService<TService>();
         return context;
     }
 
