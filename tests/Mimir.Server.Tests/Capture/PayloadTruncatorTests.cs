@@ -5,10 +5,6 @@ using Mimir.Server.Configuration;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// Spec §4 fidelity: tool payloads keep 3 KB head + 1 KB tail of any oversized field with a
-/// visible marker, prompts stay whole, and the original size is always recorded.
-/// </summary>
 public class PayloadTruncatorTests
 {
     private static readonly CaptureOptions Options = new();
@@ -27,7 +23,6 @@ public class PayloadTruncatorTests
     [Fact]
     public void AnOversizedField_Keeps3KHeadPlus1KTailWithTheMarker()
     {
-        // 5,000 bytes of ASCII: head 3,072 + tail 1,024 leaves exactly 904 dropped.
         var json = JsonSerializer.Serialize(new { tool_response = new string('a', 5000) });
 
         var value = FieldOf(Truncate(json), "tool_response");
@@ -72,7 +67,6 @@ public class PayloadTruncatorTests
     [Fact]
     public void MultiByteTextIsCutAtCharacterBoundaries_NeverCorrupted()
     {
-        // '€' is 3 UTF-8 bytes; 1,707 of them (5,121 bytes) forces cuts near both limits.
         var json = JsonSerializer.Serialize(new { tool_response = new string('€', 1707) });
 
         var value = FieldOf(Truncate(json), "tool_response");

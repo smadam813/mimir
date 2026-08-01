@@ -3,10 +3,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// §6 chunking: chronological ~token windows, nothing lost, and Remember Events riding along in
-/// every chunk. Budgets in these tests are tiny so a handful of Events spans several chunks.
-/// </summary>
 public class EpisodeChunkerTests
 {
     [Fact]
@@ -27,7 +23,6 @@ public class EpisodeChunkerTests
     [Fact]
     public void AnOversizedEpisode_SplitsChronologically_LosingNothing()
     {
-        // 100 tokens each (16 overhead + 336/4) against a 250-token budget: two per chunk.
         var events = Enumerable.Range(1, 6).Select(seq => NewEvent(seq, 336)).ToList();
 
         var chunks = EpisodeChunker.Chunk(events, chunkTokens: 250);

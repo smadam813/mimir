@@ -7,11 +7,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The §6 Distiller against a scripted model: the prompt carries the labelled Event stream and
-/// <c>/no_think</c>; the answer's candidates come back as <see cref="WisdomCandidate"/>s with
-/// kind, scope, capped text, and provenance Event ids mapped from the <c>[eN]</c> references.
-/// </summary>
 public class EpisodeDistillerTests
 {
     private static readonly Guid ProjectId = Guid.CreateVersion7();
@@ -147,8 +142,6 @@ public class EpisodeDistillerTests
     [Fact]
     public async Task AnOversizedEpisode_IsDistilledPerChunk()
     {
-        // Two chunks at this budget; each chat call must see only its own chunk's labels and the
-        // second chunk's [eN] references must map to the second chunk's Event ids.
         var events = Enumerable.Range(1, 4)
             .Select(seq => NewEvent(seq, EventType.PostToolUse, new string('x', 700)))
             .ToList();
@@ -176,10 +169,6 @@ public class EpisodeDistillerTests
     [Fact]
     public async Task AGoodChunkThenAnUnparseableOne_Throws_LettingNoPartialListOut()
     {
-        // Two chunks at this budget, the first answered cleanly: the candidates from it are in
-        // hand when the second chunk fails, and must not escape as the Episode's answer. Partial
-        // is worse than none — the caller re-queues the whole Episode (§6), so half an Episode
-        // returned here is half of it admitted and then distilled again on the retry.
         var events = Enumerable.Range(1, 4)
             .Select(seq => NewEvent(seq, EventType.PostToolUse, new string('x', 700)))
             .ToList();

@@ -7,16 +7,8 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// The §7 query ranking as a reusable service against a real Postgres: hybrid-search rank fused
-/// with the record factors, the affinity context as caller input, and no threshold of its own —
-/// consumers own their gates. The Candidate Universe is not theirs to own: each method names the
-/// universe it searches, so the ambient ranking restricts inside the §3 search while the
-/// everything ranking reaches the whole tier under narrowings the caller states.
-/// </summary>
 public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>A query with no word overlap with any test Wisdom, so only the vector leg ranks.</summary>
     private const string Query = "how do I deploy the pipeline?";
 
     public override async ValueTask InitializeAsync()
@@ -34,7 +26,6 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
 
         var ranked = await RankEverythingAsync(project.Id);
 
-        // Vector ranks 1 and 2 fuse to 1/61 vs 1/62 — a 1.6% edge the 1.5× affinity dwarfs.
         ranked.Select(r => r.WisdomId).ShouldBe([scoped.Id, global.Id]);
     }
 
@@ -47,7 +38,6 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
 
         var ranked = await RankEverythingAsync(other.Id);
 
-        // Same rows, different affinity context: neither matches, so the nearer row leads.
         ranked.Select(r => r.WisdomId).ShouldBe([global.Id, scoped.Id]);
     }
 
@@ -58,19 +48,11 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
         var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.91);
         var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
 
-        // The same two rows the everything ranking returns above — membership, not an annotation:
-        // ranking the ambient universe of a Project that owns neither row returns only the Global.
         (await RankAmbientAsync(other.Id)).Select(r => r.WisdomId).ShouldBe([global.Id]);
         (await RankAmbientAsync(project.Id)).Select(r => r.WisdomId)
             .ShouldBe([scoped.Id, global.Id], ignoreOrder: true);
     }
 
-    /// <summary>
-    /// The crowd-out bug's tombstone (#58): the §3 search bounds each leg to the per-leg top-N, so
-    /// a foreign Project's nearer corpus used to fill both legs and leave ambient recall empty
-    /// while an eligible match sat one row deeper. The universe now restricts inside the search,
-    /// before the truncation, so the eligible match competes only against its own universe.
-    /// </summary>
     [Fact]
     public async Task TheAmbientUniverse_SurvivesANearerForeignCorpus_FillingThePerLegTopN()
     {
@@ -83,8 +65,6 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
         (await RankAmbientAsync(project.Id, options)).Select(r => r.WisdomId)
             .ShouldBe([eligible.Id]);
 
-        // The crowd-out itself, still real one method over: the everything ranking's top-2 holds
-        // the two foreign rows and the eligible match never reaches a consumer that must filter.
         (await RankEverythingAsync(project.Id, options)).Select(r => r.WisdomId)
             .ShouldBe([nearest.Id, nextNearest.Id], ignoreOrder: true);
     }
@@ -114,8 +94,6 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
         var far = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.2);
         var ftsOnly = await AddWisdomAsync(project.Id, "deploy the pipeline notes", cosine: 0.0);
 
-        // Per-leg top-N of 2: the vector leg holds the two nearest rows, so the FTS-matched row
-        // rides in on its leg alone and carries no cosine.
         var ranked = await RankEverythingAsync(project.Id, new SearchOptions { PerLegTopN = 2 });
 
         ranked.Select(r => r.WisdomId).ShouldBe([near.Id, far.Id, ftsOnly.Id], ignoreOrder: true);

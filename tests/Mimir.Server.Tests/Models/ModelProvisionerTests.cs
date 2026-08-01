@@ -61,7 +61,6 @@ public class ModelProvisionerTests
 
         await Provision();
 
-        // The demo in the acceptance criteria is watching this sequence on the tile.
         seen.ShouldContain((ModelProvisioningState.Pulling, 25));
         seen.ShouldContain((ModelProvisioningState.Pulling, 80));
         seen[^1].State.ShouldBe(ModelProvisioningState.Ready);
@@ -117,8 +116,6 @@ public class ModelProvisionerTests
 
         await Provision();
 
-        // A failed pull is terminal. Reporting Working until the last (multi-gigabyte) pull
-        // finishes would hide it for minutes, so the tile carries both facts at once.
         summaries.ShouldContain(x =>
             x.State == HealthTileState.Degraded
             && x.Summary.Contains("42%")
@@ -134,7 +131,6 @@ public class ModelProvisionerTests
         _catalog.LocalModels.AddRange([Distiller, Embedding]);
 
         var provisioning = Provision();
-        // Two retry intervals must elapse before the third (successful) list call happens.
         await AdvanceUntilComplete(provisioning);
 
         _catalog.ListCalls.ShouldBe(3);
@@ -193,7 +189,6 @@ public class ModelProvisionerTests
         return provisioner.ProvisionAsync(cancellationToken);
     }
 
-    /// <summary>Drives the fake clock forward until the provisioner stops waiting on a retry delay.</summary>
     private async Task AdvanceUntilComplete(Task provisioning)
     {
         for (var attempt = 0; attempt < 500 && !provisioning.IsCompleted; attempt++)

@@ -4,10 +4,6 @@ using Mimir.Server.Recall;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// <c>mimir_timeline</c> (§7) against a real Postgres: Episodes newest first, each carrying its
-/// seal state — live, or sealed with the §4 reason — narrowed by the project and since filters.
-/// </summary>
 public sealed class McpTimelineServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]

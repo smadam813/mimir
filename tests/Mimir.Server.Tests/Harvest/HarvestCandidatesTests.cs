@@ -3,10 +3,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Harvest;
 
-/// <summary>
-/// The §5 mechanical conversion rules: H1/H2 sections, frontmatter <c>type</c> → kind, the
-/// 2,000-char hard cap. No LLM anywhere — what goes in is what comes out, just partitioned.
-/// </summary>
 public class HarvestCandidatesTests
 {
     private const int Cap = 2000;
@@ -194,8 +190,6 @@ public class HarvestCandidatesTests
     [Fact]
     public void AFileOpeningWithAHorizontalRule_IsAllBody_NeverSwallowedAsFrontmatter()
     {
-        // Two markdown horizontal rules, no frontmatter: nothing here is key: value shaped,
-        // so no content may be silently dropped between the --- lines.
         var content = "---\n# Real Heading\nSome real content here.\n---\n## Another Heading\nMore real content.";
 
         var candidates = HarvestCandidates.Of(content, Cap);
@@ -232,8 +226,6 @@ public class HarvestCandidatesTests
     [Fact]
     public void ANestedShorterFence_DoesNotCloseTheOuterOne()
     {
-        // A four-backtick fence documenting three-backtick fence syntax — the inner runs are
-        // content, so the # line inside must not split.
         var content = "# Docs\n````\n```\n# inside the example\n```\n````\nafter";
 
         HarvestCandidates.Of(content, Cap).ShouldHaveSingleItem();

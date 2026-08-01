@@ -3,10 +3,6 @@ using Mimir.Server.Models;
 
 namespace Mimir.Server.Tests.Models;
 
-/// <summary>
-/// A scriptable stand-in for Ollama. Every method records its calls so tests can assert that a
-/// model already present was <em>not</em> re-pulled.
-/// </summary>
 internal sealed class FakeModelCatalog : IModelCatalog
 {
     private readonly Queue<Func<IReadOnlyList<string>>> _listResponses = new();
@@ -17,13 +13,10 @@ internal sealed class FakeModelCatalog : IModelCatalog
 
     public int ListCalls { get; private set; }
 
-    /// <summary>Progress each pull emits, keyed by model name. Defaults to a single 100% tick.</summary>
     public Dictionary<string, IReadOnlyList<ModelPullProgress>> PullProgress { get; } = [];
 
-    /// <summary>Models whose pull throws instead of completing, keyed by model name.</summary>
     public Dictionary<string, Exception> PullFailures { get; } = [];
 
-    /// <summary>Queues one outcome for the next <see cref="ListLocalModelsAsync"/> call.</summary>
     public FakeModelCatalog EnqueueListFailure(Exception exception)
     {
         _listResponses.Enqueue(() => throw exception);

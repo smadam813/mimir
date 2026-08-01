@@ -3,18 +3,11 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// The §8.2 list's words, with no database anywhere near them (#94): every one of these is a pure
-/// function of one summary, so these pins run on a machine with no Postgres — the machine where a
-/// mistake in them would be made.
-/// </summary>
 public sealed class EpisodeDisplayTests
 {
     [Fact]
     public void AnUnsealedEpisode_IsLive_WhateverItsDistillationColumnSays()
     {
-        // Capture creates the row Pending and only Sealing enqueues (§6), so reading the column
-        // first would mark every live session "pending".
         EpisodeDisplay.State(sealedAt: null, DistillationState.Pending).ShouldBe(EpisodeState.Live);
     }
 
@@ -42,8 +35,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void ALiveEpisode_SaysOnlyWhereItRuns_LeavingLiveToTheRowsOwnMark()
     {
-        // "live" in the row's mark and "unsealed" here would be two words for one fact; the meta
-        // line carries how a session ended, and this one has not.
         var live = Summary(sealReason: null) with { SealedAt = null };
 
         EpisodeDisplay.MetaLine(live).ShouldBe(@"C:\git\mimir");
@@ -69,7 +60,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void ADistilledEpisodeThatProducedNothing_SaysSoInWords()
     {
-        // A quiet session and a session whose figure is simply absent must not read alike.
         var quiet = Summary(sealReason: "clear", wisdomCount: 0);
 
         EpisodeDisplay.MetaLine(quiet).ShouldBe(@"C:\git\mimir · sealed · clear · no Wisdom");
@@ -78,7 +68,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AnEpisodeStillOwedDistillation_ClaimsNeither()
     {
-        // Pending, running and failed have not been distilled, so there is no figure to state yet.
         foreach (var distillation in new[]
             { DistillationState.Pending, DistillationState.Running, DistillationState.Failed })
         {
@@ -138,7 +127,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void TheStamp_RendersUtc_InTheDisplayFormat()
     {
-        // A non-UTC offset: the format must convert rather than print local wall-clock time.
         var at = new DateTimeOffset(2026, 7, 26, 9, 20, 0, TimeSpan.FromHours(-5));
 
         EpisodeDisplay.Stamp(at).ShouldBe("2026-07-26 14:20 UTC");
@@ -151,8 +139,6 @@ public sealed class EpisodeDisplayTests
     [InlineData(1, 0, 0, "1h 00m")]
     [InlineData(1, 30, 0, "1h 30m")]
     [InlineData(23, 59, 0, "23h 59m")]
-    // §4 crash-Seals only after a day idle, so the swept session — the common unsealed outcome —
-    // is over a day long and must not come out as a three-digit hour count.
     [InlineData(25, 6, 0, "1d 01h")]
     [InlineData(73, 30, 0, "3d 01h")]
     public void ADuration_ReadsInTheLargestUnitItFills(int hours, int minutes, int seconds, string expected)
@@ -166,24 +152,18 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AnUnsealedEpisode_HasNoDurationToState()
     {
-        // The session has not ended, so there is no span to report — the aside says so in words
-        // rather than quietly counting up to now, which would be a figure nothing recorded.
         EpisodeDisplay.Duration(Sealed.AddHours(-1), sealedAt: null).ShouldBeNull();
     }
 
     [Fact]
     public void ASealStampedBeforeItsStart_ReadsAsNoTime_RatherThanNegative()
     {
-        // Two hosts' clocks write these two columns, so skew is possible and a "-3s" would be a
-        // reading of the clocks, not of the session.
         EpisodeDisplay.Duration(Sealed, Sealed.AddSeconds(-3)).ShouldBe("0s");
     }
 
     [Fact]
     public void AnUnsealedEpisode_IsNotInTheQueueAtAll_WhateverItsColumnSays()
     {
-        // Capture creates the row Pending; Sealing is what enqueues (§6). Reading the column out
-        // loud here would tell a curator a live session is waiting on a worker.
         EpisodeDisplay.DistillationPhrase(sealedAt: null, DistillationState.Pending)
             .ShouldBe("not queued — Sealing is what enqueues");
     }
@@ -201,7 +181,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AStreamInsideTheBound_IsWholeAndSaysNothingAboutIt()
     {
-        // Nothing is withheld, so there is no bound to state and no control to offer.
         EpisodeDisplay.StreamBoundNote(EpisodeDisplay.StreamBound, expanded: false).ShouldBeNull();
         EpisodeDisplay.StreamToggleLabel(EpisodeDisplay.StreamBound, expanded: false).ShouldBeNull();
     }
@@ -229,8 +208,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void OneEventPastTheBound_IsStillBounded()
     {
-        // The straddling case: the bound holds at the first Event it actually withholds, not one
-        // short of it, so a stream of bound+1 must not render whole and unannounced.
         EpisodeDisplay.StreamBoundNote(EpisodeDisplay.StreamBound + 1, expanded: false).ShouldNotBeNull();
         EpisodeDisplay.StreamToggleLabel(EpisodeDisplay.StreamBound + 1, expanded: false)
             .ShouldBe("Show the remaining 1");
@@ -255,7 +232,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AProvenanceLink_AnchorsTheEventItNames()
     {
-        // The shape WisdomSurface writes for §8.1's "open the Episode at the Event itself".
         var eventId = Guid.NewGuid();
 
         EpisodeDisplay.AnchoredEvent($"http://localhost/projects/p/episodes/e#event-{eventId}")
@@ -265,9 +241,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void TheAnchorTheLinkWrites_IsTheOneTheStreamCarries_AndTheReaderOpens()
     {
-        // The round trip the three sites used to spell separately: WisdomSurface's href, the
-        // stream's DOM id, and this reader. A mismatch never fails to build — the link just stops
-        // landing — so the loop is closed here instead. The literal shape stays pinned above.
         var eventId = Guid.NewGuid();
 
         EpisodeDisplay.EventAnchorHref(eventId)
@@ -280,8 +253,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AFailedDistillation_SaysItWasAttempted_NotThatItNeverRan()
     {
-        // The aside beside this note reads "failed" and promises a re-queue. Saying "has not been
-        // distilled" here would leave one Episode described two ways on one screen.
         var note = EpisodeDisplay.NothingProducedNote(Sealed, DistillationState.Failed);
 
         note.ShouldContain("failed");
@@ -292,7 +263,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void ADoneEpisodeThatProducedNothing_SaysTheEmptinessIsSettled()
     {
-        // §6 prefers no candidate to a weak one, so this is an outcome rather than a wait.
         EpisodeDisplay.NothingProducedNote(Sealed, DistillationState.Done)
             .ShouldContain("no candidate over a weak one");
     }
@@ -308,8 +278,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AnUnsealedEpisode_IsNotDescribedByItsColumn_HereEither()
     {
-        // Routed through State, the one rule: the column reads Pending from the moment capture
-        // creates the row, so a live session must not read as a distillation that ran.
         EpisodeDisplay.NothingProducedNote(sealedAt: null, DistillationState.Done)
             .ShouldContain("Nothing yet");
         EpisodeDisplay.NothingProducedNote(sealedAt: null, DistillationState.Failed)
@@ -319,7 +287,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void AnAnchorTheBoundWouldWithhold_OpensTheStreamWhole()
     {
-        // Otherwise the Provenance link lands on an element that is not in the page at all.
         var events = Enumerable.Range(0, EpisodeDisplay.StreamBound + 3).Select(_ => Guid.NewGuid()).ToList();
 
         EpisodeDisplay.AnchorIsPastTheBound(events, $"http://x/#event-{events[^1]}").ShouldBeTrue();
@@ -339,8 +306,6 @@ public sealed class EpisodeDisplayTests
     [Fact]
     public void ASealWithoutAReason_IsWordedTheSameWayEverywhere()
     {
-        // The aside states the Seal reason on its own line; the row states it inside MetaLine. One
-        // phrase, so the two screens cannot drift.
         EpisodeDisplay.SealPhrase(sealReason: null).ShouldBe("no reason");
         EpisodeDisplay.MetaLine(Summary(sealReason: null))
             .ShouldContain(EpisodeDisplay.SealPhrase(sealReason: null));
@@ -366,7 +331,6 @@ public sealed class EpisodeDisplayTests
 
     private static readonly DateTimeOffset Sealed = new(2026, 7, 26, 14, 20, 0, TimeSpan.Zero);
 
-    /// <summary>A Sealed summary; the one live case unseals it with a <c>with</c> expression.</summary>
     private static EpisodeSummary Summary(
         string? sealReason = "clear",
         DistillationState distillation = DistillationState.Done,

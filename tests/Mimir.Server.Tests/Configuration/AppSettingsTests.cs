@@ -3,10 +3,6 @@ using Mimir.Server.Configuration;
 
 namespace Mimir.Server.Tests.Configuration;
 
-/// <summary>
-/// appsettings.json restates the §11 defaults so the shipped config documents itself. That is only
-/// safe while the two agree — this is what stops them drifting apart.
-/// </summary>
 public class AppSettingsTests
 {
     private static readonly IConfiguration AppSettings =

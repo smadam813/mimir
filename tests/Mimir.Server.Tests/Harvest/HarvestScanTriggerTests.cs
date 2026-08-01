@@ -18,8 +18,6 @@ public class HarvestScanTriggerTests
     [Fact]
     public async Task RequestsWhileNooneWaits_CoalesceIntoOneScan()
     {
-        // Ten sessions ending during one scan mean one rescan, not ten: the scan that follows
-        // sees all of their files anyway.
         var trigger = new HarvestScanTrigger();
         for (var i = 0; i < 10; i++)
         {

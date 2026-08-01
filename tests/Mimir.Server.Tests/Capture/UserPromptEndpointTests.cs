@@ -12,14 +12,8 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// The single §4 UserPromptSubmit round-trip end to end: one call records the prompt Event and
-/// answers with the Prompt-lane injection — and recall failing (a dead embedder) still leaves a
-/// successful capture answering with an empty injection, because everything fails open (§7).
-/// </summary>
 public sealed class UserPromptEndpointTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>A prompt with no word overlap with the test Wisdom, so only the vector leg ranks.</summary>
     private const string Prompt = "how do I deploy the pipeline?";
 
     public override async ValueTask InitializeAsync()

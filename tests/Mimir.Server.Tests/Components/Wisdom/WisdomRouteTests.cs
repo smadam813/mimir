@@ -3,11 +3,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Components.Wisdom;
 
-/// <summary>
-/// The one keeper of the §8.1 surface's URLs (#91): the sidebar writes a lens into them and the
-/// page reads it back, so the two halves have to agree. Pure — no Postgres, like
-/// <c>ProjectRouteTests</c> beside it.
-/// </summary>
 public sealed class WisdomRouteTests
 {
     private static readonly Guid ProjectId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -37,10 +32,6 @@ public sealed class WisdomRouteTests
         WisdomRoute.LensOf(new Uri($"http://localhost/{detail}")).ShouldBe(lens);
     }
 
-    /// <summary>
-    /// A hand-typed or stale <c>?show=</c> lands on the default listing rather than erroring —
-    /// the same fallback <c>ProjectRoute</c> gives an unrecognised tab.
-    /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]

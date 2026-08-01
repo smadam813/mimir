@@ -2,10 +2,6 @@ using System.Diagnostics;
 
 namespace Mimir.Cli.Tests;
 
-/// <summary>
-/// Spec §3.1 steps 1 and 3 against real git: which remote wins, and the path fallback when there
-/// is no remote or no repository at all.
-/// </summary>
 public sealed class ProjectLocatorTests : IDisposable
 {
     private readonly List<string> _tempDirs = [];
@@ -18,13 +14,13 @@ public sealed class ProjectLocatorTests : IDisposable
             {
                 Directory.Delete(dir, recursive: true);
             }
+            // Scratch space; Windows sometimes holds .git files briefly, and leaked temp is fine.
             catch (IOException)
             {
-                // Scratch space; Windows sometimes holds .git files briefly. Leaked temp is fine.
             }
+            // git marks some object files read-only; same story.
             catch (UnauthorizedAccessException)
             {
-                // git marks some object files read-only; same story.
             }
         }
     }
@@ -91,8 +87,6 @@ public sealed class ProjectLocatorTests : IDisposable
     [Fact]
     public async Task AnAlreadyCancelledCap_StillAnswersWithThePathFallback()
     {
-        // The hook's 3 s cap can expire mid-resolution; out of time means "no repository
-        // information", never an exception (spec §4 fail-open).
         var repo = GitRepo();
         using var expired = new CancellationTokenSource();
         await expired.CancelAsync();

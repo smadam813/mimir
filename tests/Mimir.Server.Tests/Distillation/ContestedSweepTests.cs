@@ -6,10 +6,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// §6.4's flag lifetime against a real Postgres: a Contested flag standing 14 days is cleared by
-/// the sweep; a younger one — and everything about the Wisdom besides the flag — is untouched.
-/// </summary>
 public sealed class ContestedSweepTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]

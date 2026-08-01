@@ -5,9 +5,6 @@ using Mimir.Server.Configuration;
 
 namespace Mimir.Server.Tests.Configuration;
 
-/// <summary>
-/// The §11 knob table is normative: every default asserted here is quoted from the spec.
-/// </summary>
 public class MimirOptionsTests
 {
     [Fact]
@@ -45,7 +42,6 @@ public class MimirOptionsTests
     [Fact]
     public void OptionsBindFromDoubleUnderscoreEnvironmentVariables()
     {
-        // Compose passes knobs as env vars; the `__` separator must reach the same options.
         const string variable = "Mimir__Models__Distiller";
         Environment.SetEnvironmentVariable(variable, "qwen3:14b");
         try
@@ -91,10 +87,6 @@ public class MimirOptionsTests
     [InlineData("1", "2147483647")]
     public void HeadPlusTailBeyondTheCap_FailsValidation(string head, string tail)
     {
-        // Head plus tail is what survives the cap; a combination that exceeds it would make the
-        // truncator emit more than the cap allows and the marker lie about what was dropped.
-        // The near-int.MaxValue rows would wrap int addition around the check entirely — and
-        // then index far outside the payload at truncation time.
         Should.Throw<OptionsValidationException>(() => Resolve<CaptureOptions>(new Dictionary<string, string?>
         {
             ["Mimir:Capture:PayloadHeadBytes"] = head,

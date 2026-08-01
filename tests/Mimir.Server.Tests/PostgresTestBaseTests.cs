@@ -5,13 +5,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests;
 
-/// <summary>
-/// The harness pinning itself. The two seeding tests are a deliberate pollution pair: each seeds
-/// one row in every mutable table and asserts the whole table holds exactly that, so with the
-/// per-test reset gone whichever runs second goes red — on every machine, in either order. Without
-/// this pair a broken reset would not fail here at all; it would resurface as somebody else's
-/// order-dependent flake on CI, which is the #20/#22 failure mode the harness exists to end.
-/// </summary>
 public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -31,6 +24,30 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         => await AssertGlobalIsPristineThenMutateItAsync();
 
     [Fact]
+    public async Task TheProjectSeeder_GivesEachCallItsOwnIdentityAndRoot_ButNotItsOwnDisplayName()
+    {
+        var first = await AddProjectAsync();
+        var second = await AddProjectAsync();
+
+        second.Identity.ShouldNotBe(
+            first.Identity, "§3.1 identity-matching would weld a test's second Project onto its first");
+        second.RootPaths.ShouldNotBe(
+            first.RootPaths, "§3.1 root-matching would weld a test's second Project onto its first");
+        second.DisplayName.ShouldBe(
+            first.DisplayName, "nothing makes DisplayName unique: name them apart when filtering by it");
+        (await FromDb(db => db.Projects.CountAsync(Token))).ShouldBe(3);
+    }
+
+    [Fact]
+    public void TheIdentityAndRootHelpers_AnswerAFreshValueEachCall()
+    {
+        Identity("same").ShouldNotBe(
+            Identity("same"), "a resolver test hands two identities in and pins how they resolve "
+            + "against each other — a repeat would be §3.1 matching them onto one row instead");
+        Root("C", "same").ShouldNotBe(Root("C", "same"), "and the same for the root they match on");
+    }
+
+    [Fact]
     public async Task AfterTheReset_TheGlobalPseudoProjectIsTheOnlyProject()
     {
         var projects = await FromDb(db => db.Projects.ToListAsync(Token));
@@ -42,12 +59,6 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         global.RootPaths.ShouldBeEmpty();
     }
 
-    /// <summary>
-    /// The second pollution pair, for the one row the reset restores rather than deletes. Global is
-    /// the single survivor of the truncate, so it is the single way a test's writes could still
-    /// reach the next one: assert it pristine, then rename it and hand it a root — exactly what a
-    /// resolver or merger path would do to a Project — and let the sibling assert first.
-    /// </summary>
     private async Task AssertGlobalIsPristineThenMutateItAsync()
     {
         var global = await Context.Projects.SingleAsync(p => p.Id == Project.GlobalId, Token);
@@ -59,11 +70,6 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         await Context.SaveChangesAsync(Token);
     }
 
-    /// <summary>
-    /// One row in each mutable table, then the whole-table counts. Shared by both halves of the
-    /// pollution pair so the two are provably the same test twice — the property under test is
-    /// that running it twice changes nothing.
-    /// </summary>
     private async Task SeedOneOfEverythingAsync()
     {
         var project = await AddProjectAsync();
@@ -92,21 +98,6 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         (await FromDb(db => db.GoldenCases.CountAsync(Token))).ShouldBe(1);
     }
 
-    /// <summary>
-    /// Every §8 service a surface can <c>@inject</c> resolves from the render tier's container
-    /// (#130). Written as a resolution sweep over <c>AddMimirUi</c>'s own descriptors rather than a
-    /// hand-list, because a hand-list is what went wrong: the tier shipped registering neither
-    /// <see cref="TimeProvider"/> nor <c>MergeGate</c>, so three of the four browsers threw at
-    /// first render while the only surface pinned so far — the Episode list — resolved fine and
-    /// said nothing. The failure would have landed on whoever wrote the next render test, against
-    /// a rules file promising it could not happen.
-    ///
-    /// It reads the descriptors, so a §8 service added to <c>AddMimirUi</c> tomorrow is swept the
-    /// day it is registered. The clock is asserted to be this class's <see cref="Clock"/> and not
-    /// merely present: <c>TimeProvider.System</c> resolves just as well and would leave a surface
-    /// reading a different "now" from every other SUT the harness composes, which is a wrong
-    /// timestamp in a render assertion rather than an exception anybody would trace back here.
-    /// </summary>
     [Fact]
     public void TheRenderTier_ResolvesEverySection8ServiceASurfaceCanInject()
     {

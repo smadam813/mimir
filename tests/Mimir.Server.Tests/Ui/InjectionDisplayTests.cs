@@ -4,14 +4,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// The §8.3 surface's pure presentation: the payload an ambient lane put in front of a session,
-/// rebuilt from what the entry recorded, and the §7 formula the screen states beside the scores.
-///
-/// Deliberately Postgres-free. Both are wrong or right with no database in the picture, and the
-/// machine most likely to break them is the one with no Docker running — where a Postgres-backed
-/// pin would skip rather than fail.
-/// </summary>
 public class InjectionDisplayTests
 {
     private static readonly DateTimeOffset Confirmed = new(2026, 7, 1, 8, 30, 0, TimeSpan.Zero);
@@ -64,9 +56,6 @@ public class InjectionDisplayTests
     [Fact]
     public void Payload_IsNotBoundedByAnyBudget_TheRecordedItemsAreWhatAlreadyFitted()
     {
-        // Well past the Brief's own 4,000-char §11 budget: these lines were recorded, so they were
-        // injected, and a rebuild that re-measured them against the budget would drop lines the
-        // session demonstrably read.
         var items = Enumerable.Range(0, 40)
             .Select(i => Item(new string('x', 300) + i))
             .ToArray();
@@ -152,15 +141,12 @@ public class InjectionDisplayTests
 
         InjectionDisplay.Budget(InjectionLane.Brief, options).ShouldBe(options.BriefBudgetChars);
         InjectionDisplay.Budget(InjectionLane.Prompt, options).ShouldBe(options.PromptBudgetChars);
-        // mimir_search is capped by result count, not chars — quoting one would invent it.
         InjectionDisplay.Budget(InjectionLane.Mcp, options).ShouldBeNull();
     }
 
     [Fact]
     public void Score_KeepsEnoughPrecisionToTellTwoFusedScoresApart()
     {
-        // A Brief's scale runs to single digits; a query lane's fused score sits near a hundredth,
-        // where two decimals would round every row in an entry to the same figure.
         InjectionDisplay.Score(4.9).ShouldBe("4.90");
         InjectionDisplay.Score(0.0312).ShouldBe("0.0312");
         InjectionDisplay.Score(0.0208).ShouldNotBe(InjectionDisplay.Score(0.0225));
@@ -192,10 +178,6 @@ public class InjectionDisplayTests
     [Fact]
     public void CannotPromote_TellsCarriedNothingApartFromCarriedOnlyDeadLines()
     {
-        // Three ways an entry can fail to promote and only one of them is about retirement. An
-        // mimir_search whose answer matched Episodes alone records a query and no Wisdom at all
-        // (McpSearchService returns early only when *both* legs are empty) — telling that curator
-        // their lines were retired names a fault that never happened.
         var carriedNothing = Entry("what did we decide about hooks?");
         var carriedOnlyDead = Entry("what did we decide about hooks?", Retired(), Gone());
 
@@ -246,10 +228,8 @@ public class InjectionDisplayTests
                 OrphanedProvenance: false));
     }
 
-    /// <summary>An item whose Wisdom was retired after the injection (§10) — recall skips it.</summary>
     private static InjectedWisdom Retired() => Item("Retired since.", retiredAt: Confirmed);
 
-    /// <summary>An item whose Wisdom was hard-deleted after the injection (§10).</summary>
     private static InjectedWisdom Gone()
         => new(Guid.CreateVersion7(), Score: 1.0, Salient: false, Wisdom: null);
 }

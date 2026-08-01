@@ -6,12 +6,6 @@ using Npgsql;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The full Merge Gate (§6) against a real Postgres: no match inserts new Wisdom at
-/// reinforcement 1 / version 1 with Provenance; a cosine at or above 0.80 goes to the arbiter,
-/// whose ruling merges the rewrite, supersedes, or scope-splits. Thresholds read the vector
-/// leg's cosine, never the fused score (§3).
-/// </summary>
 public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -98,8 +92,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AWordForWordFtsMatch_WithADistantEmbedding_DoesNotReinforce()
     {
-        // The §3 score-scale rule at the gate: identical wording makes the FTS leg rank the pair
-        // as hard as it can, but the threshold reads cosine — a distant embedding means no match.
         var project = await AddProjectAsync();
         var item = await AddHarvestedItemAsync(project.Id);
         const string originalText = "the deploy pipeline needs manual approval";
@@ -138,8 +130,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task ADistillerShapedCandidate_RecordsOneProvenanceRowPerEvent_Unioned()
     {
-        // The §6 Distiller output shape: a candidate carries its Episode and plural provenance
-        // event ids. Each Event gets its own row; a reinforcing admission unions, not appends.
         var project = await AddProjectAsync();
         var episode = await AddEpisodeAsync(project.Id);
         var first = await AddEventAsync(episode.Id, seq: 1);
@@ -228,8 +218,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AnAgreementProposedAsGlobal_IsNotCrossProjectConfirmation_AndDoesNotPromote()
     {
-        // §6.3 promotes on confirmation from a *different Project*. A Global-scoped candidate
-        // carries no origin Project, so it cannot vouch for recurrence elsewhere.
         var project = await AddProjectAsync();
         var item = await AddHarvestedItemAsync(project.Id);
         const string originalText = "Tests need the daemon up";
@@ -322,7 +310,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         (await FromDb(db => db.WisdomVersions.SingleAsync(v => v.WisdomId == sibling.Id, Token)))
             .Cause.ShouldBe(WisdomVersionCause.Adjudicated);
 
-        // Both rows descend from both sources, so both carry the full provenance union.
         foreach (var wisdomId in new[] { kept.Id, sibling.Id })
         {
             var items = await FromDb(db => db.Provenance
@@ -360,8 +347,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AScopeSplit_WithNoProjectInPlay_DegradesToSupersede()
     {
-        // Two Global positions cannot split into "one Global and one Project-scoped" (§6.4) —
-        // there is no Project to scope to — so the adjudication falls back to Supersede.
         var project = await AddProjectAsync();
         var first = await AddHarvestedItemAsync(project.Id);
         var second = await AddHarvestedItemAsync(project.Id);
@@ -386,8 +371,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AnArbiterFailure_Propagates_LeavingTheMatchUntouched()
     {
-        // No silent mechanical fallback: a failed ruling must fail the admission, so the §5
-        // conversion marker stays pending and the item retries once the model is back.
         var project = await AddProjectAsync();
         var item = await AddHarvestedItemAsync(project.Id);
         const string originalText = "A settled lesson";
@@ -441,8 +424,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         Embeddings.Map(matchingText, TestVectors.WithCosine(0.9));
         Arbiter.Failure = new MergeArbiterException("the model returned nothing usable");
 
-        // The first candidate admits cleanly; the second matches it and the arbiter throws —
-        // so the rollback must take back an already-saved admission, not just the failed one.
         await Should.ThrowAsync<MergeArbiterException>(async () => await CreateMergeGate().AdmitAllAsync(
             [
                 new WisdomCandidate(WisdomKind.Fact, project.Id, firstText, HarvestedItemId: item.Id),
@@ -465,9 +446,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         var item = await AddHarvestedItemAsync(project.Id);
         const string text = "A fact the marker must not outlive";
 
-        // The finalizer writes the marker to the database inside the transaction and then
-        // fails — so the rollback has a genuinely written marker to take back, not one that
-        // was never staged.
         await Should.ThrowAsync<InvalidOperationException>(async () => await CreateMergeGate().AdmitAllAsync(
             [new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id)],
             async (batch, ct) =>
@@ -496,9 +474,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         Embeddings.Poison(mergedText);
         Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
 
-        // Work of the caller's own, staged and not yet saved when the batch fails. On a gate
-        // that borrowed this context, the failure's ChangeTracker.Clear() detached this row as
-        // collateral and the save below silently lost it.
         var staged = new HarvestedItem
         {
             Id = Guid.CreateVersion7(),
@@ -525,8 +500,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         (await FromDb(db => db.HarvestedItems.CountAsync(i => i.Id == staged.Id, Token)))
             .ShouldBe(1, "the caller's own staged row still saves after the batch failed");
 
-        // The failure struck mid-merge, with staged-but-unsaved rows on the batch's context.
-        // Disposing it is the rollback: nothing of the batch survives to be re-inserted.
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.WisdomVersions.CountAsync(Token))).ShouldBe(0);
         (await FromDb(db => db.Provenance.CountAsync(Token))).ShouldBe(0);
@@ -538,10 +511,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         var project = await AddProjectAsync();
         var item = await AddHarvestedItemAsync(project.Id);
 
-        // An empty or frontmatter-only file still reaches the gate, marker and all, with nothing
-        // to admit — and nothing to admit is nothing to serialize. Another batch holds the lock
-        // throughout: if the empty one queued for it, a Backfill's worth of sparse files would
-        // each cycle the gate-wide lock, contending with real batches for zero Wisdom rows.
         await using var holder = CreateContext();
         await using var held = await holder.Database.BeginTransactionAsync(Token);
         await holder.Database.ExecuteSqlAsync(
@@ -567,9 +536,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         Embeddings.Map(firstText, TestVectors.Basis);
         Embeddings.Map(secondText, TestVectors.Basis);
 
-        // Stage the exact race the advisory lock exists to close: batch A holds its transaction
-        // open until batch B is observed *waiting* on the lock. Unserialized, B's search would
-        // run before A commits, see nothing on its own connection, and insert a duplicate.
         var admittedA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var batchA = CreateMergeGate().AdmitAllAsync(
             [new WisdomCandidate(WisdomKind.Lesson, project.Id, firstText, HarvestedItemId: first.Id)],
@@ -602,9 +568,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AnEditRacingABatchRewrite_SerializesBehindIt_AndTheChainKeepsGrowing()
     {
-        // §8.1's edit and §6's rewrite both append to the same (wisdom_id, version) chain. Run
-        // unserialized they read the same max version and insert the same number: a unique
-        // violation on whichever loses. The gate's lock is what makes them queue instead.
         var project = await AddProjectAsync();
         var first = await AddHarvestedItemAsync(project.Id);
         var second = await AddHarvestedItemAsync(project.Id);
@@ -622,7 +585,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
             WisdomKind.Fact, project.Id, originalText, HarvestedItemId: first.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
-        // The rewriting batch holds the lock until the edit is observed waiting on it.
         var rewriting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var batch = CreateMergeGate().AdmitAllAsync(
             [new WisdomCandidate(WisdomKind.Fact, project.Id, confirmingText, HarvestedItemId: second.Id)],
@@ -683,10 +645,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
     [Fact]
     public async Task AnEdit_RewordsARetiredWisdom_AndLeavesItRetired()
     {
-        // Retire and edit are independent axes (#71): Retire governs a row's standing, an edit
-        // its words, and the gate never consults the one to decide the other. So a curator can
-        // repair something shelved without unretire → edit → retire, which would expose the bad
-        // text to live recall on the way past.
         var project = await AddProjectAsync();
         var item = await AddHarvestedItemAsync(project.Id);
         const string text = "Retired but badly worded";
@@ -694,9 +652,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id));
         var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
 
-        // Retired the way §10 retires (WisdomBrowser.RetireAsync), at a moment of its own and
-        // with the clock moved on after it — so an edit that re-stamped RetiredAt reads as red
-        // as one that cleared it.
         var retiredAt = Now.AddMinutes(30);
         await Context.Wisdom.Where(w => w.Id == wisdom.Id)
             .ExecuteUpdateAsync(w => w.SetProperty(x => x.RetiredAt, retiredAt), Token);
@@ -815,7 +770,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         return free;
     }
 
-    /// <summary>Polls pg_locks until some session waits on an advisory lock in this database.</summary>
     private Task WaitForAnAdvisoryLockWaiterAsync(CancellationToken cancellationToken)
         => PollUntilAnyAsync(
             """
@@ -827,17 +781,11 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
             "no session ever waited on the gate's advisory lock",
             cancellationToken);
 
-    /// <summary>
-    /// One candidate as its own Admission batch — the gate owns the embedding, the transaction,
-    /// and the commit, so the helper only builds a gate and calls it.
-    /// </summary>
     private async Task AdmitAsync(WisdomCandidate candidate)
         => await CreateMergeGate().AdmitAllAsync([candidate], finalizer: null, Token);
 
-    /// <summary>
-    /// A §5-shaped finalizer: the conversion marker written on the gate's own batch context, the
-    /// way <see cref="Mimir.Server.Harvest.HarvestConverter"/> writes it.
-    /// </summary>
+    // Mirrors HarvestConverter's §5 shape: the conversion marker written on the gate's own
+    // batch context.
     private static Func<MimirDbContext, CancellationToken, Task> MarkConverted(Guid itemId)
         => async (batch, ct) => await batch.HarvestedItems
             .Where(i => i.Id == itemId)

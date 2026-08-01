@@ -2,10 +2,6 @@ using Mimir.Server.Capture;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// The feed is what makes spec §8.2's Episode list live: capture publishes, UI circuits subscribe.
-/// Same contract as the health strip's state — one dead subscriber never silences the rest.
-/// </summary>
 public sealed class EpisodeFeedTests
 {
     private static readonly EpisodeChange Change = new(Guid.NewGuid(), Guid.NewGuid());
@@ -41,8 +37,6 @@ public sealed class EpisodeFeedTests
     [Fact]
     public void AThrowingSubscriber_NeverSilencesTheOthers()
     {
-        // A subscriber is a UI circuit that may be tearing down; its failure must not stop other
-        // circuits from updating, nor abort the capture request that published.
         var feed = new EpisodeFeed();
         var received = new List<EpisodeChange>();
         feed.Subscribe(_ => throw new InvalidOperationException("circuit gone"));

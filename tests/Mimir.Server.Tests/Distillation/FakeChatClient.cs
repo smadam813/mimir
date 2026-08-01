@@ -2,10 +2,6 @@ using Microsoft.Extensions.AI;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// A scripted stand-in for qwen3:8b: replies are dequeued in order, and every call's messages and
-/// options are captured so tests can assert on the prompt the arbiter actually sent.
-/// </summary>
 internal sealed class FakeChatClient : IChatClient
 {
     private readonly Queue<string> _replies = new();

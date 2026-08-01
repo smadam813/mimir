@@ -7,11 +7,6 @@ using Pgvector;
 
 namespace Mimir.Server.Tests.Storage;
 
-/// <summary>
-/// The §3 hybrid search against a real Postgres: top-N per leg, RRF fusion for ordering only,
-/// the vector leg's cosine riding along for thresholds, and the non-Retired filter. A tiny
-/// per-leg top-N (2) makes leg membership itself observable with a handful of rows.
-/// </summary>
 public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private const int RrfK = 60;
@@ -26,9 +21,6 @@ public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : Postgr
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "zebra", Token);
 
-        // Vector leg (top 2): vectorOnly, dualLeg. FTS leg (top 2): dualLeg, ftsOnly. The row
-        // both legs surfaced fuses two reciprocal ranks and must lead; the third-nearest,
-        // non-matching row is in neither leg and must be absent entirely.
         hits.Select(h => h.WisdomId).ShouldBe(
             [dualLeg.Id, vectorOnly.Id, ftsOnly.Id], ignoreOrder: true);
         hits[0].WisdomId.ShouldBe(dualLeg.Id);
@@ -43,8 +35,6 @@ public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : Postgr
 
         var hits = await Search().SearchAsync(new Vector(TestVectors.Basis), "zebra", Token);
 
-        // A near-perfect match on both legs still fuses to ≈ 0.033 — the §3 score-scale rule:
-        // fused values order candidates and are never comparable to a cosine threshold.
         var best = hits.ShouldHaveSingleItem();
         best.FusedScore.ShouldBe(2.0 / (RrfK + 1), tolerance: 1e-9);
         best.Cosine.ShouldNotBeNull();

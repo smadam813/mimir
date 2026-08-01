@@ -6,10 +6,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The §6 sweep against a real Postgres: failed re-queues, stale running resets, idle unsealed
-/// Episodes crash-Seal, done is never touched — and the folded §6.4 Contested clear rides along.
-/// </summary>
 public sealed class DistillationSweepTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]

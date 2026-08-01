@@ -69,7 +69,6 @@ public class HealthStateTests
     [Fact]
     public void AThrowingSubscriber_DoesNotStarveTheOthersOrTheUpdate()
     {
-        // A dead Blazor circuit must never take down health reporting for the rest of the app.
         var state = new HealthState();
         var survivor = new List<HealthSnapshot>();
         using var _ = state.Subscribe(_ => throw new InvalidOperationException("circuit is gone"));

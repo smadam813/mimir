@@ -5,11 +5,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// Spec §8.2 against a real Postgres: the queries behind the Episode list, and the hard
-/// deletes for sensitive content — an Event alone, or an Episode with everything it holds. The
-/// Project sidebar's own queries moved to <c>ChassisBrowserTests</c> with the methods (#89).
-/// </summary>
 public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private readonly EpisodeFeed _feed = new();
@@ -27,7 +22,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     {
         var project = await AddProjectAsync("timeline");
         var other = await AddProjectAsync("other");
-        // Seeded out of the order asserted, so a dropped ORDER BY cannot pass on insertion order.
         var old = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2));
         var fresh = await AddEpisodeAsync(project.Id, startedAt: Now);
         await AddEpisodeAsync(other.Id, startedAt: Now);
@@ -77,7 +71,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         var confirmed = await AddWisdomAsync(project.Id, "another lesson");
         await AddProvenanceAsync(admitted.Id, episodeId: fruitful.Id);
         await AddProvenanceAsync(confirmed.Id, episodeId: fruitful.Id);
-        // Another Episode's Wisdom must not count towards this one.
         var elsewhere = await AddWisdomAsync(project.Id, "a third lesson");
         await AddProvenanceAsync(elsewhere.Id, episodeId: quiet.Id);
 
@@ -90,8 +83,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task WisdomDrawnFromSeveralOfOneEpisodesEvents_CountsOnce()
     {
-        // The gate writes one Provenance row per provenance Event (§6), so the count is over
-        // distinct Wisdom — otherwise a Lesson drawn from three Events reads as three Wisdom.
         var project = await AddProjectAsync("distinct");
         var episode = await AddEpisodeAsync(project.Id);
         var first = await AddEventAsync(episode.Id, seq: 1);
@@ -108,9 +99,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task RetiredWisdom_StopsCountingTowardsTheEpisodeThatProducedIt()
     {
-        // Every Wisdom figure in the chassis excludes Retired (ChassisBrowser), and §6.4 Retires the
-        // loser of a supersede — so a row must not go on crediting a session for a line that has
-        // been taken away.
         var project = await AddProjectAsync("retired");
         var episode = await AddEpisodeAsync(project.Id);
         var standing = await AddWisdomAsync(project.Id, "a lesson that stands");
@@ -141,8 +129,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task Searching_IsWordAware_NotSubstring()
     {
-        // The GIN index over Event.tsv is an FTS index: it stems, so "fires" finds "firing" — and
-        // a mid-word fragment finds nothing, which is the trade the index buys.
         var project = await AddProjectAsync("stemming");
         var episode = await AddEpisodeAsync(project.Id);
         await AddEventAsync(episode.Id, seq: 1, payload: """{"prompt":"the interceptor is firing"}""");
@@ -226,7 +212,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     {
         var project = await AddProjectAsync("produced");
         var episode = await AddEpisodeAsync(project.Id);
-        // Seeded out of the order asserted, so a dropped ORDER BY cannot pass on insertion order.
         var older = await AddWisdomAsync(
             project.Id, "prefer ripgrep", lastConfirmedAt: Now.AddDays(-3), kind: WisdomKind.Preference);
         var newer = await AddWisdomAsync(Project.GlobalId, "always run the linter", lastConfirmedAt: Now);
@@ -246,8 +231,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task WisdomDrawnFromSeveralOfOneEpisodesEvents_IsOneLine()
     {
-        // The gate writes one Provenance row per provenance Event (§6), so a line drawn from three
-        // moments of one session is one thing the session produced, not three.
         var project = await AddProjectAsync("distinct-detail");
         var episode = await AddEpisodeAsync(project.Id);
         var first = await AddEventAsync(episode.Id, seq: 1);
@@ -265,8 +248,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task RetiredWisdom_StopsBeingSomethingTheEpisodeProduced()
     {
-        // The one convention every Wisdom figure in the chassis keeps, and the drill-down has to
-        // agree with the row the curator arrived from.
         var project = await AddProjectAsync("retired-detail");
         var episode = await AddEpisodeAsync(project.Id);
         var standing = await AddWisdomAsync(project.Id, "still true");
@@ -298,8 +279,6 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task TheDrillDown_CountsPromptsAlone_NotEveryEvent()
     {
-        // §3: session start and end are not Events at all, so the turns a curator took are exactly
-        // the UserPromptSubmit rows — and a stream is mostly PostToolUse.
         var project = await AddProjectAsync("prompts");
         var episode = await AddEpisodeAsync(project.Id);
         await AddEventAsync(episode.Id, seq: 1, EventType.UserPromptSubmit);

@@ -4,19 +4,8 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// Spec §8.3 against a real Postgres: the injection log's per-session listing with sizes and
-/// hydrated items, the one-click §9 marks with <c>verdict_at</c>, the injection-precision
-/// inputs, and promote-to-golden — filled from the entry's <c>query_context</c> and
-/// <c>project_id</c>, refused for Brief entries, idempotent on repeat clicks.
-/// </summary>
 public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>
-    /// The top recall count the "most recalled" fixture seeds — one past
-    /// <see cref="InjectionBrowser.MostRecalledLimit"/>, so the bound has to drop exactly one and
-    /// the ranking decides which.
-    /// </summary>
     private const int MostRecalledSpread = InjectionBrowser.MostRecalledLimit + 1;
 
     [Fact]
@@ -263,8 +252,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         view.Truncated.ShouldBeTrue();
         view.Sessions.Sum(s => s.Entries.Count).ShouldBe(InjectionBrowser.RecentEntryLimit);
         view.Sessions.SelectMany(s => s.Entries).ShouldAllBe(e => e.Id != oldest.Id);
-        // The cut entry's mark still feeds the §9 precision inputs — and the figure itself, not
-        // only the two counts it divides, is what the bound must not be able to move.
         view.Useful.ShouldBe(1);
         view.Marked.ShouldBe(1);
         view.Precision.ShouldNotBeNull().ShouldBe(1.0);
@@ -328,8 +315,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         var episode = await AddEpisodeAsync(project.Id);
         var deliberate = await AddEventAsync(episode.Id, seq: 1, salient: true);
         await AddProvenanceAsync(salient.Id, episode.Id, deliberate.Id);
-        // The other one has Provenance too — so what marks it apart is the Event's salience, not
-        // the mere existence of a link back.
         var ordinary = await AddEventAsync(episode.Id, seq: 2, salient: false);
         await AddProvenanceAsync(plain.Id, episode.Id, ordinary.Id);
         await AddInjectionAsync(
@@ -362,7 +347,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
 
         view.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([hit.Id]);
         view.Matching.ShouldBe(1);
-        // The aside is the whole Project's, whatever the box says — §9's stat is whole-history.
         view.TotalEntries.ShouldBe(3);
     }
 
@@ -401,8 +385,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
 
         view.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([brief.Id]);
         view.Matching.ShouldBe(1);
-        // Every lane keeps a chip, including the one this Project has never used: a chip that
-        // vanished at zero would read as "no such lane".
         view.Lanes.Select(l => (l.Lane, l.Entries)).ShouldBe(
             [(InjectionLane.Brief, 1), (InjectionLane.Prompt, 2), (InjectionLane.Mcp, 0)]);
     }
@@ -434,10 +416,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     [Fact]
     public async Task AFilteredListingThatFillsTheBound_CountsWhatMatched_NotTheWholeProject()
     {
-        // The one case where the matching count cannot be worked out from what is already in hand:
-        // a Take that came back short saw everything, and an unnarrowed listing's population is the
-        // Project's — but a narrowed one that filled the bound is neither, and answering it with
-        // the Project's total would overstate the "N more" line by every entry the filter excluded.
         var project = await AddProjectAsync("injection");
         var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
         var items = new[] { (wisdom.Id, 0.03) };
@@ -506,7 +484,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
             project.Id, "sess-a", InjectionLane.Prompt, "a prompt", Now,
             items: [(wisdom.Id, 0.03)]);
         await Browser().PromoteAsync(injection.Id, Token);
-        // A hand-written case, and another Project's promotion: neither grew from this log.
         await AddGoldenCaseAsync(project.Id, wisdom.Id);
         var elsewhere = await AddInjectionAsync(
             other.Id, "sess-b", InjectionLane.Prompt, "a prompt", Now,
@@ -522,9 +499,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task MostRecalled_RanksThisWeeksCarriedWisdom_BoundedAndForgettingLastWeeks()
     {
         var project = await AddProjectAsync("injection");
-        // One more Wisdom than the bound admits, each on a distinct count, so the ranking has
-        // something to get wrong: a listing without its ORDER BY has to pick five of six out of
-        // Postgres's own grouping order, and the sixth is not the one that should have been cut.
         var ranked = new List<(Wisdom Wisdom, int Recalls)>();
         for (var recalls = MostRecalledSpread; recalls > 0; recalls--)
         {
@@ -533,8 +507,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
 
         var stale = await AddWisdomAsync(project.Id, "busy last week");
 
-        // Seeded weakest-first, and each Wisdom's injections interleaved with the others', so
-        // neither insertion order nor a per-Wisdom run can hand back a descending list by accident.
         for (var round = 1; round <= MostRecalledSpread; round++)
         {
             foreach (var (wisdom, recalls) in ranked.Where(r => r.Recalls >= round))
@@ -545,7 +517,6 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
             }
         }
 
-        // Recalled more than any of them, one day outside the window.
         for (var i = 0; i < MostRecalledSpread + 1; i++)
         {
             await AddInjectionAsync(

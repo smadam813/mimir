@@ -5,27 +5,14 @@ using Mimir.Server.Storage;
 
 namespace Mimir.Server.Tests.Storage;
 
-/// <summary>
-/// The traps in ADR-0006 are all about what Postgres <em>actually</em> reports, so they can only be
-/// pinned against a real one. The scratch tables each test creates need no cleanup: the harness's
-/// database is thrown away with the class, which is also why these CREATEs no longer land in the
-/// development database.
-///
-/// They are the one thing the per-test reset does not reach — it truncates the EF-mapped tables,
-/// and these are unmapped with no FK for CASCADE to follow — so a test here sees its siblings'
-/// tables still standing. Harmless for what these assert, each naming its own table; an assertion
-/// counting the catalog, or claiming a table is the only one, would be order-dependent and belongs
-/// nowhere in this class.
-/// </summary>
 public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
     public async Task AnalyzedWhileEmptyThenPopulated_ReportsPopulated()
     {
-        // THE trap that disqualified every estimator. This is the shape an EF migration produces:
-        // the table is created empty, gets analyzed while empty, and is only then written to.
-        // Measured in this exact state: reltuples = 0, relpages = 0, n_live_tup = 0 — with 200,000
-        // rows present. Anything reading those statistics reports a populated table as empty.
+        // Measured on Postgres in this exact state — created empty, analyzed, then written to,
+        // which is the shape an EF migration produces: reltuples = 0, relpages = 0,
+        // n_live_tup = 0, with 200,000 rows present.
         var table = await ScratchTable();
         await ExecuteAsync($"ANALYZE \"{table}\";");
         await ExecuteAsync($"INSERT INTO \"{table}\" SELECT g, repeat('x', 100) FROM generate_series(1, 200000) g;");
@@ -39,10 +26,8 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
     [Fact]
     public async Task PopulatedThenFullyDeleted_ReportsEmpty()
     {
-        // The mirror trap, and the one that matters most to a user: spec §8.2 makes hard Delete of
-        // sensitive Events and Episodes a user-facing action, so this fires exactly when someone is
-        // checking whether their deletion took effect. n_live_tup was measured still reporting
-        // 50,000 here, and reltuples 200,000, with the table genuinely empty.
+        // Measured after a full DELETE: n_live_tup still reported 50,000 and reltuples 200,000,
+        // with the table genuinely empty.
         var table = await ScratchTable();
         await ExecuteAsync($"INSERT INTO \"{table}\" SELECT g, repeat('x', 100) FROM generate_series(1, 200000) g;");
         await ExecuteAsync($"ANALYZE \"{table}\";");
@@ -62,9 +47,7 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
     [Fact]
     public async Task APlainTableReportsItsRealSize()
     {
-        // The pg_partition_tree landmine: that function returns zero rows for an ordinary table, so
-        // an unconditional rollup sizes every plain table at 0 bytes — the worst kind of silent
-        // failure, because the tile still looks healthy.
+        // pg_partition_tree returns zero rows for an ordinary table.
         var table = await ScratchTable();
         await ExecuteAsync($"INSERT INTO \"{table}\" SELECT g, repeat('x', 100) FROM generate_series(1, 20000) g;");
 
@@ -74,8 +57,8 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
     [Fact]
     public async Task APartitionedTableIsDiscoveredOnceUnderItsParentName()
     {
-        // pg_tables returns parents AND children; summing both double-counted a partitioned table
-        // (measured: 50,000 real rows reported as 100,000).
+        // pg_tables returns parents AND children; summing both was measured reporting 50,000 real
+        // rows as 100,000.
         var parent = Name("part");
         var child = $"{parent}_p1";
 
@@ -96,13 +79,9 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
     [Fact]
     public async Task AZeroByteTableIsNeverReportedPopulated()
     {
-        // A tuple cannot exist without a page, so this is an invariant across the two queries: if
-        // it ever fails, size and occupancy are disagreeing and one of them is lying. Deliberately
-        // an assertion and not a production shortcut — EXISTS stays the only source of occupancy.
-        // Both sides seeded here rather than left to whatever else the database holds: a mapped
-        // table the harness truncated still owns its index pages, so it never reads as zero-byte
-        // and the sweep below would run over nothing at all. The zero-byte side takes no text
-        // column either — that would bring a TOAST index, whose metapage alone is 8 KB.
+        // Both sides are seeded rather than left to whatever else the database holds: a truncated
+        // mapped table keeps its index pages and never reads as zero-byte, and a text column
+        // would bring a TOAST index whose metapage alone is 8 KB.
         var empty = Name("void");
         await ExecuteAsync($"CREATE TABLE \"{empty}\" (id int);");
         var written = await ScratchTable();
@@ -141,7 +120,6 @@ public sealed class PostgresStorageProbeTests(ThrowawayDatabaseFixture fixture) 
         return tile.Tables.Single(t => t.Table == table);
     }
 
-    /// <summary>Creates an empty scratch table under a name no other test uses.</summary>
     private async Task<string> ScratchTable()
     {
         var table = Name("tbl");

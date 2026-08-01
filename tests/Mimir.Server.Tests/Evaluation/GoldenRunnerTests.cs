@@ -8,15 +8,8 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Evaluation;
 
-/// <summary>
-/// The §9 golden runner against a real Postgres: every GoldenCase replays through the shared §7
-/// query ranking — unthresholded, under the case's own affinity context — and passes only when
-/// its expected Wisdom ranks within the golden-set k. The report carries each case's actual rank
-/// and the pass rate over the suite.
-/// </summary>
 public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>A query with no word overlap with any test Wisdom, so only the vector leg ranks.</summary>
     private const string Query = "how do I deploy the pipeline?";
 
     public override async ValueTask InitializeAsync()
@@ -70,8 +63,6 @@ public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : Postgr
         var expected = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.1);
         await AddCaseAsync(project.Id, expected.Id);
 
-        // A per-leg top-N of 1 crowds the expected row out of the vector leg, and its text
-        // shares no word with the query — it never ranks at all.
         var report = await RunAsync(new SearchOptions { PerLegTopN = 1 });
 
         var result = report.Results.ShouldHaveSingleItem();
@@ -87,8 +78,6 @@ public sealed class GoldenRunnerTests(ThrowawayDatabaseFixture fixture) : Postgr
         var expected = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.90);
         await AddCaseAsync(project.Id, expected.Id);
 
-        // At k=1 the case passes only if the runner ranks under the case's Project: the 1.5×
-        // affinity boost is what lifts the expected row past the nearer Global one.
         var report = await RunAsync(new SearchOptions { GoldenSetK = 1 });
 
         report.Results.ShouldHaveSingleItem().Passed.ShouldBeTrue();

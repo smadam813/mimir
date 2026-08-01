@@ -9,11 +9,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// Spec §4 against a real Postgres: a session's hooks become one Episode with ordered Events,
-/// truncated payloads, and a Seal carrying the SessionEnd reason (ADR-0003 — the session is the
-/// Episode; session end is not an Event).
-/// </summary>
 public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private readonly EpisodeFeed _feed = new();
@@ -75,7 +70,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task AnEventForAnUnseenSession_CreatesTheEpisodeOnDemand()
     {
-        // Async hooks can outrun SessionStart; capture never drops what it can attach (§4).
         var request = Request();
 
         var evt = await Service().AppendEventAsync(request, EventType.PostToolUse, Token);
@@ -167,8 +161,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task ASealFromAnotherContext_BeatsAStaleDuplicate()
     {
-        // First-seal-wins under real concurrency: this service still tracks the Episode as
-        // unsealed while another request seals it. The stale duplicate must update nothing.
         var request = Request();
         var service = Service();
         await service.ResumeEpisodeAsync(request, Token);
@@ -191,8 +183,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task AStragglerEventAfterTheSeal_IsStillCaptured()
     {
-        // PostToolUse is fire-and-forget (§4): it can land after SessionEnd. Losing it would
-        // contradict capture-is-dumb; it belongs to the Episode it names.
         var request = Request();
         await Service().SealEpisodeAsync(Request(request.SessionId, new { reason = "exit" }), Token);
 
@@ -200,9 +190,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
 
         evt.Seq.ShouldBe(1);
     }
-
-    // Spec §8.2's Episode list is live because every committed capture write is announced on the
-    // feed; a write that changed nothing stays quiet so circuits never re-query for no reason.
 
     [Fact]
     public async Task ANewSessionsEpisode_IsAnnouncedOnTheFeed()
@@ -255,10 +242,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task SessionsInTwoClonesOfOneRepo_EndUpUnderOneProjectWithBothRoots()
     {
-        // The #17 demo: a session in clone A before its remote is known (path identity), a
-        // session in clone B that reports the remote, then hook traffic from clone A learning the
-        // remote too. Identity follows the repository (§3.1) — one Project, both roots, every
-        // Episode attached to it.
         var suffix = Guid.NewGuid().ToString("N");
         var remote = $"github.com/test/demo-{suffix}";
         var rootA = $@"C:\git\demo-{suffix}";
@@ -276,6 +259,18 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
             .Distinct()
             .ToListAsync(Token));
         episodeProjects.ShouldBe([project.Id], "two clones of one repository are one Project");
+    }
+
+    [Fact]
+    public async Task TwoUnnamedRequests_LandInTwoProjects()
+    {
+        await Service().ResumeEpisodeAsync(Request(), Token);
+        await Service().ResumeEpisodeAsync(Request(), Token);
+
+        (await FromDb(db => db.Projects.CountAsync(Token))).ShouldBe(
+            3,
+            "the two sessions and the Global pseudo-project: a Request() repeating its identity or "
+            + "root would have §3.1 welding a test's second session onto its first");
     }
 
     [Fact]
@@ -407,11 +402,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
             Clock,
             _feed);
 
-    /// <summary>
-    /// A request for a fresh session unless one is named. Identity and root are unique per call so
-    /// a test seeding two sessions gets two Projects — §3.1 root-matching would otherwise weld the
-    /// second onto the first.
-    /// </summary>
     private static HookEventRequest Request(
         string? sessionId = null,
         object? payload = null,

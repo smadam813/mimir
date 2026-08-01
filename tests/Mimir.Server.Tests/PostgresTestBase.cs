@@ -19,50 +19,30 @@ using Pgvector;
 namespace Mimir.Server.Tests;
 
 /// <summary>
-/// The one Postgres harness: every Postgres-backed test class inherits it and writes no plumbing.
-/// Before each test the whole database is emptied, so a test's assertions see its own rows and
-/// nothing else — the clean slate is a property of the harness, not a convention each class has to
-/// remember (the #20/#22 ordering failures). The class fixture still owns a throwaway database per
-/// class; xUnit builds the class once per test and runs a class's tests serially, so the reset
-/// races nothing.
-///
-/// Members are <c>private protected</c> throughout: several of the types handed out here
-/// (<see cref="MergeGate"/> and the fakes standing in for its collaborators) are internal to their
-/// module, and the whole suite is one assembly, so that is exactly the reach they need.
+/// The one Postgres harness. Members are <c>private protected</c> throughout: several of the types
+/// handed out here (<see cref="MergeGate"/> and the fakes standing in for its collaborators) are
+/// internal to their module, and the whole suite is one assembly, so that is exactly the reach
+/// they need.
 /// </summary>
 public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     : IClassFixture<ThrowawayDatabaseFixture>, IAsyncLifetime
 {
-    /// <summary>
-    /// The suite's fixed clock reading. One value across every class: assertions that render a
-    /// timestamp (<c>"sealed 2026-07-22 10:00Z"</c>) are then reading the same "now" everywhere.
-    /// </summary>
     private protected static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
 
     private MimirDbContext? _context;
 
-    /// <summary>Every renderer <see cref="CreateRenderContext"/> handed out, torn down with the class.</summary>
     private readonly List<BunitContext> _renderContexts = [];
 
-    /// <summary>The deterministic stand-in for qwen3-embedding; see <see cref="TestVectors"/>.</summary>
     private protected FakeEmbeddings Embeddings { get; } = new();
 
-    /// <summary>The scripted merge arbiter: Agreement-on-the-existing-text unless a test says otherwise.</summary>
     private protected FakeArbiter Arbiter { get; } = new();
 
-    /// <summary>The scripted chat model the distiller and the real arbiter talk to.</summary>
     private protected FakeChatClient Chat { get; } = new();
 
-    /// <summary>The clock every SUT built here reads, started at <see cref="Now"/>.</summary>
     private protected FakeTimeProvider Clock { get; } = new(Now);
 
-    /// <summary>The ambient test cancellation token.</summary>
     private protected static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    /// <summary>
-    /// The test's own long-lived context on the throwaway database — the one a SUT taking a scoped
-    /// <see cref="MimirDbContext"/> is built over. Skips the test when no Postgres is reachable.
-    /// </summary>
     private protected MimirDbContext Context
     {
         get
@@ -72,10 +52,8 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         }
     }
 
-    /// <summary>The factory a SUT that opens its own contexts (the gate, the Ui browsers) takes.</summary>
     private protected IDbContextFactory<MimirDbContext> Contexts { get; } = new FixtureContextFactory(fixture);
 
-    /// <summary>The throwaway database's connection string, for tests that build their own DI graph.</summary>
     private protected string ConnectionString
     {
         get
@@ -85,17 +63,12 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         }
     }
 
-    /// <summary>
-    /// Reads back through a separate context, so assertions see what Postgres persisted rather
-    /// than the entities a service still tracks.
-    /// </summary>
     private protected async Task<T> FromDb<T>(Func<MimirDbContext, Task<T>> query)
     {
         await using var context = Contexts.CreateDbContext();
         return await query(context);
     }
 
-    /// <summary>A fresh context on the throwaway database; the caller disposes it.</summary>
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
@@ -180,19 +153,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         throw new TimeoutException(timeoutMessage);
     }
 
-    /// <summary>
-    /// One seeded Episode read back through a separate context — the assertion counterpart to
-    /// <see cref="AddEpisodeAsync"/>, and what every class asserting on Episode state was writing
-    /// for itself.
-    /// </summary>
     private protected async Task<Episode> EpisodeAsync(Guid id)
         => await FromDb(db => db.Episodes.SingleAsync(e => e.Id == id, Token));
 
-    /// <summary>
-    /// The real Merge Gate over the fixture's database and this class's fakes. Every harness-backed
-    /// caller composes it here, so its six-dependency graph is a one-file edit; the one gate built
-    /// by hand is <c>MergeGateGuardTests</c>, which needs a factory that never connects.
-    /// </summary>
     private protected MergeGate CreateMergeGate(DistillationOptions? distillation = null)
         => new(
             Contexts,
@@ -209,32 +172,19 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected WisdomSearch CreateWisdomSearch(SearchOptions? search = null)
         => new(Context, Options.Create(search ?? new SearchOptions()));
 
-    /// <summary>
-    /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
-    /// the four consumers that replay a query through it all want the same graph.
-    /// </summary>
     private protected QueryRanking CreateQueryRanking(
         SearchOptions? search = null, RecallOptions? recall = null)
         => new(
             Context,
             Embeddings,
             CreateWisdomSearch(search),
-            // Takes its own RecallOptions rather than always the defaults: the ranking reads the
-            // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
-            // overrides one for the service under test has to be able to hand the same instance
-            // here — otherwise the test pins a value the ranked rows were never scored with.
             Options.Create(recall ?? new RecallOptions()),
             Clock);
 
-    /// <summary>
-    /// Registers the throwaway database the way <c>AddMimirStorage</c> does — both the factory and
-    /// the scoped context, with Singleton options (#23) — for tests that boot a hosted service over
-    /// their own DI graph. The connection string is read here, on the test's thread: inside the
-    /// options callback it would be read on the service's thread, where the no-Postgres skip is an
-    /// unobserved exception and the test sits out its patience instead of skipping.
-    /// </summary>
     private protected void AddThrowawayStorage(IServiceCollection services)
     {
+        // Read here, on the test's thread: inside the options callback the no-Postgres skip would
+        // be an unobserved exception on the service's, and the test would hang rather than skip.
         var connectionString = ConnectionString;
         void Configure(DbContextOptionsBuilder options) =>
             options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
@@ -242,37 +192,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
     }
 
-    /// <summary>
-    /// A bUnit renderer over this test's throwaway database — the Postgres render tier (#130). A
-    /// §8 surface injects the <c>Ui/</c> browsers, so pinning what it renders means seeding rows,
-    /// and this is where the two halves meet: the seeders and the per-test truncation are the
-    /// class's own, and <see cref="AddThrowawayStorage"/> registers storage the way
-    /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
-    /// Registered on top of that is what a §8 surface actually takes, and every registration comes
-    /// from the app's own composition rather than a copy of it: <c>AddMimirUi</c> for the four
-    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, <c>AddMimirHealth</c> for the
-    /// snapshot the header's pill and pull chip read, and <c>CaptureModule</c> for the Episode
-    /// feed. The module is constructed and asked, not restated — its <c>AddServices</c>
-    /// ignores the configuration it takes and its two other registrations are inert here, which is
-    /// a small price for a line that cannot drift the day Capture decorates the feed or changes its
-    /// lifetime. That drift is the class this tier exists to close (#94/#108), so the harness must
-    /// not open a fresh one.
-    /// <para>
-    /// The fakes come too, and must: three of the four browsers take <see cref="TimeProvider"/> and
-    /// <c>WisdomBrowser</c> takes <see cref="MergeGate"/>, so without them only
-    /// <c>EpisodeBrowser</c> resolves and the Wisdom and Injection surfaces throw at first render.
-    /// <see cref="Clock"/> is registered as the <c>TimeProvider</c> rather than
-    /// <c>TimeProvider.System</c> — a real clock here would read a different "now" from every other
-    /// SUT this class composes — and the gate arrives through <see cref="CreateMergeGate"/>, so the
-    /// embedder and the arbiter behind it are the class's scripted ones.
-    /// </para>
-    /// <para>
-    /// Disposed with the test class. Skips when no Postgres is reachable, like every other member
-    /// here — a component whose whole behaviour arrives through its parameters wants
-    /// <c>RenderTestBase</c>'s disconnected tier instead, so its pins still run on a machine
-    /// without Docker.
-    /// </para>
-    /// </summary>
     private protected BunitContext CreateRenderContext()
     {
         // Before the context exists: this reads ConnectionString, and skipping out of a
@@ -316,11 +235,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected static string Root(string drive, string name)
         => $@"{drive}:\git\{name}-{Guid.NewGuid():N}";
 
-    /// <summary>
-    /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
-    /// call so a test seeding two of them gets two rows rather than a unique-index violation.
-    /// Name them apart when a test filters by display name — nothing makes that column unique.
-    /// </summary>
     private protected async Task<Project> AddProjectAsync(string name = "project")
     {
         var suffix = Guid.NewGuid().ToString("N");
@@ -407,8 +321,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Payload = body,
             PayloadFullSize = body.Length,
             // Taken from the caller, never derived from the type: deriving it would restate
-            // CaptureService's salience rule in shared test infrastructure, and the day that rule
-            // changes every seeded row here would go on asserting the old one.
+            // CaptureService's salience rule in shared test infrastructure.
             Salient = salient,
         };
         Context.Events.Add(evt);
@@ -416,10 +329,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         return evt;
     }
 
-    /// <summary>
-    /// A Wisdom and the version-1 row every Wisdom carries in production, so a chain assertion
-    /// counts from the same floor whether the row was seeded or admitted through the gate.
-    /// </summary>
     private protected async Task<Wisdom> AddWisdomAsync(
         Guid scopeProjectId,
         string text,
@@ -497,24 +406,12 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         return provenance;
     }
 
-    /// <summary>
-    /// A Wisdom sourced from <paramref name="projectId"/>'s auto-memory and nothing else — the
-    /// shape §7's native-content exclusion turns on, and the one provenance helper two suites
-    /// wrote identically.
-    /// </summary>
     private protected async Task<Provenance> AddHarvestProvenanceAsync(Guid wisdomId, Guid projectId)
     {
         var item = await AddHarvestedItemAsync(projectId, content: "harvested content");
         return await AddProvenanceAsync(wisdomId, harvestedItemId: item.Id);
     }
 
-    /// <summary>
-    /// One logged injection (§3). <paramref name="items"/> are the injected Wisdom and the scores
-    /// that ordered them, in rank order. <paramref name="verdict"/> seeds the §9 mark a curator
-    /// would have left, stamped at the base clock — every figure read off the mark wants entries
-    /// already carrying one, and marking them through the browser afterwards is the same row
-    /// written twice.
-    /// </summary>
     private protected async Task<Injection> AddInjectionAsync(
         Guid projectId,
         string sessionId = "sess-injection",
@@ -544,7 +441,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         return injection;
     }
 
-    /// <summary>One golden-set regression case (§9); hand-inserted unless a promotion is named.</summary>
     private protected async Task<GoldenCase> AddGoldenCaseAsync(
         Guid projectId,
         Guid expectedWisdomId,
@@ -566,10 +462,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         return goldenCase;
     }
 
-    /// <summary>
-    /// Empties the database before each test. A derived override runs its own setup around
-    /// <c>base.InitializeAsync()</c>.
-    /// </summary>
     public virtual async ValueTask InitializeAsync()
     {
         SkipIfUnavailable();
@@ -577,19 +469,12 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         await ResetAsync(context, fixture.GlobalSeed);
     }
 
-    /// <summary>
-    /// Tears the class down, renderers first. Each is disposed inside its own try: a renderer can
-    /// still be tearing a container down under a lifecycle query the test returned without
-    /// awaiting, and one throwing there must not take the remaining renderers — or the context
-    /// below — down with it, turning one teardown failure into a silent leak of the rest.
-    /// <see cref="BunitContext.DisposeAsync"/> rather than <c>Dispose</c>, for the async
-    /// provider-teardown path; it still does not await pending lifecycle tasks, so a test whose
-    /// component is mid-query when it returns is relying on that query being harmless to abandon.
-    /// </summary>
     public virtual async ValueTask DisposeAsync()
     {
         foreach (var render in _renderContexts)
         {
+            // Each inside its own try: a renderer still tearing down under an abandoned lifecycle
+            // query must not take the remaining renderers, or the context below, with it.
             try
             {
                 await render.DisposeAsync();
@@ -606,20 +491,6 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         }
     }
 
-    /// <summary>
-    /// Truncates every mapped table — CASCADE, so it reaches unmapped tables referencing one — and
-    /// puts the §3 Global pseudo-project back from <see cref="ThrowawayDatabaseFixture.GlobalSeed"/>:
-    /// the pristine row, read once before any test ran, rather than whatever the outgoing test left
-    /// in that row. Restoring what was just read would carry a rename or an appended RootPath into
-    /// every later test in the class — the one row that could still reintroduce #20/#22 ordering.
-    /// It stays migration-sourced, so dropping the <c>HasData</c> seed leaves nothing to restore and
-    /// the harness's own pin fails, which a hand-built copy here would hide. A fresh instance each
-    /// time: re-adding the snapshot itself would hand every reset the same tracked object.
-    ///
-    /// The table list comes from the EF model rather than a hand-list, so a later entity is emptied
-    /// the day it is mapped — but by the same token a second <c>HasData</c> seed, in any table,
-    /// gets truncated and is not restored here. Adding one means extending this.
-    /// </summary>
     private static async Task ResetAsync(MimirDbContext context, Project? globalSeed)
     {
         var tables = context.Model.GetEntityTypes()
@@ -628,8 +499,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .Select(table => $"\"{table}\"");
-        // Raw, not interpolated: every name comes from the EF model, and TRUNCATE takes no
-        // parameters — a parameterized overload could not carry a table list at all.
+        // Raw, not interpolated: every name comes from the EF model and TRUNCATE takes no parameters.
         var truncate = $"TRUNCATE TABLE {string.Join(", ", tables)} CASCADE";
         await context.Database.ExecuteSqlRawAsync(truncate, Token);
 

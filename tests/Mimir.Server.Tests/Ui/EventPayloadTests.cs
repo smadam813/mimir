@@ -2,10 +2,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// Spec §8.2: the drill-down renders payloads with their truncation markers. The helper only
-/// reshapes what capture stored — pretty JSON, marker kept visible, never a crash on odd input.
-/// </summary>
 public sealed class EventPayloadTests
 {
     [Fact]

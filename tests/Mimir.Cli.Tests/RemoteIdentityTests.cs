@@ -2,10 +2,6 @@ using Mimir.Cli;
 
 namespace Mimir.Cli.Tests;
 
-/// <summary>
-/// The spec §3.1 normalization matrix: every way a machine can spell one repository's remote must
-/// land on the same identity, because identity is what makes two clones one Project.
-/// </summary>
 public class RemoteIdentityTests
 {
     [Theory]
@@ -28,9 +24,6 @@ public class RemoteIdentityTests
     [Fact]
     public void OnlyTheHostIsLowercased_OwnerAndRepoKeepTheirCase()
     {
-        // Deliberate (spec §3.1): owner/repo can be case-sensitive on self-hosted servers, so
-        // lowercasing the path could merge two distinct repositories — irreversible for a memory
-        // system. A case-variant split of one repository is the healable direction (#17).
         RemoteIdentity.Normalize("https://GitHub.com/SmAdam813/MiMir.git")
             .ShouldBe("github.com/SmAdam813/MiMir");
     }
@@ -43,8 +36,7 @@ public class RemoteIdentityTests
     [InlineData("C:/repos/bare-repo/")]
     public void EverySpellingOfOneLocalWindowsRemote_IsOneIdentity(string remoteUrl)
     {
-        // A drive letter is not an SSH host: git accepts C:\ and C:/ for one directory, and both
-        // must land on one identity or a local bare remote splits into two Projects.
+        // git accepts C:\ and C:/ for one directory, and a drive letter is not an SSH host.
         RemoteIdentity.Normalize(remoteUrl).ShouldBe("c:/repos/bare-repo");
     }
 
@@ -64,8 +56,8 @@ public class RemoteIdentityTests
     [Fact]
     public void AColonWithNoSeparatorAfterIt_IsStillAnScpHostNotADrive()
     {
-        // git itself only treats <letter>:<separator> as a DOS path (has_dos_drive_prefix);
-        // a bare "c:path" keeps parsing as scp-form host "c".
+        // git only treats <letter>:<separator> as a DOS path (has_dos_drive_prefix), so a bare
+        // "c:path" keeps parsing as scp-form host "c".
         RemoteIdentity.Normalize("c:repos/x").ShouldBe("c/repos/x");
     }
 

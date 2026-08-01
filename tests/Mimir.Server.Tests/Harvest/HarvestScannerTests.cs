@@ -9,23 +9,14 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Harvest;
 
-/// <summary>
-/// Spec §5 against a real Postgres and a real directory tree: memory files become HarvestedItems
-/// under the right Projects, edits re-version with priors kept, deletions set <c>gone_at</c>. The
-/// first scan of an empty database is the Backfill — there is no special mode to test separately.
-/// </summary>
 public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>The mangled slug (§5) every test writes under, bar the ones seeding their own root.</summary>
     private const string Slug = "C--git-harvest";
 
     private string _root = "";
 
     public override async ValueTask InitializeAsync()
     {
-        // Base first: its no-Postgres skip throws out of InitializeAsync, and xUnit runs no
-        // DisposeAsync after that — a directory created above this line is never cleaned up, once
-        // per test per run, because the class is built per test.
         await base.InitializeAsync();
         _root = Directory.CreateTempSubdirectory("mimir-harvest-").FullName;
     }
@@ -63,8 +54,6 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task AHyphenatedRoot_ResolvesByRemanglingKnownRoots_NotByGuessingThePath()
     {
-        // `C--git-fh6-tuning-…` could demangle to `C:\git\fh6\tuning\…`; the Project whose known
-        // root mangles to the slug must win over that guess (§5 slug mapping).
         var project = await AddProjectAsync("fh6-tuning-calculator");
         WriteMemoryFile(MemorySlug.Mangle(project.RootPaths[0]), "MEMORY.md", "hyphens intact");
 
@@ -198,9 +187,6 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task AnUnreadableFile_KeepsItsStateInsteadOfGoingGone()
     {
-        // A memory file locked mid-write (or with its permissions off) is present, just briefly
-        // unreadable. Marking it gone would fabricate a deletion — and resurrect it as a
-        // spurious new version next scan.
         WriteMemoryFile(Slug, "MEMORY.md", "locked later");
         await Scanner().ScanAsync(Token);
         Clock.Advance(TimeSpan.FromMinutes(5));
@@ -218,10 +204,6 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
         version.GoneAt.ShouldBeNull();
     }
 
-    /// <summary>
-    /// Unreadable the way each OS does it: an exclusive lock where sharing is mandatory
-    /// (Windows), permission bits where it is advisory (everything else). Disposal restores.
-    /// </summary>
     private static IDisposable MakeUnreadable(string file)
     {
         if (OperatingSystem.IsWindows())
@@ -276,7 +258,6 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
         File.WriteAllText(path, content);
     }
 
-    /// <summary>Every stored version, oldest first — the whole table, which the reset made this test's.</summary>
     private async Task<List<HarvestedItem>> VersionsAsync()
         => await FromDb(db => db.HarvestedItems
             .OrderBy(i => i.LastChanged).ThenBy(i => i.Id)
