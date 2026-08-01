@@ -40,12 +40,6 @@ public sealed class ChassisBrowser(IDbContextFactory<MimirDbContext> contexts, T
             p.Id == Project.GlobalId,
             db.Wisdom.Count(w => w.ScopeProjectId == p.Id && w.RetiredAt == null)));
 
-    /// <summary>
-    /// The header's live readout, across every Project. <c>Queued</c> restates
-    /// <c>DistillationQueue.QueueDepthAsync</c>'s predicate verbatim rather than calling it: that
-    /// class is scoped to a request's own <c>MimirDbContext</c>, while every UI browser opens its
-    /// own short-lived one from a Singleton.
-    /// </summary>
     public async Task<HeaderPipeline> GetHeaderPipelineAsync(CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);

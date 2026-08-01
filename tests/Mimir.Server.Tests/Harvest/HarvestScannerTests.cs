@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -123,6 +124,21 @@ public sealed class HarvestScannerTests(ThrowawayDatabaseFixture fixture) : Post
         versions[1].ContentHash.ShouldNotBe(versions[0].ContentHash);
         versions[1].FirstSeen.ShouldBe(Now, "first_seen follows the path, not the version");
         versions[1].LastChanged.ShouldBe(Now.AddMinutes(5));
+    }
+
+    [Fact]
+    public async Task TheContentHash_IsTheLowercaseHexSha256OfTheFileBytes()
+    {
+        const string content = "a memory worth hashing";
+        WriteMemoryFile(Slug, "MEMORY.md", content);
+
+        await Scanner().ScanAsync(Token);
+
+        var version = (await VersionsAsync()).ShouldHaveSingleItem();
+        version.ContentHash.ShouldBe(
+            Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(
+                    Path.Combine(_root, Slug, "memory", "MEMORY.md"), Token))));
     }
 
     [Fact]

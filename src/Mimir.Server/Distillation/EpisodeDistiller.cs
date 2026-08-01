@@ -7,25 +7,8 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Distillation;
 
-/// <summary>
-/// The §6 Distiller: one Sealed Episode's Event stream in, zero or more Wisdom candidates out, on
-/// the distiller model through the §2 model-client layer. Chunking an oversized Episode is behind
-/// this seam — a caller hands over the whole stream and is answered for the whole Episode or not
-/// at all. Faked in the queue-turn tests, the way <see cref="IMergeArbiter"/> is in the gate's.
-/// </summary>
 internal interface IEpisodeDistiller
 {
-    /// <param name="events">
-    /// The Episode's whole Event stream in seq order. A session read out of order is a different
-    /// session, so ordering is the caller's to supply rather than each implementation's to
-    /// rediscover — <see cref="EpisodeDistiller"/> re-sorts only because chunking must slice
-    /// chronologically whatever it is handed.
-    /// </param>
-    /// <exception cref="DistillerException">
-    /// The model's answer was unusable anywhere in the Episode; no partial list comes back with
-    /// it. Callers let it propagate: the Episode stays owed distillation (§6), so the sweep's
-    /// re-queue redoes it whole rather than admitting a partial reading of the session.
-    /// </exception>
     Task<IReadOnlyList<WisdomCandidate>> DistillAsync(
         Episode episode,
         string projectIdentity,
@@ -33,13 +16,6 @@ internal interface IEpisodeDistiller
         CancellationToken cancellationToken);
 }
 
-/// <summary>
-/// <see cref="IEpisodeDistiller"/> on the distiller model, called the way
-/// <see cref="DistillerCall"/> says every call to it is made. Oversized Episodes are chunked by
-/// <see cref="EpisodeChunker"/> and distilled per chunk — the Merge Gate downstream is the reduce.
-/// Events are labelled <c>[eN]</c> by seq so the model's provenance references map back to Event
-/// ids.
-/// </summary>
 internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOptions> options)
     : IEpisodeDistiller
 {
@@ -48,12 +24,6 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>
-    /// The schema handed to <see cref="DistillerCall.ChatSettings"/> as the generation constraint,
-    /// so the kind and scope enums are enforced while decoding. The per-candidate semantic checks
-    /// (usable text, real event refs) are what a grammar can't express, so they stay in
-    /// <see cref="Parse"/>.
-    /// </summary>
     private static readonly JsonElement Schema = JsonSerializer.Deserialize<JsonElement>("""
         {
           "type": "object",
@@ -77,14 +47,9 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         """);
 
     // Not "Options": the primary constructor's IOptions<DistillationOptions> already owns that
-    // word here, and the two would otherwise read as one thing at call sites. The arbiter's copy
-    // is named to match, so one concept reads the same at both call sites.
+    // word here. The arbiter's copy is named to match.
     private static readonly ChatOptions ChatSettings = DistillerCall.ChatSettings(Schema, "wisdom_candidates");
 
-    // The §6 prompting guidance verbatim: durable, reusable lessons only — not session
-    // narration; prefer no candidates over weak ones. A Remember Event is the user deliberately
-    // saving something (§4), so it always deserves a candidate — its explicit salience must not
-    // be lost to the model's selectivity.
     private const string Instructions = """
         You distill one finished Claude Code session into durable memory notes for a memory
         system shared by every future session, in this project and others. The session is given
@@ -182,15 +147,12 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
         var candidates = new List<WisdomCandidate>();
         foreach (var candidate in parsed.Candidates)
         {
-            // A blank note is the model failing to decline; declining is the answer we keep.
             var text = candidate.Text?.Trim();
             if (string.IsNullOrEmpty(text))
             {
                 continue;
             }
 
-            // Provenance refs outside the chunk are hallucinated; the Episode-level Provenance
-            // row the gate writes for a ref-less candidate is the honest fallback.
             var eventIds = candidate.Events?
                 .Where(eventsBySeq.ContainsKey)
                 .Select(seq => eventsBySeq[seq])
@@ -229,5 +191,4 @@ internal sealed class EpisodeDistiller(IChatClient chat, IOptions<DistillationOp
     private sealed record AnswerCandidate(string? Kind, string? Scope, string? Text, List<int>? Events);
 }
 
-/// <summary>The distiller model's answer could not be turned into candidates.</summary>
 internal sealed class DistillerException(string message) : Exception(message);

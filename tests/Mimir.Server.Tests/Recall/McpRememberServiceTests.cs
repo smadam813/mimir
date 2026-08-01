@@ -74,7 +74,7 @@ public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : 
         // starts work. Bound to it, the admission would roll back with nothing left to retry
         // from — no marker, no queue — and the save would be gone.
         using var abandoned = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        Embeddings.OnGenerate = abandoned.Cancel;
+        Embeddings.OnGenerate = _ => abandoned.Cancel();
 
         await RememberAsync(project, content, "Fact", abandoned.Token);
 

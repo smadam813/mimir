@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -169,24 +169,8 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
-    private async Task<HarvesterTile> TileAsync(Func<HarvesterTile, bool> accept)
-    {
-        var seen = new TaskCompletionSource<HarvesterTile>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = _health.Subscribe(snapshot =>
-        {
-            if (accept(snapshot.Harvester))
-            {
-                seen.TrySetResult(snapshot.Harvester);
-            }
-        });
-
-        if (accept(_health.Current.Harvester))
-        {
-            return _health.Current.Harvester;
-        }
-
-        return await seen.Task.WaitAsync(Patience, Token);
-    }
+    private Task<HarvesterTile> TileAsync(Func<HarvesterTile, bool> accept)
+        => _health.TileAsync(s => s.Harvester, accept, Patience, Token);
 
     private void WriteMemoryFile(string relativePath, string content)
     {
