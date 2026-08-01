@@ -4,8 +4,8 @@ namespace Mimir.Server.Components.Shared;
 /// Whether a §8.2 confirmation is armed, and the record it is armed against. The whole of
 /// <see cref="ConfirmDelete"/>'s state, kept here rather than in its <c>@code</c> block because
 /// nothing renders a component in a test in this repo: a rule that must hold lives in a pure
-/// companion the tests can reach (CLAUDE.md), and "selecting another row must not carry an armed
-/// Delete onto it" is exactly such a rule — #106 exists because a host quietly stopped honouring
+/// companion the tests can reach (<c>.claude/rules/tests.md</c>), and "selecting another row
+/// must not carry an armed Delete onto it" is exactly such a rule — #106 exists because a host quietly stopped honouring
 /// it and no test could notice.
 /// </summary>
 internal sealed class ConfirmArming
