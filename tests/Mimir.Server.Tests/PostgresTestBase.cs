@@ -1,11 +1,13 @@
 using Bunit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
+using Mimir.Server.Modules;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
@@ -54,7 +56,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected FakeTimeProvider Clock { get; } = new(Now);
 
     /// <summary>The ambient test cancellation token.</summary>
-    private protected static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
+    private protected static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>
     /// The test's own long-lived context on the throwaway database — the one a SUT taking a scoped
@@ -156,17 +158,22 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// and this is where the two halves meet: the seeders and the per-test truncation are the
     /// class's own, and <see cref="AddThrowawayStorage"/> registers storage the way
     /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
-    /// Registered on top of that is what a §8 surface actually takes: the browsers and the
-    /// header's per-circuit <c>SurfaceSearch</c> from the real <c>AddMimirUi</c>, so a
-    /// registration this harness invented could never diverge from the app's, plus the Episode
-    /// feed — the one line restated from <c>CaptureModule</c> rather than reused, since a module's
-    /// registrations and its HTTP surface come as one — and logging for the debouncers.
+    /// Registered on top of that is what a §8 surface actually takes, and every registration comes
+    /// from the app's own composition rather than a copy of it: <c>AddMimirUi</c> for the four
+    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, and <c>CaptureModule</c> for the
+    /// Episode feed. The module is constructed and asked, not restated — its <c>AddServices</c>
+    /// ignores the configuration it takes and its two other registrations are inert here, which is
+    /// a small price for a line that cannot drift the day Capture decorates the feed or changes its
+    /// lifetime. That drift is the class this tier exists to close (#94/#108), so the harness must
+    /// not open a fresh one.
     /// <para>
-    /// This class's fakes are deliberately <em>not</em> here. Nothing a surface injects takes one:
-    /// the browsers read Postgres and no more, so registering an embedder or an arbiter a surface
-    /// never resolves would be scaffolding for a caller that does not exist. A surface that does
-    /// need one adds it to the returned context's <c>Services</c> before the first render — which
-    /// is also how anything else missing arrives.
+    /// The fakes come too, and must: three of the four browsers take <see cref="TimeProvider"/> and
+    /// <c>WisdomBrowser</c> takes <see cref="MergeGate"/>, so without them only
+    /// <c>EpisodeBrowser</c> resolves and the Wisdom and Injection surfaces throw at first render.
+    /// <see cref="Clock"/> is registered as the <c>TimeProvider</c> rather than
+    /// <c>TimeProvider.System</c> — a real clock here would read a different "now" from every other
+    /// SUT this class composes — and the gate arrives through <see cref="CreateMergeGate"/>, so the
+    /// embedder and the arbiter behind it are the class's scripted ones.
     /// </para>
     /// <para>
     /// Disposed with the test class. Skips when no Postgres is reachable, like every other member
@@ -184,7 +191,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         var context = new BunitContext();
         AddThrowawayStorage(context.Services);
         context.Services.AddMimirUi();
-        context.Services.AddSingleton<IEpisodeFeed, EpisodeFeed>();
+        new CaptureModule().AddServices(context.Services, new ConfigurationBuilder().Build());
+        context.Services.AddSingleton<TimeProvider>(Clock);
+        context.Services.AddSingleton(CreateMergeGate());
         context.Services.AddLogging();
         _renderContexts.Add(context);
         return context;
@@ -421,11 +430,27 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         await ResetAsync(context, fixture.GlobalSeed);
     }
 
+    /// <summary>
+    /// Tears the class down, renderers first. Each is disposed inside its own try: a renderer can
+    /// still be tearing a container down under a lifecycle query the test returned without
+    /// awaiting, and one throwing there must not take the remaining renderers — or the context
+    /// below — down with it, turning one teardown failure into a silent leak of the rest.
+    /// <see cref="BunitContext.DisposeAsync"/> rather than <c>Dispose</c>, for the async
+    /// provider-teardown path; it still does not await pending lifecycle tasks, so a test whose
+    /// component is mid-query when it returns is relying on that query being harmless to abandon.
+    /// </summary>
     public virtual async ValueTask DisposeAsync()
     {
         foreach (var render in _renderContexts)
         {
-            render.Dispose();
+            try
+            {
+                await render.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                TestContext.Current.SendDiagnosticMessage($"Renderer teardown failed: {ex}");
+            }
         }
 
         if (_context is not null)

@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mimir.Server.Storage.Entities;
+using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests;
 
@@ -88,5 +90,35 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
         (await FromDb(db => db.Provenance.CountAsync(Token))).ShouldBe(1);
         (await FromDb(db => db.Injections.CountAsync(Token))).ShouldBe(1);
         (await FromDb(db => db.GoldenCases.CountAsync(Token))).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Every §8 service a surface can <c>@inject</c> resolves from the render tier's container
+    /// (#130). Written as a resolution sweep over <c>AddMimirUi</c>'s own descriptors rather than a
+    /// hand-list, because a hand-list is what went wrong: the tier shipped registering neither
+    /// <see cref="TimeProvider"/> nor <c>MergeGate</c>, so three of the four browsers threw at
+    /// first render while the only surface pinned so far — the Episode list — resolved fine and
+    /// said nothing. The failure would have landed on whoever wrote the next render test, against
+    /// a rules file promising it could not happen.
+    ///
+    /// It reads the descriptors, so a §8 service added to <c>AddMimirUi</c> tomorrow is swept the
+    /// day it is registered. The clock is asserted to be this class's <see cref="Clock"/> and not
+    /// merely present: <c>TimeProvider.System</c> resolves just as well and would leave a surface
+    /// reading a different "now" from every other SUT the harness composes, which is a wrong
+    /// timestamp in a render assertion rather than an exception anybody would trace back here.
+    /// </summary>
+    [Fact]
+    public void TheRenderTier_ResolvesEverySection8ServiceASurfaceCanInject()
+    {
+        var render = CreateRenderContext();
+
+        foreach (var serviceType in new ServiceCollection().AddMimirUi().Select(d => d.ServiceType))
+        {
+            Should.NotThrow(
+                () => render.Services.GetRequiredService(serviceType),
+                $"a surface injecting {serviceType.Name} must render on this tier");
+        }
+
+        render.Services.GetRequiredService<TimeProvider>().ShouldBeSameAs(Clock);
     }
 }

@@ -22,7 +22,7 @@ public class ConfirmDeleteTests : RenderTestBase
     private readonly List<Guid> _deleted = [];
 
     private IRenderedComponent<ConfirmDelete> RenderAt(Guid subject)
-        => Render.Render<ConfirmDelete>(p => p
+        => Render<ConfirmDelete>(p => p
             .Add(c => c.Label, "Delete")
             .Add(c => c.Prompt, "Delete this Wisdom forever?")
             .Add(c => c.SubjectKey, subject)

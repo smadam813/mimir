@@ -1,6 +1,7 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Mimir.Server.Components.Episodes;
+using Mimir.Server.Storage.Entities;
 using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Components.Episodes;
@@ -94,16 +95,22 @@ public class EpisodeListTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
     /// Global holds Wisdom only (§3), so there are no Episodes to narrow and the box is handed
     /// back rather than offered over nothing. The claim is by holder identity, so "holds no claim"
     /// is the assertion — an unclaimed box renders disabled with an explanation.
+    /// <para>
+    /// Mounting straight into Global, which is a different path from switching into it: there is no
+    /// prior claim to release. Nothing is seeded and nothing needs to be — the §3 pseudo-project is
+    /// the migration seed the harness restores on every reset, and the Global branch short-circuits
+    /// ahead of the query, which is the behaviour under test rather than a gap in the fixture.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task UnderGlobal_HoldsNoClaimAtAll()
+    public void UnderGlobal_HoldsNoClaimAtAll()
     {
-        var project = await AddProjectAsync();
         var (render, search) = NewCircuit();
 
-        RenderAt(render, project.Id, isGlobal: true);
+        var list = RenderAt(render, Project.GlobalId, "Global", isGlobal: true);
 
         search.IsClaimed.ShouldBeFalse();
+        list.Find("p.pane-note").TextContent.ShouldContain("Global holds Wisdom only");
     }
 
     /// <summary>
@@ -137,12 +144,11 @@ public class EpisodeListTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
     public async Task SwitchingToGlobal_ReleasesTheClaim()
     {
         var project = await AddProjectAsync();
-        var global = await AddProjectAsync("global");
         var (render, search) = NewCircuit();
         var list = RenderAt(render, project.Id);
         search.Set("migrations");
 
-        SwitchTo(list, global.Id, "Global", isGlobal: true);
+        SwitchTo(list, Project.GlobalId, "Global", isGlobal: true);
 
         search.IsClaimed.ShouldBeFalse();
         search.Term.ShouldBe("");
@@ -156,9 +162,8 @@ public class EpisodeListTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
     public async Task ReturningFromGlobal_ClaimsAgain()
     {
         var project = await AddProjectAsync();
-        var global = await AddProjectAsync("global");
         var (render, search) = NewCircuit();
-        var list = RenderAt(render, global.Id, "Global", isGlobal: true);
+        var list = RenderAt(render, Project.GlobalId, "Global", isGlobal: true);
 
         SwitchTo(list, project.Id, "project");
 

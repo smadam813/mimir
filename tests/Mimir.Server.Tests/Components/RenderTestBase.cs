@@ -13,15 +13,12 @@ namespace Mimir.Server.Tests.Components;
 /// <see cref="PostgresTestBase.CreateRenderContext"/>, which builds a context over the same
 /// seeders, fakes and truncation-reset the rest of the harness hands out.
 /// </para>
+/// <para>
+/// It <em>is</em> the renderer rather than holding one: <see cref="BunitContext"/> is public and
+/// non-sealed precisely to be a test class's base, and it already ships both dispose paths with
+/// virtual hooks. A wrapper would forfeit the async one — which xunit.v3 prefers — and would go
+/// silently unrun the day a derived class implemented <c>IAsyncDisposable</c> for a resource of
+/// its own.
+/// </para>
 /// </summary>
-public abstract class RenderTestBase : IDisposable
-{
-    /// <summary>The renderer under this class's tests; disposed with the class.</summary>
-    private protected BunitContext Render { get; } = new();
-
-    public void Dispose()
-    {
-        Render.Dispose();
-        GC.SuppressFinalize(this);
-    }
-}
+public abstract class RenderTestBase : BunitContext;

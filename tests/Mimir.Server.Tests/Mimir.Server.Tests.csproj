@@ -34,6 +34,11 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
+    <!-- bUnit 2.x still ships a public Bunit.TestContext compat shim beside BunitContext, so any
+         file combining `using Bunit;` with the Xunit global using gets CS0104 on the bare name.
+         Aliased once here rather than qualified per call site: eight files already say
+         TestContext.Current, and each would break the day it needs a renderer. -->
+    <Using Include="Xunit.TestContext" Alias="TestContext" />
   </ItemGroup>
 
 </Project>
