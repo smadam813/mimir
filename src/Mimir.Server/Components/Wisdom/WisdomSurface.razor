@@ -486,7 +486,7 @@
     /// otherwise re-pick it on every row. Not a URL parameter either — it is how this screen is
     /// being read right now, not what it is showing, so it has no business in a link (§8.1).
     /// </summary>
-    private VersionChainView _chainView;
+    private VersionChainView _chainView = VersionChainView.Changed;
 
     private IDisposable? _claim;
     private Debouncer? _debounce;

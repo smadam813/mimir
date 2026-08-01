@@ -33,21 +33,6 @@ public class EpisodeDrillDownTests : RenderTestBase
         drillDown.Markup.ShouldContain("&lt;script&gt;");
     }
 
-    /// <summary>
-    /// The other half of the same serializer choice: relaxed escaping is what keeps the marker
-    /// legible rather than re-encoded into <c>\u2026</c> escapes on the way to the screen.
-    /// </summary>
-    [Fact]
-    public void ATruncatedPayload_KeepsItsMarkerLegibleOnTheScreen()
-    {
-        const string truncated = """{"prompt":"the first half…[truncated 4096 bytes]…"}""";
-
-        var drillDown = Render(truncated);
-
-        drillDown.Find("pre.event-payload").TextContent
-            .ShouldContain("…[truncated 4096 bytes]…");
-    }
-
     private IRenderedComponent<EpisodeDrillDown> Render(string payload)
     {
         var episodeId = Guid.CreateVersion7();

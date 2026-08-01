@@ -120,8 +120,8 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Clock);
 
     /// <summary>
-    /// Storage's §7 universe keeper over the fixture's database — both the ranking below and a
-    /// test asserting against the ambient universe itself want the same one.
+    /// Storage's §7 universe keeper over the fixture's database — the ranking below, the Brief's
+    /// own graph, and a test asserting against the ambient universe itself all want the same one.
     /// </summary>
     private protected WisdomSearch CreateWisdomSearch(SearchOptions? search = null)
         => new(Context, Options.Create(search ?? new SearchOptions()));

@@ -157,6 +157,32 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         listing.Entries.Select(w => w.Id).ShouldBe([orphan.Id]);
     }
 
+    /// <summary>
+    /// "Orphaned" is one rule written twice — <c>AmbientUniverse.For</c>'s lens predicate and the
+    /// <c>OrphanedProvenance</c> flag <c>WisdomBrowser.ToEntries</c> puts on every row — because
+    /// neither expression can be invoked from inside the other's EF projection. The sidebar's
+    /// "Orphaned N" counts the first and the row badges render the second, so a definition that
+    /// drifts leaves the count disagreeing with the list it opens (#91's divergence). Seeded on
+    /// the shape that separates them: harvest-only Provenance is Provenance, so narrowing either
+    /// expression to Episode-borne rows flips that side alone.
+    /// </summary>
+    [Fact]
+    public async Task TheOrphanedLens_AndTheRowsOwnFlag_AnswerTheSameQuestion()
+    {
+        var project = await AddProjectAsync("one rule twice");
+        var orphan = await AddWisdomAsync(project.Id, "nothing points here");
+        var harvested = await AddWisdomAsync(project.Id, "sourced by a harvest alone");
+        await AddHarvestProvenanceAsync(harvested.Id, project.Id);
+
+        var lens = await Browser().ListAsync(
+            new WisdomQuery(project.Id, Lens: WisdomLens.Orphaned), Token);
+        var listed = await Browser().ListAsync(new WisdomQuery(project.Id), Token);
+
+        lens.Entries.Select(w => w.Id).ShouldBe([orphan.Id]);
+        listed.Entries.Single(w => w.Id == orphan.Id).OrphanedProvenance.ShouldBeTrue();
+        listed.Entries.Single(w => w.Id == harvested.Id).OrphanedProvenance.ShouldBeFalse();
+    }
+
     [Fact]
     public async Task TheRetiredLens_ShowsRetiredAlone()
     {
@@ -297,7 +323,9 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
     /// apply §7's native-content exclusion; a curation surface has to show both, since Wisdom a
     /// curator cannot see is Wisdom they cannot retire. Asserted against
     /// <see cref="WisdomSearch.ListAmbientAsync"/> itself rather than against a restatement of what
-    /// it excludes, so the two cannot drift into agreement.
+    /// it excludes, so the two cannot drift into agreement. The Retired half of "show both" is
+    /// <see cref="TheRetiredLens_ShowsRetiredAlone"/>'s; the retired row is seeded here only as
+    /// something for the lanes to exclude.
     /// </summary>
     [Fact]
     public async Task TheCurationUniverse_ShowsWhatTheRecallLanesExclude_HarvestOnlyWisdomIncluded()
@@ -308,18 +336,15 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         await AddProvenanceAsync(ordinary.Id, episode.Id);
         var harvested = await AddWisdomAsync(project.Id, "harvested out of auto-memory");
         await AddHarvestProvenanceAsync(harvested.Id, project.Id);
-        var retired = await AddWisdomAsync(project.Id, "retired since", retiredAt: Now);
+        await AddWisdomAsync(project.Id, "retired since", retiredAt: Now);
 
         var lanes = await CreateWisdomSearch().ListAmbientAsync(project.Id, Token);
         var listed = await Browser().ListAsync(new WisdomQuery(project.Id), Token);
-        var retiredLens = await Browser()
-            .ListAsync(new WisdomQuery(project.Id, Lens: WisdomLens.Retired), Token);
 
-        // The ordinary row is in both, so "the lanes exclude the other two" is the only thing the
-        // three assertions can be reading — not a universe that came back empty for its own reasons.
+        // The ordinary row is in both, so "the lanes exclude the other two" is the only thing these
+        // assertions can be reading — not a universe that came back empty for its own reasons.
         lanes.ShouldBe([ordinary.Id]);
         listed.Entries.Select(e => e.Id).ShouldBe([ordinary.Id, harvested.Id], ignoreOrder: true);
-        retiredLens.Entries.Select(e => e.Id).ShouldBe([retired.Id]);
     }
 
     /// <summary>
