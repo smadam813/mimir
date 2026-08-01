@@ -112,8 +112,9 @@
    Where a surface does differ, the difference stays in that surface's own .razor.css, and it beats
    what is written here with no ordering trick: the scoped bundle is linked after this file and
    every scoped rule carries an extra attribute selector. Which side a variant belongs on, and why
-   a <SurfaceAside> wrapper was not the answer, is CLAUDE.md's stylesheet section — stated there
-   once rather than restated here, since it is a rule about the repo and not about this file.
+   a <SurfaceAside> wrapper was not the answer, is the stylesheet section of
+   .claude/rules/blazor-ui.md — stated there once rather than restated here, since it is a rule
+   about the repo and not about this file.
    SurfaceChassisTests is what fails when either is broken. */
 
 /* The detail and its aside share one frame, so the accent wash behind them is one wash rather than
