@@ -5,6 +5,7 @@ using Mimir.Contracts.Hooks;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Storage.Entities;
+using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Capture;
 
@@ -94,6 +95,23 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
         stored.Payload.ShouldContain("…[truncated 904 bytes]…");
         stored.PayloadFullSize.ShouldBe(JsonSerializer.Serialize(
             new { tool_response = new string('a', 5000) }).Length);
+    }
+
+    [Fact]
+    public async Task TheStoredMarker_IsTheOneTheDrillDownDetects()
+    {
+        // The sync pair: PayloadTruncator writes the marker, Ui.EventPayload matches it with an
+        // independent regex, and neither side would notice the other moving. The agreement only
+        // holds over what Postgres stored — the truncator's own output escapes the ellipses, and
+        // jsonb normalization is what puts them back.
+        var truncated = Request(payload: new { tool_response = new string('a', 5000) });
+        var intact = Request(payload: new { tool_response = "short enough" });
+
+        var oversized = await Service().AppendEventAsync(truncated, EventType.PostToolUse, Token);
+        var small = await Service().AppendEventAsync(intact, EventType.PostToolUse, Token);
+
+        EventPayload.IsTruncated(await StoredPayloadAsync(oversized.Id)).ShouldBeTrue();
+        EventPayload.IsTruncated(await StoredPayloadAsync(small.Id)).ShouldBeFalse();
     }
 
     [Fact]
@@ -259,6 +277,127 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
             .ToListAsync(Token));
         episodeProjects.ShouldBe([project.Id], "two clones of one repository are one Project");
     }
+
+    [Fact]
+    public async Task AnAppendToACallerResolvedEpisode_NeverLooksTheSessionUpAgain()
+    {
+        // The §4 single round-trip hands the Episode it already resolved to the append, rather
+        // than paying a second lookup on the 500 ms path — so the Episode passed in is the one
+        // written to, whatever session the request beside it names.
+        var resolved = await Service().ResumeEpisodeAsync(Request(), Token);
+        var otherRequest = Request();
+        var other = await Service().ResumeEpisodeAsync(otherRequest, Token);
+
+        var evt = await Service().AppendEventAsync(
+            resolved, otherRequest, EventType.UserPromptSubmit, Token);
+
+        evt.EpisodeId.ShouldBe(resolved.Id);
+        (await FromDb(db => db.Events.CountAsync(e => e.EpisodeId == other.Id, Token))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ALostSeqRace_TakesTheNextSlot()
+    {
+        var request = Request();
+        var episode = await Service().ResumeEpisodeAsync(request, Token);
+
+        // The max-seq read misses the uncommitted row, so the losing append claims seq 1 too and
+        // blocks on the (episode_id, seq) unique index until the winner commits.
+        var losing = await RaceAsync(
+            winner =>
+            {
+                winner.Events.Add(new Event
+                {
+                    Id = Guid.CreateVersion7(),
+                    EpisodeId = episode.Id,
+                    Seq = 1,
+                    Type = EventType.PostToolUse,
+                    At = Now,
+                    Payload = "{}",
+                    PayloadFullSize = 2,
+                });
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Service().AppendEventAsync(request, EventType.Stop, Token));
+
+        losing.Seq.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task SealingAnEpisode_PutsItBackOnTheDistillationQueue()
+    {
+        // §6: sealing is what enqueues, and this is one of the two queue writes living outside
+        // DistillationQueue. Seeded Done so the write has something to change.
+        var project = await AddProjectAsync();
+        var episode = await AddEpisodeAsync(project.Id, distillation: DistillationState.Done);
+
+        await Service().SealEpisodeAsync(
+            Request(episode.SessionId, new { reason = "exit" }), Token);
+
+        var sealedEpisode = await EpisodeAsync(episode.Id);
+        sealedEpisode.SealedAt.ShouldBe(Now);
+        sealedEpisode.Distillation.ShouldBe(DistillationState.Pending);
+    }
+
+    [Fact]
+    public async Task ALostEpisodeCreateRace_ResumesTheWinnersEpisode()
+    {
+        var request = Request();
+        var project = await AddProjectAsync();
+
+        var winning = new Episode
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = request.SessionId,
+            ProjectId = project.Id,
+            StartedAt = Now,
+            Cwd = request.Cwd,
+            Distillation = DistillationState.Pending,
+        };
+
+        // The session lookup misses the uncommitted row, so the losing insert blocks on the unique
+        // session_id index until the winner commits.
+        var losing = await RaceAsync(
+            winner =>
+            {
+                winner.Episodes.Add(winning);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Service().ResumeEpisodeAsync(request, Token));
+
+        losing.Id.ShouldBe(winning.Id);
+        (await FromDb(db => db.Episodes.CountAsync(e => e.SessionId == request.SessionId, Token)))
+            .ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ACloneMergeDeletingTheResolvedProject_ReResolvesToTheSurvivor()
+    {
+        // The other #17 race on this path: the Project was resolved, then a concurrent clone merge
+        // removed it before the Episode landed. The insert's FK violation is the signal to
+        // re-resolve, and the survivor holds the loser's roots by then.
+        var root = Root("C", "merged");
+        var survivor = await AddProjectAsync("survivor");
+        var loser = await new ProjectResolver(Context).ResolveAsync(root, root, Token);
+
+        // The resolve still sees the uncommitted-deleted row, so the Episode insert takes an FK
+        // lock on it and blocks until the merge commits — then fails, and retries onto the survivor.
+        var racing = await RaceAsync(
+            async merging =>
+            {
+                await merging.Database.ExecuteSqlAsync(
+                    $"UPDATE projects SET root_paths = array_append(root_paths, {root}) WHERE id = {survivor.Id}",
+                    Token);
+                await merging.Database.ExecuteSqlAsync(
+                    $"DELETE FROM projects WHERE id = {loser.Id}", Token);
+            },
+            () => Service().ResumeEpisodeAsync(Request(identity: root, root: root), Token));
+
+        racing.ProjectId.ShouldBe(survivor.Id);
+    }
+
+    private async Task<string> StoredPayloadAsync(Guid eventId)
+        => (await FromDb(db => db.Events.SingleAsync(e => e.Id == eventId, Token))).Payload;
 
     private CaptureService Service()
         => new(

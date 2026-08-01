@@ -727,50 +727,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
             cancellationToken);
 
     /// <summary>
-    /// Polls until some other session on this database is blocked on one of the two locks an edit
-    /// can collide on. Wider than the advisory-only probe on purpose, and only where an edit is
-    /// the racer: an edit that skipped the gate's lock would block on the version chain's unique
-    /// index instead, so the mutation check goes red on that collision rather than timing out here
-    /// waiting for a lock the mutant never takes. Naming both rather than accepting any
-    /// <c>Lock</c> wait keeps an unrelated waiter — autovacuum, a stray backend — from releasing
-    /// the test early and leaving the serialization it is named for unexercised.
-    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
-    /// no database oid to filter this class's throwaway database by — and an unfiltered pg_locks
-    /// would see other classes' databases.
-    /// </summary>
-    private Task WaitForABlockedSessionAsync(CancellationToken cancellationToken)
-        => PollUntilAnyAsync(
-            """
-            SELECT count(*)::int AS "Value"
-            FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND wait_event_type = 'Lock'
-              AND wait_event IN ('advisory', 'transactionid')
-              AND pid <> pg_backend_pid()
-            """,
-            "no session ever blocked behind the batch holding the gate's lock",
-            cancellationToken);
-
-    /// <summary>Runs <paramref name="countingSql"/> every 25 ms until it counts something.</summary>
-    private async Task PollUntilAnyAsync(
-        string countingSql, string timeoutMessage, CancellationToken cancellationToken)
-    {
-        await using var context = CreateContext();
-        for (var attempt = 0; attempt < 400; attempt++)
-        {
-            var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
-            if (found > 0)
-            {
-                return;
-            }
-
-            await Task.Delay(25, cancellationToken);
-        }
-
-        throw new TimeoutException(timeoutMessage);
-    }
-
-    /// <summary>
     /// One candidate as its own Admission batch — the gate owns the embedding, the transaction,
     /// and the commit, so the helper only builds a gate and calls it.
     /// </summary>
