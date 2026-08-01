@@ -27,6 +27,7 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 - A `dotnet run --project src/Mimir.Server` left running from manual testing locks `Mimir.Contracts.dll`/`Mimir.Server.dll`; the next `dotnet build`/`dotnet test` fails with MSB3027 until that process is killed.
 - A `.OwnsMany(...).ToJson(...)` jsonb column isn't LINQ-inert: `db.Injections.Where(i => i.Items.Any(x => !db.Wisdom.Any(w => w.Id == x.WisdomId)))` translates to a real Postgres `NOT EXISTS`, verified against Postgres (#89's review round). Try LINQ before writing raw SQL against a jsonb owned collection.
 - `mcp__Claude_Browser__preview_start {name: ...}` reads `.claude/launch.json` from the session's *original* directory, not a worktree entered later via `EnterWorktree`. If you've switched worktrees mid-session, start the server manually (`dotnet run --project src/Mimir.Server`) and use `preview_start {url: "http://localhost:6464"}` instead.
+- `.claude/settings.json` enables the `csharp-lsp` plugin, which only shells out to a `csharp-ls` binary it does not install: without `dotnet tool install --global csharp-ls` the plugin loads and the language server is inert, with no error saying so. It reads `Mimir.slnx` directly (community server, not Microsoft's Roslyn LS) and its first solution load costs ~90 s, seconds thereafter (#132).
 
 ## Path-scoped rules
 
