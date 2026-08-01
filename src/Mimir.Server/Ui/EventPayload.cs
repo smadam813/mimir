@@ -18,13 +18,7 @@ public static partial class EventPayload
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>
-    /// Matches the exact marker <see cref="Capture.PayloadTruncator"/> writes (§4). The marker is
-    /// deliberately the detector: comparing <c>payload_full_size</c> against the stored bytes is
-    /// less honest — re-encoding legally shifts escaping, and a small cut plus the marker can even
-    /// grow the payload. A stored payload whose own text contains the marker pattern is wrongly
-    /// badged; accepted.
-    /// </summary>
+    /// <summary>Detects by marker, not by size: a payload carrying the pattern is wrongly badged, accepted.</summary>
     [GeneratedRegex(@"…\[truncated \d+ bytes\]…")]
     private static partial Regex TruncationMarker();
 

@@ -98,6 +98,35 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
+    /// Waits until some session on this database is blocked on another transaction — the handshake
+    /// a capture race test needs between starting the losing write and committing the winner's.
+    /// Filtered to <c>current_database()</c> because the classes run in parallel on their own
+    /// throwaway databases and each would otherwise see the others' waits (#70).
+    /// </summary>
+    private protected async Task WaitForABlockedSessionAsync()
+    {
+        await using var probe = CreateContext();
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            var blocked = await probe.Database.SqlQuery<int>(
+                $"""
+                SELECT count(*)::int AS "Value"
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND wait_event IN ('transactionid', 'advisory')
+                """).SingleAsync(Token);
+            if (blocked > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(25, Token);
+        }
+
+        Assert.Fail("No session blocked within 5s — the race under test never started.");
+    }
+
+    /// <summary>
     /// One seeded Episode read back through a separate context — the assertion counterpart to
     /// <see cref="AddEpisodeAsync"/>, and what every class asserting on Episode state was writing
     /// for itself.
@@ -198,6 +227,17 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         _renderContexts.Add(context);
         return context;
     }
+
+    /// <summary>
+    /// A §3.1 remote identity, unique per call — for the resolver tests, which hand identities and
+    /// roots in by hand rather than through <see cref="AddProjectAsync"/> because what they are
+    /// pinning is how two of them resolve against each other.
+    /// </summary>
+    private protected static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
+
+    /// <inheritdoc cref="Identity"/>
+    private protected static string Root(string drive, string name)
+        => $@"{drive}:\git\{name}-{Guid.NewGuid():N}";
 
     /// <summary>
     /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
