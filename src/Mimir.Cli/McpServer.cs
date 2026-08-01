@@ -5,14 +5,6 @@ using Mimir.Contracts.Mcp;
 
 namespace Mimir.Cli;
 
-/// <summary>
-/// <c>mimir mcp</c> (spec §7, §7.1): the Mimir MCP tools over stdio — newline-delimited JSON-RPC,
-/// hand-rolled because the surface is three tools and five methods, and the CLI stays
-/// dependency-free. The Project is resolved once from the server's own working directory
-/// (<c>CLAUDE_PROJECT_DIR</c> as fallback) per §3.1; every tool call is one HTTP round-trip to
-/// Mimir, whose reply text is relayed verbatim. Unlike the fail-open hooks, this lane is
-/// deliberate: a dead Mimir answers with an honest tool error, never silence.
-/// </summary>
 internal sealed class McpServer(
     HttpClient http,
     TextReader input,
@@ -20,17 +12,10 @@ internal sealed class McpServer(
     ProjectLocation location,
     string sessionId)
 {
-    /// <summary>Generous next to the hooks' 3 s: nothing here blocks a session (§1).</summary>
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>
-    /// The one protocol revision this build serves. Earlier revisions allow request batching,
-    /// which this line loop does not speak — so <c>initialize</c> always answers this version,
-    /// never an echo (the MCP handshake rule: answer a version the server supports).
-    /// </summary>
     private const string ProtocolVersion = "2025-06-18";
 
-    /// <summary>The §3 Wisdom kinds, restated client-side for the tool schemas' enum.</summary>
     private static readonly string[] WisdomKinds = ["Fact", "Preference", "Lesson", "Procedure"];
 
     private static readonly JsonSerializerOptions Wire = new(JsonSerializerDefaults.Web);
@@ -55,17 +40,18 @@ internal sealed class McpServer(
         return 0;
     }
 
-    /// <summary>
-    /// Spec §7.1: the Project comes from the server's own working directory — Claude Code spawns
-    /// it in the project dir — with <c>CLAUDE_PROJECT_DIR</c> as the fallback when the cwd turns
-    /// out to be no repository at all.
-    /// </summary>
-    public static async Task<ProjectLocation> ResolveProjectAsync(CancellationToken cancellationToken)
+    public static Task<ProjectLocation> ResolveProjectAsync(CancellationToken cancellationToken)
+        => ResolveProjectAsync(
+            Environment.CurrentDirectory,
+            Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR"),
+            cancellationToken);
+
+    internal static async Task<ProjectLocation> ResolveProjectAsync(
+        string cwd, string? projectDir, CancellationToken cancellationToken)
     {
-        var cwd = Environment.CurrentDirectory;
         var location = await ProjectLocator.LocateAsync(cwd, cancellationToken);
         if (location.Identity == cwd
-            && Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR") is { Length: > 0 } projectDir
+            && projectDir is { Length: > 0 }
             && Directory.Exists(projectDir))
         {
             location = await ProjectLocator.LocateAsync(Path.GetFullPath(projectDir), cancellationToken);
@@ -91,8 +77,6 @@ internal sealed class McpServer(
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                // Valid JSON, but not a request object — a batch array (pre-2025-06-18) or a bare
-                // scalar. There is no id to echo, so the error carries null per JSON-RPC.
                 return new
                 {
                     jsonrpc = "2.0",
@@ -109,7 +93,6 @@ internal sealed class McpServer(
             var hasId = root.TryGetProperty("id", out var idElement);
             object? id = hasId ? idElement.Clone() : null;
 
-            // A notification expects no answer — including ones this build does not know.
             if (!hasId)
             {
                 return null;
@@ -135,8 +118,6 @@ internal sealed class McpServer(
 
     private async Task<object> CallToolAsync(object? id, JsonElement root)
     {
-        // Anything short of {"params":{"name":"…"}} is the client's mistake, answered with
-        // -32602 — never a throw, which would kill the stdio loop for the rest of the session.
         if (!root.TryGetProperty("params", out var parameters)
             || parameters.ValueKind != JsonValueKind.Object
             || !parameters.TryGetProperty("name", out var name)
@@ -242,8 +223,6 @@ internal sealed class McpServer(
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            // A 200 whose body is not a Mimir reply — a proxy or captive portal answering for
-            // it, say. The deliberate lane degrades to the same honest tool error as downtime.
             return ToolError(id,
                 $"Mimir's reply for {route} was not readable — is something else answering at"
                 + $" {http.BaseAddress}? ({ex.Message})");
@@ -271,8 +250,7 @@ internal sealed class McpServer(
             return false;
         }
 
-        // Normalize to UTC: Npgsql refuses a non-UTC DateTimeOffset against timestamptz, so a
-        // legal "+02:00" input must not survive to the server as-is.
+        // Npgsql refuses a non-UTC DateTimeOffset against timestamptz.
         since = parsed.ToUniversalTime();
         return true;
     }
@@ -297,10 +275,6 @@ internal sealed class McpServer(
     private static object Error(object? id, int code, string message)
         => new { jsonrpc = "2.0", id, error = new { code, message } };
 
-    /// <summary>
-    /// A tool-level failure (MCP <c>isError</c>): the model sees it and can react, while the
-    /// protocol call itself succeeded — the shape MCP prescribes for execution errors.
-    /// </summary>
     private static object ToolError(object? id, string message)
         => Result(id, new
         {

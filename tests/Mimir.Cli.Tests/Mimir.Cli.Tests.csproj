@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\src\Mimir.Cli\Mimir.Cli.csproj" Link="Mimir.Cli.csproj.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Mimir.Cli\Mimir.Cli.csproj" />
   </ItemGroup>
 

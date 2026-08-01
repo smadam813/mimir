@@ -2,11 +2,6 @@ using Mimir.Contracts.Mcp;
 
 namespace Mimir.Server.Recall;
 
-/// <summary>
-/// The HTTP surface behind <c>mimir mcp</c> (spec §7): one route per tool, each answering with
-/// the finished tool-result text. Unlike the fail-open hook routes, errors here surface — the MCP
-/// lane is deliberate, and an honest error beats a silent empty answer.
-/// </summary>
 internal static class McpEndpoints
 {
     public static async Task<McpToolReply> SearchAsync(

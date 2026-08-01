@@ -461,7 +461,8 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         Guid projectId,
         string? path = null,
         string content = "a memory",
-        DateTimeOffset? lastChanged = null)
+        DateTimeOffset? lastChanged = null,
+        DateTimeOffset? goneAt = null)
     {
         var suffix = Guid.NewGuid().ToString("N");
         var item = new HarvestedItem
@@ -473,6 +474,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Content = content,
             FirstSeen = Now,
             LastChanged = lastChanged ?? Now,
+            GoneAt = goneAt,
         };
         Context.HarvestedItems.Add(item);
         await Context.SaveChangesAsync(Token);

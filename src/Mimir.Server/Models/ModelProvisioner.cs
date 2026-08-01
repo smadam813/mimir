@@ -5,12 +5,6 @@ using Mimir.Server.Health;
 
 namespace Mimir.Server.Models;
 
-/// <summary>
-/// Spec §12: on startup Mimir provisions the two §11 models. Ollama is usually still booting when
-/// we get here, so the first job is waiting for it; the second is pulling whatever is missing.
-/// Both are narrated on the health strip, which is the only progress the user gets during a
-/// multi-gigabyte first run.
-/// </summary>
 public sealed class ModelProvisioner(
     IModelCatalog catalog,
     IHealthState health,
@@ -48,11 +42,6 @@ public sealed class ModelProvisioner(
         }
     }
 
-    /// <summary>
-    /// Pulls the model at <paramref name="index"/>, republishing the whole strip as progress
-    /// arrives. Progress is tracked in <paramref name="statuses"/> rather than read back off the
-    /// health state, so the provisioner stays the sole author of its own tile.
-    /// </summary>
     private async Task PullAsync(ModelStatus[] statuses, int index, CancellationToken cancellationToken)
     {
         var model = statuses[index];
@@ -72,7 +61,6 @@ public sealed class ModelProvisioner(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // One unusable model must not stop the others from provisioning; the tile reports which.
             logger.LogError(ex, "Failed to provision model {Model}", model.Name);
             statuses[index] = model with { State = ModelProvisioningState.Failed, Error = ex.Message };
         }
@@ -129,9 +117,6 @@ public sealed class ModelProvisioner(
             var percent = pulling.PercentComplete is { } value ? $" {value}%" : string.Empty;
             var progress = $"Pulling {pulling.Name}{percent}";
 
-            // A failed pull is terminal, so it outranks the one still in flight. Reporting only
-            // the progress would leave the tile green for however long the remaining
-            // multi-gigabyte pull takes, which is exactly when the user is watching it.
             return failed > 0
                 ? (HealthTileState.Degraded, $"{progress} · {Unavailable(failed, statuses.Count)}")
                 : (HealthTileState.Working, progress);
@@ -149,6 +134,5 @@ public sealed class ModelProvisioner(
 
     private static string Unavailable(int failed, int total) => $"{failed} of {total} models unavailable";
 
-    /// <summary>Ollama reports an untagged model as <c>:latest</c>; compare on the same footing.</summary>
     private static string NormalizeTag(string model) => model.Contains(':') ? model : $"{model}:latest";
 }

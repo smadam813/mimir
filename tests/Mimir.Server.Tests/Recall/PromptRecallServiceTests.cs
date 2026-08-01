@@ -138,6 +138,28 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
         logged.Items.Select(i => i.WisdomId).ShouldBe([injected.Id]);
     }
 
+    [Fact]
+    public async Task AnOpenGateWithNothingFittingTheBudget_InjectsNothing_AndLogsNothing()
+    {
+        var project = await AddProjectAsync("prompt");
+        var oversized = await AddWisdomAsync(project.Id, new string('a', 500), cosine: 0.9);
+
+        var starved = await ComposeAsync(
+            project.Id, options: new RecallOptions { PromptBudgetChars = 400 });
+
+        starved.ShouldBeEmpty(
+            "this lane raises no notice, so an open gate that fits nothing renders the same "
+            + "empty injection an unopened one does");
+        (await FromDb(db => db.Injections.CountAsync(Token))).ShouldBe(0);
+
+        // The same row under a budget that holds it, so the emptiness above is the fill running
+        // out of room and not the gate having stayed shut.
+        var roomy = await ComposeAsync(
+            project.Id, options: new RecallOptions { PromptBudgetChars = 900 });
+
+        roomy.ShouldContain(oversized.Text);
+    }
+
     private async Task<string> ComposeAsync(
         Guid projectId, string? sessionId = null, RecallOptions? options = null)
     {

@@ -2,25 +2,14 @@ using System.Diagnostics;
 
 namespace Mimir.Cli;
 
-/// <summary>Where a hook fired from: the Project identity and root the CLI sends with every POST.</summary>
 internal sealed record ProjectLocation(string Identity, string Root);
 
-/// <summary>
-/// Spec §3.1: resolve Project identity host-side. The remote of <c>origin</c> (else the
-/// alphabetically first remote) normalized per <see cref="RemoteIdentity"/>; a repo with no remote
-/// falls back to its root path, a non-repo to the cwd. Never throws, and honors the caller's
-/// cancellation — the hook's 3 s cap must bound git too, so a hung git is killed, not awaited. A
-/// machine without git is a machine whose Projects are identified by path.
-/// </summary>
 internal static class ProjectLocator
 {
-    /// <summary>Per-call ceiling for a local metadata read; the hook's cap still bounds the total.</summary>
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(2);
 
     public static async Task<ProjectLocation> LocateAsync(string cwd, CancellationToken cancellationToken)
     {
-        // Both lookups read from cwd — no data dependency. Started together they cost one git
-        // round-trip instead of two on the prompt hook's 500 ms budget (§11).
         var toplevelTask = RunGitAsync(cwd, ["rev-parse", "--show-toplevel"], cancellationToken);
         var remoteTask = RemoteUrlAsync(cwd, cancellationToken);
 
@@ -54,7 +43,6 @@ internal static class ProjectLocator
             : await RunGitAsync(cwd, ["remote", "get-url", firstRemote], cancellationToken);
     }
 
-    /// <summary>Runs git, returning trimmed stdout — or null on failure, timeout, or cancellation.</summary>
     private static async Task<string?> RunGitAsync(string cwd, string[] args, CancellationToken cancellationToken)
     {
         Process? process = null;
@@ -92,8 +80,7 @@ internal static class ProjectLocator
         }
         catch (Exception)
         {
-            // No git, no PATH, no permissions, or out of time — all the same answer: no
-            // repository information. A still-running git must not outlive the hook.
+            // Swallowed deliberately, but a still-running git must not outlive the hook.
             TryKill(process);
             return null;
         }
@@ -111,7 +98,7 @@ internal static class ProjectLocator
         }
         catch (Exception)
         {
-            // Already exited or already gone — either way it is no longer our problem.
+            // Swallowed deliberately: already exited, or already gone.
         }
     }
 }

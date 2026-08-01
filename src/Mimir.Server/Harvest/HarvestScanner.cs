@@ -9,17 +9,8 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Harvest;
 
-/// <summary>What one scan did, feeding the Harvester tile (§8).</summary>
-/// <param name="Items">Memory files found this scan.</param>
-/// <param name="Changed">Files that stored a new HarvestedItem version.</param>
-/// <param name="Gone">Files newly found deleted.</param>
 internal sealed record HarvestScanResult(int Items, int Changed, int Gone);
 
-/// <summary>
-/// One §5 scan over the harvest root: every <c>&lt;slug&gt;/memory/**/*.md</c> is content-hashed
-/// and stored as a HarvestedItem version when new or changed; files no longer on disk get
-/// <c>gone_at</c>. The first scan of an empty database is the Backfill — no special mode.
-/// </summary>
 internal sealed class HarvestScanner(
     MimirDbContext db,
     ProjectResolver projects,
@@ -32,8 +23,6 @@ internal sealed class HarvestScanner(
         var root = options.Value.Root;
         if (!Directory.Exists(root))
         {
-            // Refusing to scan, rather than seeing zero files, is what keeps a broken mount from
-            // marking every item gone.
             throw new DirectoryNotFoundException($"Harvest root '{root}' does not exist.");
         }
 
@@ -58,9 +47,6 @@ internal sealed class HarvestScanner(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The host is live under us; a file locked, vanishing mid-scan or with its
-                // permissions off is next scan's problem, not this scan's failure. It was seen,
-                // so the gone-marking below leaves it alone: it keeps whatever state it had.
                 logger.LogWarning(ex, "Skipping unreadable memory file {File}", file);
                 continue;
             }
@@ -100,12 +86,6 @@ internal sealed class HarvestScanner(
         return new HarvestScanResult(items, changed, gone);
     }
 
-    /// <summary>
-    /// The current state of every path ever harvested: its latest version's hash and liveness.
-    /// Loaded whole — the version count grows at memory-file edit pace, and no Content comes
-    /// along — then reduced in memory, because "latest row per group" does not translate to SQL
-    /// EF Core reliably supports.
-    /// </summary>
     private async Task<Dictionary<string, LatestVersion>> LatestVersionsAsync(
         CancellationToken cancellationToken)
     {
@@ -139,7 +119,6 @@ internal sealed class HarvestScanner(
         }
     }
 
-    /// <summary>Harvest-relative with forward slashes: the same identity whatever the mount.</summary>
     private static string ItemPathOf(string root, string file)
         => Path.GetRelativePath(root, file).Replace('\\', '/');
 
@@ -151,11 +130,6 @@ internal sealed class HarvestScanner(
         DateTimeOffset LastChanged,
         DateTimeOffset? GoneAt);
 
-    /// <summary>
-    /// §5 slug → Project, memoized per scan. Mangling a known root is exact (hyphens and all), so
-    /// that wins; only an unmatched slug falls back to the demangled guess, creating the
-    /// path-identity Project that hook traffic upgrades or merges later.
-    /// </summary>
     private sealed class SlugProjectResolver(MimirDbContext db, ProjectResolver projects)
     {
         private readonly Dictionary<string, Guid> _bySlug = new(StringComparer.Ordinal);

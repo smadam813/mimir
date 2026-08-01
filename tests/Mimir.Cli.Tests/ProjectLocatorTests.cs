@@ -103,6 +103,41 @@ public sealed class ProjectLocatorTests : IDisposable
         location.Root.ShouldBe(repo);
     }
 
+    [Fact]
+    public async Task TheMcpProjectFallback_IsReachedOnlyWhenTheCwdIsNoRepositoryAtAll()
+    {
+        var repo = GitRepo();
+        Git(repo, "remote", "add", "origin", "https://github.com/smadam813/mimir.git");
+        var fallback = GitRepo();
+        Git(fallback, "remote", "add", "origin", "https://github.com/smadam813/fallback.git");
+        var plainDirectory = TempDir();
+
+        var fromRepo = await McpServer.ResolveProjectAsync(
+            repo, fallback, TestContext.Current.CancellationToken);
+        var fromNowhere = await McpServer.ResolveProjectAsync(
+            plainDirectory, fallback, TestContext.Current.CancellationToken);
+
+        fromRepo.Identity.ShouldBe(
+            "github.com/smadam813/mimir", "a cwd that is a repository is the answer (§7.1)");
+        fromNowhere.Identity.ShouldBe("github.com/smadam813/fallback");
+    }
+
+    [Fact]
+    public async Task AnUnusableProjectDirFallback_LeavesTheCwdAsTheIdentity()
+    {
+        var plainDirectory = TempDir();
+
+        var unset = await McpServer.ResolveProjectAsync(
+            plainDirectory, projectDir: null, TestContext.Current.CancellationToken);
+        var missing = await McpServer.ResolveProjectAsync(
+            plainDirectory,
+            Path.Combine(plainDirectory, "no-such-directory"),
+            TestContext.Current.CancellationToken);
+
+        unset.Identity.ShouldBe(plainDirectory);
+        missing.Identity.ShouldBe(plainDirectory);
+    }
+
     private static Task<ProjectLocation> Locate(string cwd)
         => ProjectLocator.LocateAsync(cwd, TestContext.Current.CancellationToken);
 
