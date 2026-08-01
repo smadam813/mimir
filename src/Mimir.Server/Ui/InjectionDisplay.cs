@@ -5,32 +5,13 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Ui;
 
-/// <summary>
-/// The §7 score a lane ranked by, in words: the expression itself, and the factors that feed it
-/// read off the live <see cref="RecallOptions"/> rather than restated — a knob retuned in §11 must
-/// not leave the screen explaining the old one.
-/// </summary>
 internal sealed record ScoringFormula(string Expression, string Factors);
 
-/// <summary>
-/// The §8.3 surface's shared presentation, sibling to <see cref="EpisodeDisplay"/>: how a lane is
-/// named, what it costs, the §7 formula it ranked by, and the payload rebuild.
-///
-/// Pure by construction, and deliberately so — the payload rebuild is the part of this surface that
-/// can be wrong with no database in the picture, and a pin that needs Postgres to run is a pin that
-/// skips on the machine where the mistake is being made (the prior art is
-/// <see cref="InjectionLabel"/> and <see cref="InjectionWrapper"/> themselves).
-/// </summary>
 internal static class InjectionDisplay
 {
-    /// <summary>
-    /// A log row's stamp: the time alone, because the row's session header already carries the day
-    /// and <see cref="EpisodeDisplay.Stamp"/>'s full form would repeat it on every line.
-    /// </summary>
     public static string TimeOfDay(DateTimeOffset at)
         => at.UtcDateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
 
-    /// <summary>The lane's own name, as §3 writes it — <c>Mcp</c> is an initialism, not a word.</summary>
     public static string Name(InjectionLane lane) => lane switch
     {
         InjectionLane.Brief => "Brief",
@@ -38,7 +19,6 @@ internal static class InjectionDisplay
         _ => "MCP",
     };
 
-    /// <summary>When the lane fired, in the words §3 describes it by.</summary>
     public static string Trigger(InjectionLane lane) => lane switch
     {
         InjectionLane.Brief => "at SessionStart",
@@ -46,10 +26,6 @@ internal static class InjectionDisplay
         _ => "the session asked",
     };
 
-    /// <summary>
-    /// The §11 char budget the lane filled to, or null for <c>Mcp</c> — <c>mimir_search</c> is
-    /// capped by result count, not chars, so quoting a char budget for it would invent one.
-    /// </summary>
     public static int? Budget(InjectionLane lane, RecallOptions options) => lane switch
     {
         InjectionLane.Brief => options.BriefBudgetChars,
@@ -57,12 +33,6 @@ internal static class InjectionDisplay
         _ => null,
     };
 
-    /// <summary>
-    /// One score, at a precision that can tell two of them apart. §3's score-scale rule keeps the
-    /// lanes' scales incomparable, and they are orders of magnitude apart: a brief_score runs to
-    /// single digits while a fused query score sits near a hundredth, where two decimals would
-    /// round every row in an entry to the same figure.
-    /// </summary>
     public static string Score(double score)
         => score.ToString(score >= 1 ? "0.00" : "0.0000", CultureInfo.InvariantCulture);
 
@@ -97,23 +67,6 @@ internal static class InjectionDisplay
                     + "reinforcement only nudges.");
     }
 
-    /// <summary>
-    /// The §7 wrapper an ambient lane put in front of the session, rebuilt from what the entry
-    /// recorded: the same <see cref="InjectionWrapper"/> and <see cref="InjectionLabel"/> the lane
-    /// itself rendered through, over the same Wisdom in the same order.
-    ///
-    /// It is a rebuild rather than a replay of stored text, because §3 records an injection's size
-    /// and items and not its payload. Two things therefore make the rebuild differ from what the
-    /// session read, and both are visible on the screen rather than papered over: a line whose
-    /// Wisdom was edited or hard-deleted since, and the Brief's growth-tripwire notice, which rides
-    /// in the payload's char count but is not itself recorded. The recorded <c>chars</c> is the
-    /// check — an entry whose rebuild is a different length has drifted.
-    /// </summary>
-    /// <returns>
-    /// The wrapper text; <c>""</c> when no carried Wisdom survives to rebuild a line from; and null
-    /// for <c>Mcp</c>, whose payload was never this wrapper at all — <c>mimir_search</c> composes
-    /// its own sectioned answer, Episodes included, and only its Wisdom lines are recorded.
-    /// </returns>
     public static string? Payload(InjectionLane lane, IReadOnlyList<InjectedWisdom> items)
     {
         if (lane == InjectionLane.Mcp)
@@ -132,21 +85,9 @@ internal static class InjectionDisplay
                 i.Wisdom.Text))
             .ToList();
 
-        // Unbounded: the recorded items are exactly the ones the lane's own §11 budget admitted, so
-        // measuring them against that budget a second time would be a different fill, not a rebuild
-        // — one whose header and footer are charged twice against a line that only just fitted.
         return InjectionWrapper.Build(entries, int.MaxValue).Text;
     }
 
-    /// <summary>
-    /// Why an entry cannot be promoted to a GoldenCase (§9), or null when it can. Three faults, and
-    /// naming the wrong one is worse than saying nothing: a Brief carries no query to replay (§3);
-    /// an <c>mimir_search</c> whose answer matched only Episodes carried no Wisdom at all, an
-    /// ordinary outcome and nothing to do with retirement; and only the third is the entry whose
-    /// lines have since been retired or hard-deleted. <see cref="InjectionLogEntry.CanPromote"/>
-    /// collapses all three into one false, so the reason is worked out here rather than inferred
-    /// from the query alone.
-    /// </summary>
     public static string? CannotPromote(InjectionLogEntry entry) => entry switch
     {
         { CanPromote: true } => null,

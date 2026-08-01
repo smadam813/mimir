@@ -2,9 +2,6 @@
 @using Mimir.Server.Storage
 @inherits HealthAwareComponent
 
-@* Spec §8: one Health pill in the header, opening a popover with all four probes. Built on the
-   native Popover API (popover="auto" is the default for a bare `popover` attribute) — light
-   dismiss and Escape come from the platform, and toggling never touches the Blazor circuit. *@
 <button type="button" class="health-pill" popovertarget="health-popover" aria-haspopup="true">
     <span class="health-dot @DotClass()"></span>
     <span>@Headline()</span>
@@ -133,9 +130,6 @@
         _ => "All ready",
     };
 
-    // The pill's own dot mirrors Headline()'s three buckets — never the danger hue, which the
-    // Mimir layer reserves for Delete and orphaned Provenance (see wwwroot/nocturne/mimir.css).
-    // Only a live claim pulses; a Degraded probe is still, since nothing is in flight to animate.
     private string DotClass() => Headline() switch
     {
         "Working" => "dot-working",
@@ -153,8 +147,6 @@
     private string BytesLabel()
         => Snapshot.Storage.DatabaseSizeBytes is { } bytes ? ByteSize.Format(bytes) : "—";
 
-    // Emptiness is carried in words, never inferred from the byte figure — a 28 MB heap can hold
-    // zero live rows. Only the two states we can prove get to say anything.
     private static string DescribeTable(TableFootprint table) => table.Occupancy switch
     {
         TableOccupancy.Populated => ByteSize.Format(table.TotalBytes),

@@ -92,7 +92,7 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
     }
 
     private WisdomSearch Search(int perLegTopN = 50)
-        => new(Context, Options.Create(new SearchOptions { PerLegTopN = perLegTopN }));
+        => CreateWisdomSearch(new SearchOptions { PerLegTopN = perLegTopN });
 
     private async Task<Guid> AddEventProvenanceAsync(Guid wisdomId, Guid projectId)
     {

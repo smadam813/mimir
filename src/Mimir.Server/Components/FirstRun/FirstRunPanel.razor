@@ -2,10 +2,6 @@
 @inject IJSRuntime Js
 @inject ILogger<FirstRunPanel> Logger
 
-@* Spec §8 / #90: an install that has never been introduced to Claude Code explains itself as a
-   state of the same shell rather than a separate screen — the header, tab strip and sidebar around
-   this body are the ones the curator keeps using. Both registrations are rendered from
-   FirstRunCommands, which is also what the clipboard receives. *@
 <article class="first-run">
     <div class="first-run-column">
         <h6 class="first-run-eyebrow">Nothing captured yet</h6>
@@ -64,14 +60,10 @@
 </article>
 
 @code {
-    // The port's one piece of JavaScript (#90): the clipboard has no server-side equivalent, so
-    // this single call is the exception to a chassis that is otherwise all platform CSS and Blazor.
+    // The port's one piece of JavaScript: the clipboard has no server-side equivalent, so this
+    // single call is the exception to a chassis that is otherwise all platform CSS and Blazor.
     private const string Module = "Components/FirstRun/FirstRunPanel.razor.js";
 
-    /// <summary>
-    /// Said whether the browser refused the write or the call never got that far — either way the
-    /// commands are on the screen to select, so the panel names the fallback rather than the fault.
-    /// </summary>
     private const string Blocked = "Copying is blocked here — select the blocks above instead.";
 
     private IJSObjectReference? _module;
@@ -82,9 +74,8 @@
     {
         try
         {
-            // The panel is swapped out the moment the first hook lands, which can be mid-import if
-            // the curator copies as their first session starts. DisposeAsync would have seen no
-            // module to release, so the import that lands after it releases its own.
+            // An import that lands after DisposeAsync releases its own module: the teardown saw
+            // none to release, and the panel is swapped out the moment the first hook lands.
             var module = _module ??= await Js.InvokeAsync<IJSObjectReference>("import", Assets[Module]);
             if (_disposed)
             {
@@ -99,8 +90,8 @@
         }
         catch (Exception ex)
         {
-            // The circuit may be tearing down, or the browser may refuse the clipboard outright.
-            // Neither is worth an error boundary on a screen whose commands are already readable.
+            // Swallowed: a tearing-down circuit and a refused clipboard are both ordinary here,
+            // and neither is worth an error boundary on a screen already showing the commands.
             Logger.LogWarning(ex, "Copying the first-run registrations failed");
             _copyState = Blocked;
         }
