@@ -2,10 +2,12 @@
 paths:
   - "src/Mimir.Server/Components/**"
   - "src/Mimir.Server/Ui/**"
-  - "src/Mimir.Server/wwwroot/nocturne/**"
+  - "src/Mimir.Server/wwwroot/**"
 ---
 
 # Blazor UI: surfaces, chassis and stylesheets
+
+No bUnit, so nothing renders a component in a test and markup is unpinned. A `.razor`'s logic is testable only by living somewhere else: a pure companion `.cs` (`ProjectRoute`, `FirstRunCommands`, `ModelPull`, each pinned under `tests/…/Components/`), or the data-shaping layer in `Ui/` (`WisdomBrowser`, `EpisodeBrowser`, `SurfaceSearch`, …) that `tests/Mimir.Server.Tests/Ui` reaches directly. A rule that must hold goes in one of those, not in an `@code` block.
 
 Two chassis conventions the #86 surface ports each inherit (#91 set both, #94 extended them). The header's search box is claimed, not wired: a surface calls `SurfaceSearch.Claim(this, placeholder)`, disposes the token in `Dispose`, subscribes to the one `Changed` event (raised on claim, keystroke and release), and re-reads `Search.Term` off the service, so the box renders disabled with an explanation while nothing holds it. Two consequences follow, each of which has cost a bug. The claim is held by holder identity, so a re-claim by the same component makes any earlier token stale, and disposing that stale token later hands the box back out from under the live claim: release first, then re-claim. And the term is per claim, not per circuit, so a surface that stays mounted across a parameter change (Blazor reuses the instance where the route and component match) must release and re-claim, or it narrows the new Project by the old one's term (#94). All three ported surfaces shed it on that boundary now (#108); only the Episode list could reach the leak through a link, since every sidebar row points at the episodes route, so on the other two it was latent rather than absent. Where a surface claims in `OnInitialized` — Wisdom and Injections do — anchor the Project there too, since the parameters are already set by then and the boundary branch would otherwise re-claim over a claim one line old. `EpisodeList` claims from the boundary alone instead, because Global must hold no claim at all.
 

@@ -29,7 +29,7 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 
 ## Path-scoped rules
 
-This file is the repo's only always-on instruction file, so ambient context has exactly one place to audit. Path-specific material lives in `.claude/rules/*.md`, each scoped by a `paths:` frontmatter glob and loaded only once Claude reads a file it governs: `blazor-ui.md` (`Components/`, `Ui/`, `wwwroot/nocturne/`), `tests.md` (`tests/`), `storage.md` (`Storage/`). No rule there goes unscoped — a rule that would cause mistakes in a session that never touches its governed paths belongs here instead. Path-scoped rules drop out after compaction until re-triggered, which is why nothing load-bearing outside its paths may live in one.
+This file is the repo's only always-on instruction file, so ambient context has exactly one place to audit. Path-specific material lives in `.claude/rules/*.md`, each scoped by a `paths:` frontmatter glob and loaded only once Claude reads a file it governs — `blazor-ui.md`, `tests.md`, `storage.md`, each naming its own paths. No rule there goes unscoped — a rule that would cause mistakes in a session that never touches its governed paths belongs here instead. Path-scoped rules drop out after compaction until re-triggered, which is why nothing load-bearing outside its paths may live in one.
 
 ## Agent skills
 
