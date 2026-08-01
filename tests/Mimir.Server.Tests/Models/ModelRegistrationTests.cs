@@ -34,9 +34,7 @@ public sealed class ModelRegistrationTests
     [Fact]
     public void Provisioning_IsAHostedBackgroundService_SoStartupNeverWaitsOnADownload()
     {
-        var services = new ServiceCollection();
-        services.AddSingleton(Options.Create(new ModelOptions()));
-        services.AddMimirModelClients();
+        var services = Registrations();
 
         services.ShouldContain(
             d => d.ServiceType == typeof(IHostedService)
@@ -52,11 +50,13 @@ public sealed class ModelRegistrationTests
         => OllamaModelCatalog.ToPercent(new PullModelResponse { Total = total, Completed = completed })
             .ShouldBe(expected);
 
-    private static ServiceProvider Provider()
+    private static ServiceProvider Provider() => Registrations().BuildServiceProvider();
+
+    private static ServiceCollection Registrations()
     {
         var services = new ServiceCollection();
         services.AddSingleton(Options.Create(new ModelOptions()));
         services.AddMimirModelClients();
-        return services.BuildServiceProvider();
+        return services;
     }
 }

@@ -2,6 +2,7 @@
 paths:
   - "src/Mimir.Cli/**"
   - "src/Mimir.Contracts/**"
+  - "src/Mimir.Server/Recall/BriefTripwire.cs"
 ---
 
 # CLI: the host companion, and the contracts it shares

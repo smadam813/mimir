@@ -64,14 +64,7 @@ public class HookCommandTests
         var handler = new RecordingHandler("{}");
         // An explicit JSON null, not an absent property: the property read succeeds and hands
         // back a null string, which is the arm a missing property never reaches.
-        var stdin = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["session_id"] = null,
-            ["cwd"] = Environment.CurrentDirectory,
-            ["hook_event_name"] = "whatever-fired",
-        });
-
-        var output = await RunAsync(handler, "SessionStart", stdin);
+        var output = await RunAsync(handler, "SessionStart", Stdin(sessionId: null));
 
         output.ShouldBeEmpty();
         handler.Path.ShouldBeNull("nothing to attach an Episode to means nothing is relayed");
@@ -189,11 +182,11 @@ public class HookCommandTests
     }
 
     /// <summary>A realistic Claude Code hook stdin document.</summary>
-    private static string Stdin(string? cwd = null, string? prompt = null)
+    private static string Stdin(string? cwd = null, string? prompt = null, string? sessionId = "sess-123")
     {
         var fields = new Dictionary<string, object?>
         {
-            ["session_id"] = "sess-123",
+            ["session_id"] = sessionId,
             ["transcript_path"] = @"C:\Users\someone\.claude\projects\x\sess-123.jsonl",
             ["cwd"] = cwd ?? Environment.CurrentDirectory,
             ["hook_event_name"] = "whatever-fired",

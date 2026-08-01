@@ -173,8 +173,8 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         var stranger = new Project
         {
             Id = Guid.CreateVersion7(),
-            Identity = "github.com/test/never-seeded",
-            RootPaths = [@"C:\git\never-seeded"],
+            Identity = Identity("never-seeded"),
+            RootPaths = [Root("C", "never-seeded")],
             DisplayName = "never-seeded",
         };
 

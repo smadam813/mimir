@@ -33,7 +33,7 @@ public sealed class McpProjectsTests(ThrowawayDatabaseFixture fixture) : Postgre
         var before = await FromDb(db => db.Projects.CountAsync(Token));
 
         var found = await new McpProjects(Context).FindRequesterAsync(
-            "github.com/test/never-seeded", @"C:\git\never-seeded", Token);
+            Identity("never-seeded"), Root("C", "never-seeded"), Token);
 
         found.ShouldBeNull();
         (await FromDb(db => db.Projects.CountAsync(Token)))

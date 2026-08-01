@@ -126,11 +126,18 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
     public async Task ACancellationThatIsNotTheShutdowns_DegradesTheTile_AndTheLoopKeepsScanning()
     {
         WriteMemoryFile("MEMORY.md", "scanned fine, cancelled mid-embed");
-        var embeddings = new CancelOnceEmbeddings(Embeddings);
+        var embeds = 0;
+        Embeddings.OnGenerate = _ =>
+        {
+            if (Interlocked.Increment(ref embeds) == 1)
+            {
+                throw new OperationCanceledException("the query timed out");
+            }
+        };
 
         // A query timeout surfaces as an OperationCanceledException with nobody's shutdown behind
         // it. That is a failed scan to degrade and retry, not a reason to tear the host down.
-        await StartServiceAsync(embeddings);
+        await StartServiceAsync();
         await TileAsync(t => t.State == HealthTileState.Degraded);
 
         Clock.Advance(TimeSpan.FromSeconds(1));
@@ -140,25 +147,32 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         recovered.LastScanAt.ShouldBe(Clock.GetUtcNow(), "the loop was still alive to rescan");
     }
 
-    /// <summary>Cancels the first embedding call out of nowhere, then behaves.</summary>
-    private sealed class CancelOnceEmbeddings(IEmbeddingGenerator<string, Embedding<float>> inner)
-        : IEmbeddingGenerator<string, Embedding<float>>
+    [Fact]
+    public async Task TheHostsOwnShutdown_EndsTheLoopWithoutDegradingTheTile()
     {
-        private int _calls;
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Interlocked.Increment(ref _calls) == 1
-                ? throw new OperationCanceledException("the query timed out")
-                : inner.GenerateAsync(values, options, cancellationToken);
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
+        WriteMemoryFile("MEMORY.md", "scanned, then the host went down mid-embed");
+        var scanning = new TaskCompletionSource();
+        var stopping = new TaskCompletionSource();
+        Embeddings.OnGenerate = _ =>
         {
-        }
+            scanning.TrySetResult();
+            stopping.Task.Wait(Patience);
+            throw new OperationCanceledException("the host is going down");
+        };
+
+        await StartServiceAsync();
+        await scanning.Task.WaitAsync(Patience, Token);
+
+        // StopAsync cancels the stopping token before it awaits, so releasing the scan here makes
+        // its cancellation a genuine shutdown — the one OperationCanceledException ScanAsync's
+        // filter must let past, for ExecuteAsync's filter to catch. The two are inverses, and
+        // this is the half that pins the coupling: weaken either and the tile degrades.
+        var stopped = _service!.StopAsync(CancellationToken.None);
+        stopping.TrySetResult();
+        await stopped;
+
+        _health.Current.Harvester.State.ShouldNotBe(
+            HealthTileState.Degraded, "a shutdown is not a failed scan to report and retry");
     }
 
     private sealed class ThrowingEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
