@@ -346,6 +346,24 @@ public sealed class EpisodeDisplayTests
             .ShouldContain(EpisodeDisplay.SealPhrase(sealReason: null));
     }
 
+    /// <summary>
+    /// All four mappings, not just the one another suite happened to reach: the words are
+    /// CONTEXT.md's own, from the Event entry, and a curator reading a Wisdom's Provenance is told
+    /// what a moment was rather than what a hook is called.
+    /// </summary>
+    [Fact]
+    public void EveryEventType_IsNamedInWords_NeverByItsHook()
+    {
+        EpisodeDisplay.EventWord(EventType.UserPromptSubmit).ShouldBe("a prompt");
+        EpisodeDisplay.EventWord(EventType.PostToolUse).ShouldBe("tool activity");
+        EpisodeDisplay.EventWord(EventType.Stop).ShouldBe("an assistant message");
+        EpisodeDisplay.EventWord(EventType.Remember).ShouldBe("a deliberate save");
+
+        // The mapping's default arm answers "a deliberate save", so a fifth §3 Event type would
+        // be worded as one silently. Named here so adding one is a decision rather than a default.
+        Enum.GetValues<EventType>().Length.ShouldBe(4);
+    }
+
     private static readonly DateTimeOffset Sealed = new(2026, 7, 26, 14, 20, 0, TimeSpan.Zero);
 
     /// <summary>A Sealed summary; the one live case unseals it with a <c>with</c> expression.</summary>

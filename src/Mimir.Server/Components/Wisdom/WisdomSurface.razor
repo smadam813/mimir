@@ -410,7 +410,9 @@
     private string _draft = "";
     private (Guid Subject, string Text)? _failure;
 
-    private VersionChainView _chainView;
+    // Stated rather than left to the enum's declaration order: which view the chain opens on is
+    // not pinned anywhere — the render test switches views and asserts on the switch (#134).
+    private VersionChainView _chainView = VersionChainView.Changed;
 
     private IDisposable? _claim;
     private Debouncer? _debounce;

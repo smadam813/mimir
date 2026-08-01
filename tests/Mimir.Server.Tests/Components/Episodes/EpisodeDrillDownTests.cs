@@ -35,20 +35,20 @@ public class EpisodeDrillDownTests : RenderTestBase
         Distillation = DistillationState.Done,
     };
 
-    private static Event At(int seq) => new()
+    private static Event At(int seq, string? payload = null) => new()
     {
         Id = Guid.Parse($"55555555-5555-5555-5555-{seq:D12}"),
         EpisodeId = Session.Id,
         Seq = seq,
         Type = EventType.UserPromptSubmit,
         At = Now,
-        Payload = $$"""{"prompt":"event {{seq}}"}""",
+        Payload = payload ?? $$"""{"prompt":"event {{seq}}"}""",
         PayloadFullSize = 32,
     };
 
     private static Mimir.Server.Ui.EpisodeDetail Detail(
         int events, IReadOnlyList<EpisodeWisdom>? produced = null)
-        => new(Session, [.. Enumerable.Range(1, events).Select(At)], produced ?? []);
+        => new(Session, [.. Enumerable.Range(1, events).Select(seq => At(seq))], produced ?? []);
 
     private IRenderedComponent<EpisodeDrillDown> RenderAt(
         Mimir.Server.Ui.EpisodeDetail detail, string? fragment = null)
@@ -168,6 +168,26 @@ public class EpisodeDrillDownTests : RenderTestBase
 
         drill.FindAll("li.event-item").Select(e => e.Id)
             .ShouldBe([EpisodeDisplay.EventAnchorId(At(1).Id), EpisodeDisplay.EventAnchorId(At(2).Id)]);
+    }
+
+    /// <summary>
+    /// <see cref="EventPayload"/> serializes with <c>UnsafeRelaxedJsonEscaping</c> so the §4
+    /// truncation marker survives as written, which is only safe because the text lands in Blazor
+    /// render output and Blazor encodes for HTML itself. Nothing in the pure class can show that,
+    /// so the guarantee is pinned where it actually holds: a payload carrying markup renders as
+    /// text, not as an element. (#134)
+    /// </summary>
+    [Fact]
+    public void APayloadCarryingMarkup_RendersAsText_BecauseBlazorEncodesTheOutput()
+    {
+        const string markup = """{"prompt":"<script>alert('x')</script>"}""";
+
+        var drill = RenderAt(new Mimir.Server.Ui.EpisodeDetail(Session, [At(1, markup)], []));
+
+        var payload = drill.Find("pre.event-payload");
+        payload.QuerySelector("script").ShouldBeNull();
+        payload.TextContent.ShouldContain("<script>alert('x')</script>");
+        drill.Markup.ShouldContain("&lt;script&gt;");
     }
 
     /// <summary>
