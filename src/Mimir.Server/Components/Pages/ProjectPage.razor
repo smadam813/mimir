@@ -5,8 +5,6 @@
 @using Mimir.Server.Ui
 @inject ChassisBrowser Browser
 
-@* The full tab strip — with this Project's counts — is the layout's SurfaceTabStrip, above
-   @Body; this page renders only the selected tab's body (#89). *@
 <PageTitle>@(_project?.DisplayName ?? "Project") · Mimir</PageTitle>
 
 @if (_project is null)
@@ -17,11 +15,6 @@ else
 {
     <h1 class="sr-only">@_project.DisplayName</h1>
 
-    @* Wisdom left this switch with #91 and Episodes with #95 — each owns its own route now. What
-       is left here is Injections, plus the tabless /projects/{id} route and any unrecognised tab,
-       which land on Episodes the way they always have. Both cases draw the pane shape and own their
-       own scrolling, so both take the layout's flush body (#94, #96); the padded page this switch
-       was written around is gone. *@
     @switch (ActiveTab)
     {
         case "injections":
@@ -45,12 +38,6 @@ else
 
     private ProjectListItem? _project;
 
-    /// <summary>
-    /// Wisdom and Episodes are absent deliberately: <c>WisdomPage</c>'s and <c>EpisodePage</c>'s
-    /// literal segments outrank this page's <c>{Tab}</c> parameter, so neither ever reaches here
-    /// (#91, #95). The Episodes default remains, because the tabless route and an unrecognised tab
-    /// both still land here.
-    /// </summary>
     private string ActiveTab => Tab?.ToLowerInvariant() switch
     {
         "injections" => "injections",

@@ -3,11 +3,6 @@ using Mimir.Server.Configuration;
 
 namespace Mimir.Server.Distillation;
 
-/// <summary>
-/// Runs the <see cref="DistillationSweep"/> on boot and then every
-/// <see cref="DistillationOptions.SweepInterval"/> (§6: 6 h), poking the worker whenever a pass
-/// put anything back on the queue. A failed pass just waits for the next tick.
-/// </summary>
 internal sealed class DistillationSweepService(
     IServiceScopeFactory scopeFactory,
     IDistillationTrigger trigger,

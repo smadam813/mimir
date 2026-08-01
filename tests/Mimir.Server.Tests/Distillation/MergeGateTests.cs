@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mimir.Server.Distillation;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
+using Npgsql;
 
 namespace Mimir.Server.Tests.Distillation;
 
@@ -714,6 +715,106 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
         versions[1].Text.ShouldBe(editedText);
     }
 
+    [Fact]
+    public async Task ABatchEmbedsItsCandidatesBeforeTheLock_AndOnlyTheArbitersRewriteInsideIt()
+    {
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string existingText = "The deploy needs approval";
+        const string candidateText = "Deploys need an approval";
+        const string mergedText = "Every deploy needs an approval";
+        Embeddings.Map(existingText, TestVectors.Basis);
+        Embeddings.Map(candidateText, TestVectors.WithCosine(0.95));
+        Embeddings.Map(mergedText, TestVectors.WithCosine(0.95));
+        await AddWisdomAsync(project.Id, existingText, embedding: TestVectors.Basis);
+        Arbiter.Enqueue(new MergeRuling.Agreement(mergedText));
+
+        var embedded = new List<(string Text, bool GateLockFree)>();
+        Embeddings.OnGenerate = texts => embedded.Add((texts.Single(), GateLockIsFree()));
+
+        await AdmitAsync(new WisdomCandidate(
+            WisdomKind.Fact, project.Id, candidateText, HarvestedItemId: item.Id));
+
+        embedded.ShouldBe(
+            [(candidateText, true), (mergedText, false)],
+            "a candidate's text is known up front and embeds before the gate-wide lock is taken; "
+            + "the arbiter invents its rewrite mid-transaction, so that one embeds under the lock");
+    }
+
+    [Fact]
+    public async Task AnEditEmbedsBeforeTheLock()
+    {
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        const string text = "Approval is manual";
+        const string editedText = "Approval is manual, and always has been";
+        await AdmitAsync(new WisdomCandidate(WisdomKind.Fact, project.Id, text, HarvestedItemId: item.Id));
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+
+        var embedded = new List<(string Text, bool GateLockFree)>();
+        Embeddings.OnGenerate = texts => embedded.Add((texts.Single(), GateLockIsFree()));
+
+        await CreateMergeGate().EditAsync(wisdom.Id, editedText, Token);
+
+        embedded.ShouldBe(
+            [(editedText, true)],
+            "an edit's text is known up front too, so its model round-trip is not held against "
+            + "every background batch — one wasted embedding on a raced pre-check is the price");
+    }
+
+    [Fact]
+    public async Task AnEmbeddingBatchShorterThanItsCandidates_FailsBeforeTheLock_AndCommitsNothing()
+    {
+        var project = await AddProjectAsync();
+        var item = await AddHarvestedItemAsync(project.Id);
+        Embeddings.ShortBatch = true;
+
+        // Another batch holds the gate lock throughout: a count check made after the lock would
+        // queue behind it and trip the deadline instead, so this pins where the check sits, not
+        // just that it exists.
+        await using var holder = CreateContext();
+        await using var held = await holder.Database.BeginTransactionAsync(Token);
+        await holder.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({MergeGate.AdmissionLockKey})", Token);
+
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        giveUp.CancelAfter(TimeSpan.FromSeconds(10));
+        var failure = await Should.ThrowAsync<InvalidOperationException>(
+            CreateMergeGate().AdmitAllAsync(
+                [
+                    new WisdomCandidate(WisdomKind.Fact, project.Id, "first", HarvestedItemId: item.Id),
+                    new WisdomCandidate(WisdomKind.Fact, project.Id, "second", HarvestedItemId: item.Id),
+                ],
+                MarkConverted(item.Id),
+                giveUp.Token));
+
+        failure.Message.ShouldContain("1 vector(s) for 2 candidate(s)");
+
+        await held.RollbackAsync(Token);
+        (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(0);
+        (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == item.Id, Token)))
+            .ConvertedAt.ShouldBeNull(
+                "committing the marker over a silently truncated batch is a permanent loss: the "
+                + "caller's retry keys off that marker");
+    }
+
+    /// <summary>
+    /// Whether the gate's advisory lock is free right now, asked on a connection of its own. Fully
+    /// synchronous because <see cref="FakeEmbeddings.OnGenerate"/> is, and blocking on an async
+    /// call from there is how a test deadlocks rather than fails.
+    /// </summary>
+    private bool GateLockIsFree()
+    {
+        using var connection = new NpgsqlConnection(ConnectionString);
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = new NpgsqlCommand(
+            $"SELECT pg_try_advisory_xact_lock({MergeGate.AdmissionLockKey})", connection, transaction);
+        var free = (bool)command.ExecuteScalar()!;
+        transaction.Rollback();
+        return free;
+    }
+
     /// <summary>Polls pg_locks until some session waits on an advisory lock in this database.</summary>
     private Task WaitForAnAdvisoryLockWaiterAsync(CancellationToken cancellationToken)
         => PollUntilAnyAsync(
@@ -725,50 +826,6 @@ public sealed class MergeGateTests(ThrowawayDatabaseFixture fixture) : PostgresT
             """,
             "no session ever waited on the gate's advisory lock",
             cancellationToken);
-
-    /// <summary>
-    /// Polls until some other session on this database is blocked on one of the two locks an edit
-    /// can collide on. Wider than the advisory-only probe on purpose, and only where an edit is
-    /// the racer: an edit that skipped the gate's lock would block on the version chain's unique
-    /// index instead, so the mutation check goes red on that collision rather than timing out here
-    /// waiting for a lock the mutant never takes. Naming both rather than accepting any
-    /// <c>Lock</c> wait keeps an unrelated waiter — autovacuum, a stray backend — from releasing
-    /// the test early and leaving the serialization it is named for unexercised.
-    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
-    /// no database oid to filter this class's throwaway database by — and an unfiltered pg_locks
-    /// would see other classes' databases.
-    /// </summary>
-    private Task WaitForABlockedSessionAsync(CancellationToken cancellationToken)
-        => PollUntilAnyAsync(
-            """
-            SELECT count(*)::int AS "Value"
-            FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND wait_event_type = 'Lock'
-              AND wait_event IN ('advisory', 'transactionid')
-              AND pid <> pg_backend_pid()
-            """,
-            "no session ever blocked behind the batch holding the gate's lock",
-            cancellationToken);
-
-    /// <summary>Runs <paramref name="countingSql"/> every 25 ms until it counts something.</summary>
-    private async Task PollUntilAnyAsync(
-        string countingSql, string timeoutMessage, CancellationToken cancellationToken)
-    {
-        await using var context = CreateContext();
-        for (var attempt = 0; attempt < 400; attempt++)
-        {
-            var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
-            if (found > 0)
-            {
-                return;
-            }
-
-            await Task.Delay(25, cancellationToken);
-        }
-
-        throw new TimeoutException(timeoutMessage);
-    }
 
     /// <summary>
     /// One candidate as its own Admission batch — the gate owns the embedding, the transaction,

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
+using Mimir.Server.Health;
 using Mimir.Server.Modules;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
@@ -98,6 +99,88 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
+    /// Runs a race whose winner has to be uncommitted for the loser to collide with it: opens a
+    /// transaction, lets <paramref name="seedUncommittedWinner"/> write into it, starts
+    /// <paramref name="losing"/>, waits for it to block, then commits and answers with what the
+    /// loser resolved to. The winner's entities are the caller's locals, so a test asserts the
+    /// loser reached them by closure rather than by anything handed back here.
+    /// </summary>
+    private protected async Task<T> RaceAsync<T>(
+        Func<MimirDbContext, Task> seedUncommittedWinner, Func<Task<T>> losing)
+    {
+        await using var winner = CreateContext();
+        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
+        await seedUncommittedWinner(winner);
+
+        var racing = Task.Run(losing, Token);
+        await WaitForABlockedSessionAsync(Token, racing);
+        await transaction.CommitAsync(Token);
+        return await racing;
+    }
+
+    /// <summary>
+    /// Polls until some other session on this database is blocked on one of the two locks a racing
+    /// write can collide on. Both are named rather than accepting any <c>Lock</c> wait for two
+    /// reasons: an unrelated waiter — autovacuum, a stray backend — would otherwise release the
+    /// test early and leave the collision it is named for unexercised, and a mutant that skips a
+    /// lock usually still blocks on the unique index behind it, so the check goes red on that
+    /// collision instead of timing out here waiting for a lock it never takes.
+    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
+    /// no database oid to filter this class's throwaway database by — and an unfiltered
+    /// <c>pg_locks</c> would see other classes' databases (#70).
+    /// </summary>
+    /// <param name="racing">
+    /// The write expected to block, where the caller holds it. Observed on every poll so a racer
+    /// that faults, or that finishes without ever colliding, fails here with its own exception
+    /// instead of burning the whole budget and dying as an unexplained timeout. Omitted where the
+    /// racer is started after this call and there is no handle to pass.
+    /// </param>
+    private protected async Task WaitForABlockedSessionAsync(
+        CancellationToken cancellationToken, Task? racing = null)
+        => await PollUntilAnyAsync(
+            """
+            SELECT count(*)::int AS "Value"
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND wait_event IN ('advisory', 'transactionid')
+              AND pid <> pg_backend_pid()
+            """,
+            "no session ever blocked behind the uncommitted winner",
+            cancellationToken,
+            racing);
+
+    /// <summary>Runs <paramref name="countingSql"/> every 25 ms until it counts something.</summary>
+    private protected async Task PollUntilAnyAsync(
+        string countingSql,
+        string timeoutMessage,
+        CancellationToken cancellationToken,
+        Task? racing = null)
+    {
+        await using var context = CreateContext();
+        for (var attempt = 0; attempt < 400; attempt++)
+        {
+            if (racing is { IsCompleted: true })
+            {
+                await racing;
+                throw new InvalidOperationException(
+                    $"The racing write finished without ever blocking, so {timeoutMessage} — "
+                    + "the collision this test is named for did not happen.");
+            }
+
+            var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
+            if (found > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(25, cancellationToken);
+        }
+
+        throw new TimeoutException(timeoutMessage);
+    }
+
+    /// <summary>
     /// One seeded Episode read back through a separate context — the assertion counterpart to
     /// <see cref="AddEpisodeAsync"/>, and what every class asserting on Episode state was writing
     /// for itself.
@@ -120,6 +203,13 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Clock);
 
     /// <summary>
+    /// Storage's §7 universe keeper over the fixture's database — the ranking below, the Brief's
+    /// own graph, and a test asserting against the ambient universe itself all want the same one.
+    /// </summary>
+    private protected WisdomSearch CreateWisdomSearch(SearchOptions? search = null)
+        => new(Context, Options.Create(search ?? new SearchOptions()));
+
+    /// <summary>
     /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
     /// the four consumers that replay a query through it all want the same graph.
     /// </summary>
@@ -128,7 +218,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         => new(
             Context,
             Embeddings,
-            new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
+            CreateWisdomSearch(search),
             // Takes its own RecallOptions rather than always the defaults: the ranking reads the
             // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
             // overrides one for the service under test has to be able to hand the same instance
@@ -160,8 +250,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
     /// Registered on top of that is what a §8 surface actually takes, and every registration comes
     /// from the app's own composition rather than a copy of it: <c>AddMimirUi</c> for the four
-    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, and <c>CaptureModule</c> for the
-    /// Episode feed. The module is constructed and asked, not restated — its <c>AddServices</c>
+    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, <c>AddMimirHealth</c> for the
+    /// snapshot the header's pill and pull chip read, and <c>CaptureModule</c> for the Episode
+    /// feed. The module is constructed and asked, not restated — its <c>AddServices</c>
     /// ignores the configuration it takes and its two other registrations are inert here, which is
     /// a small price for a line that cannot drift the day Capture decorates the feed or changes its
     /// lifetime. That drift is the class this tier exists to close (#94/#108), so the harness must
@@ -191,6 +282,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         var context = new BunitContext();
         AddThrowawayStorage(context.Services);
         context.Services.AddMimirUi();
+        context.Services.AddMimirHealth();
         new CaptureModule().AddServices(context.Services, new ConfigurationBuilder().Build());
         context.Services.AddSingleton<TimeProvider>(Clock);
         context.Services.AddSingleton(CreateMergeGate());
@@ -198,6 +290,31 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         _renderContexts.Add(context);
         return context;
     }
+
+    /// <summary>
+    /// The same renderer, with one of its own services handed back beside it — the circuit-scoped
+    /// <c>SurfaceSearch</c> a surface claims through, or the <c>NavigationManager</c> a route-aware
+    /// component reads. Resolved from the renderer rather than constructed, because the whole point
+    /// of this tier is that the test drives the same instance the component was injected with.
+    /// </summary>
+    private protected BunitContext CreateRenderContext<TService>(out TService service)
+        where TService : notnull
+    {
+        var context = CreateRenderContext();
+        service = context.Services.GetRequiredService<TService>();
+        return context;
+    }
+
+    /// <summary>
+    /// A §3.1 remote identity, unique per call — for the resolver tests, which hand identities and
+    /// roots in by hand rather than through <see cref="AddProjectAsync"/> because what they are
+    /// pinning is how two of them resolve against each other.
+    /// </summary>
+    private protected static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
+
+    /// <inheritdoc cref="Identity"/>
+    private protected static string Root(string drive, string name)
+        => $@"{drive}:\git\{name}-{Guid.NewGuid():N}";
 
     /// <summary>
     /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
@@ -216,6 +333,33 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         };
         Context.Projects.Add(project);
         await Context.SaveChangesAsync(Token);
+        return project;
+    }
+
+    /// <summary>
+    /// A Project at exactly the <paramref name="identity"/> and <paramref name="rootPaths"/> named,
+    /// for the resolver cases that turn on two rows sharing one root — which the minting overload
+    /// above cannot set up. Seeded on its own context so the row arrives untracked, the way a
+    /// rival written by another process does.
+    /// </summary>
+    /// <param name="displayName">
+    /// Only where a test reads it. It deliberately does not re-derive
+    /// <c>ProjectResolver.DisplayNameOf</c>: a fixture that hand-copies a production derivation
+    /// pins yesterday's version of it the first time it changes.
+    /// </param>
+    private protected async Task<Project> AddProjectAsync(
+        string identity, string[] rootPaths, string displayName = "seeded")
+    {
+        await using var seeding = CreateContext();
+        var project = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = identity,
+            RootPaths = rootPaths,
+            DisplayName = displayName,
+        };
+        seeding.Projects.Add(project);
+        await seeding.SaveChangesAsync(Token);
         return project;
     }
 
@@ -285,11 +429,12 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         int reinforcement = 1,
         DateTimeOffset? lastConfirmedAt = null,
         DateTimeOffset? contestedAt = null,
-        DateTimeOffset? retiredAt = null)
+        DateTimeOffset? retiredAt = null,
+        Guid? id = null)
     {
         var wisdom = new Wisdom
         {
-            Id = Guid.CreateVersion7(),
+            Id = id ?? Guid.CreateVersion7(),
             Kind = kind,
             ScopeProjectId = scopeProjectId,
             Text = text,

@@ -8,11 +8,6 @@ using Pgvector;
 
 namespace Mimir.Server.Distillation;
 
-/// <summary>
-/// One candidate at the gate: text with a kind, a scope, and where it came from. Harvested
-/// candidates carry a HarvestedItem; the Distiller's carry their Episode and provenance Event
-/// ids — plural, one Provenance row per Event (§6).
-/// </summary>
 internal sealed record WisdomCandidate(
     WisdomKind Kind,
     Guid ScopeProjectId,
@@ -21,38 +16,13 @@ internal sealed record WisdomCandidate(
     Guid? EpisodeId = null,
     IReadOnlyList<Guid>? EventIds = null);
 
-/// <summary>
-/// Why an edit would change nothing — <see cref="MergeGate.EditAsync"/>'s no-op set, exactly
-/// three and named so a caller can say which one it hit rather than infer it from a silent return.
-/// </summary>
 internal enum WisdomEditNoOp
 {
-    /// <summary>The draft is blank once trimmed.</summary>
     Blank,
-
-    /// <summary>No Wisdom answers to the id.</summary>
     Unknown,
-
-    /// <summary>The trimmed draft is what the Wisdom already says.</summary>
     Unchanged,
 }
 
-/// <summary>
-/// The Merge Gate (§6) — the single entry point to the Wisdom tier. Mechanically: embed,
-/// hybrid-search existing non-Retired Wisdom, insert on no match. On a match (cosine ≥ 0.80) the
-/// <see cref="IMergeArbiter"/> rules: agreement merges the pair into a rewrite (reinforcement+1,
-/// prior text versioned, cross-Project confirmation promoting to Global); contradiction
-/// adjudicates by Supersede or Scope-split, leaving the survivors Contested.
-/// </summary>
-/// <remarks>
-/// <see cref="AdmitAllAsync"/> and <see cref="EditAsync"/> are the whole interface, and each runs
-/// on a context of its own making, in its own transaction, under one gate-wide advisory lock — so
-/// ADR-0004's rule that nothing else writes Wisdom text is mechanism, and a caller supplies text
-/// and nothing else. Rollback is the dispose: a failure leaves no residue in the caller. §10's
-/// other curation writes — retire, unretire, delete — change a row's standing, not its words, and
-/// stay outside. Arbiter failures propagate rather than degrading to a mechanical merge; the
-/// caller's retry (the §5 marker, the §6 queue) redoes the Admission.
-/// </remarks>
 internal sealed class MergeGate(
     IDbContextFactory<MimirDbContext> contexts,
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
@@ -61,35 +31,14 @@ internal sealed class MergeGate(
     IOptions<DistillationOptions> options,
     TimeProvider clock)
 {
-    /// <summary>
-    /// The Merge Gate's advisory lock key — one gate-wide key ("mimir" in ASCII), taken with
-    /// <c>pg_advisory_xact_lock</c> as the first statement of every Admission batch's and every
-    /// edit's transaction, never nested, released by Postgres on commit or rollback.
-    /// </summary>
+    /// <summary>0x6D696D6972 is "mimir" in ASCII.</summary>
     internal const long AdmissionLockKey = 0x6D696D6972;
 
-    /// <summary>
-    /// One Admission batch (see CONTEXT.md): the gate embeds every candidate text in a single
-    /// round-trip, then admits the whole batch on its own context, in its own transaction,
-    /// serialized against every other batch — any caller, any process — by the advisory lock. All
-    /// or nothing: a failure anywhere rolls back every admission and the finalizer's writes and
-    /// propagates unchanged, so the caller's retry semantics (the §5 marker, the §6 queue) still
-    /// apply. The batch context is disposed either way, so a failed batch cannot reach into the
-    /// caller's own change tracker.
-    /// </summary>
-    /// <param name="finalizer">Runs inside the transaction, on the batch's context; what it writes
-    /// commits atomically with the admissions. Callers write their completion marker here — and,
-    /// written there, it leaves any copy of that row the caller tracks stale. Benign: nothing
-    /// writes those copies back.</param>
     public async Task AdmitAllAsync(
         IReadOnlyList<WisdomCandidate> candidates,
         Func<MimirDbContext, CancellationToken, Task>? finalizer,
         CancellationToken cancellationToken)
     {
-        // Embeddings depend only on the text, so the batch embeds before the transaction opens
-        // and holds the lock no longer than adjudication requires. Matched candidates still
-        // reach the model inside it — arbiter rulings and rewrite re-embeddings depend on what
-        // the search finds against staged rows.
         var vectors = candidates.Count == 0
             ? []
             : (await embeddings.GenerateAsync(
@@ -97,37 +46,22 @@ internal sealed class MergeGate(
                 .Select(e => new Vector(e.Vector))
                 .ToList();
 
-        // Zip below truncates to the shorter side: a generator returning a short batch would
-        // silently skip trailing candidates and still commit the marker — a permanent loss,
-        // since the caller's retry keys off that marker. Fail loudly instead, before the lock.
         if (vectors.Count != candidates.Count)
         {
             throw new InvalidOperationException(
                 $"the embedding batch returned {vectors.Count} vector(s) for {candidates.Count} candidate(s)");
         }
 
-        // The batch's own context, and a search bound to it, so an admission's search sees what
-        // earlier admissions of the same batch staged — the scoped WisdomSearch the recall lanes
-        // share runs on a connection this transaction is invisible to.
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
         var search = new WisdomSearch(db, searchOptions);
 
-        // Rollback is the dispose: nothing below is visible until the commit on the last line,
-        // and everything the batch tracked dies with the context.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // A batch that admits nothing has nothing to serialize — an Episode that yielded no
-        // candidates, a frontmatter-only file — and its finalizer only touches its own caller's
-        // row. Taking the gate-wide lock for that would make a Backfill's worth of sparse files
-        // contend with real batches, interactive saves included, for no convergence benefit.
         if (candidates.Count > 0)
         {
             await TakeAdmissionLockAsync(db, cancellationToken);
         }
 
-        // The save after each admission stays inside this transaction: a later candidate's
-        // search sees what earlier ones staged (§6's merge-gate-as-reduce), while nothing
-        // becomes visible outside unless the whole batch commits.
         foreach (var (candidate, embedding) in candidates.Zip(vectors))
         {
             await AdmitAsync(db, search, candidate, embedding, cancellationToken);
@@ -142,29 +76,11 @@ internal sealed class MergeGate(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// The §8.1 edit, through the gate because it rewrites a Wisdom's words: the new text becomes
-    /// current — re-embedded, appended to the chain as a <c>cause=edited</c> WisdomVersion — under
-    /// the same advisory lock an Admission batch takes, so an interactive edit and a background
-    /// rewrite cannot both claim the same version number. Reinforcement and recency are untouched:
-    /// an edit rewords, only an Admission confirms (§6). The no-op set is exactly three: blank
-    /// text, an id no Wisdom answers to, and text unchanged from what is current.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="Wisdom.RetiredAt"/> is deliberately not consulted, so a Retired Wisdom is not a
-    /// fourth no-op: Retire governs a row's standing and an edit governs its words, independently
-    /// (CONTEXT.md, Retire). A Retired Wisdom rewords like any other and stays Retired — so a
-    /// curator repairing something shelved never has to route the fix back through live recall,
-    /// which <c>unretire → edit → retire</c> would. Superseded losers are Retired rows like any
-    /// other and get no carve-out; a rewording leaves <see cref="Wisdom.SupersededBy"/> untouched.
-    /// </remarks>
     public async Task EditAsync(Guid wisdomId, string text, CancellationToken cancellationToken)
     {
         var trimmed = text.Trim();
 
-        // Blank is settled before the row is read, since it is the one arm that needs no row —
-        // hence the null current, which leaves the other two undecidable and is why only this
-        // arm is acted on here.
+        // current: null so that only the Blank arm can fire here.
         if (NoOpOf(trimmed, current: null) is WisdomEditNoOp.Blank)
         {
             return;
@@ -172,10 +88,6 @@ internal sealed class MergeGate(
 
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
 
-        // The edit form saves whatever is in the box, unchanged text included, so the no-op is
-        // the ordinary case rather than the exception. One unlocked SELECT settles it — cheaper
-        // than the model round-trip and the turn holding the gate-wide lock that discovering it
-        // below would cost. Advisory only: the read under the lock is what decides.
         var current = await db.Wisdom.AsNoTracking()
             .Where(w => w.Id == wisdomId)
             .Select(w => w.Text)
@@ -185,20 +97,13 @@ internal sealed class MergeGate(
             return;
         }
 
-        // Before the lock, like a batch's candidates: an edit's text is known up front, so its
-        // model round-trip need not be held against every background batch. (A batch's *rewrites*
-        // must embed inside the lock — the arbiter invents that text mid-transaction.) The price
-        // is one wasted embedding when the pre-check above was raced, paid locally.
         var embedding = await EmbedAsync(trimmed, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await TakeAdmissionLockAsync(db, cancellationToken);
 
-        // Read again under the lock: an edit that raced a batch would otherwise reword text the
-        // batch is in the middle of replacing, and number its version off a chain about to grow.
         var wisdom = await db.Wisdom.FirstOrDefaultAsync(w => w.Id == wisdomId, cancellationToken);
-        // The null arm is the compiler's, not the rule's: NoOpOf calls a missing row Unknown all
-        // the same, but RewriteAsync below takes a non-null one.
+        // The null arm is the compiler's, not the rule's: RewriteAsync takes a non-null row.
         if (wisdom is null || NoOpOf(trimmed, wisdom.Text) is not null)
         {
             return;
@@ -209,23 +114,6 @@ internal sealed class MergeGate(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Whether saving <paramref name="text"/> over <paramref name="current"/> would change nothing,
-    /// and which of <see cref="EditAsync"/>'s three no-ops it would be — null when the edit lands.
-    /// The one statement of that set, and the §8.1 screen reads it twice over:
-    /// <see cref="EditAsync"/> settles it here at each of its three decision points,
-    /// <c>WisdomDisplay.UnsavableReason</c> words the two a curator can see coming in front of the
-    /// Save button rather than after it, and <c>WisdomDisplay.WithPendingEdit</c> asks the same
-    /// question to decide whether the version chain grows a pending row — which is what keeps that
-    /// row and that button from disagreeing about whether there is an edit here at all. They
-    /// restated the set independently before, which is how the doc comment in #71 went stale.
-    /// </summary>
-    /// <param name="current">
-    /// What the Wisdom says now, as stored — <see langword="null"/> for an id no Wisdom answers to,
-    /// and for a caller that has not read the row yet, which can therefore only act on
-    /// <see cref="WisdomEditNoOp.Blank"/>. Deliberately compared untrimmed: only the edit path
-    /// trims what it writes, so a merged text carrying whitespace has an edit that would land.
-    /// </param>
     internal static WisdomEditNoOp? NoOpOf(string text, string? current) => text.Trim() switch
     {
         { Length: 0 } => WisdomEditNoOp.Blank,
@@ -234,19 +122,10 @@ internal sealed class MergeGate(
         _ => null,
     };
 
-    /// <summary>
-    /// Takes the gate-wide lock as the first statement of an already-open transaction. Both entry
-    /// points come through here so the key, the function, and its placement cannot drift apart in
-    /// one of them — the edit-vs-batch race is exactly what such a drift would reopen.
-    /// </summary>
     private static async Task TakeAdmissionLockAsync(MimirDbContext db, CancellationToken cancellationToken)
         => await db.Database.ExecuteSqlAsync(
             $"SELECT pg_advisory_xact_lock({AdmissionLockKey})", cancellationToken);
 
-    /// <summary>
-    /// One candidate's Admission, inside the batch's transaction and with the embedding the batch
-    /// already generated for it.
-    /// </summary>
     private async Task AdmitAsync(
         MimirDbContext db,
         WisdomSearch search,
@@ -256,8 +135,6 @@ internal sealed class MergeGate(
     {
         var hits = await search.SearchAsync(embedding, candidate.Text, cancellationToken);
 
-        // The §3 score-scale rule: the threshold reads the vector leg's best cosine, never the
-        // RRF-fused score. Rows only the FTS leg surfaced carry no cosine and cannot match.
         var best = hits.Where(h => h.Cosine is not null).MaxBy(h => h.Cosine);
         if (best is null || best.Cosine < options.Value.MergeMatchThreshold)
         {
@@ -276,8 +153,6 @@ internal sealed class MergeGate(
                     await SplitAsync(db, matched, candidate, split, cancellationToken);
                     break;
                 default:
-                    // Supersede — including a Scope-split ruled between two Global positions,
-                    // where no Project exists to scope the split's project side to (§6.4).
                     Supersede(db, matched, candidate, embedding);
                     break;
             }
@@ -289,7 +164,6 @@ internal sealed class MergeGate(
     private static bool ProjectInPlay(Wisdom matched, WisdomCandidate candidate)
         => matched.ScopeProjectId != Project.GlobalId || candidate.ScopeProjectId != Project.GlobalId;
 
-    /// <summary>§6.2 no match: new Wisdom at reinforcement 1, version 1, with its Provenance.</summary>
     private Wisdom Insert(
         MimirDbContext db, WisdomCandidate candidate, Vector embedding, WisdomVersionCause cause)
     {
@@ -322,11 +196,6 @@ internal sealed class MergeGate(
         return wisdom;
     }
 
-    /// <summary>
-    /// §6.3 agreement: reinforcement+1, <c>last_confirmed_at=now</c>, Provenance unioned, and the
-    /// arbiter's rewrite becomes the current text (re-embedded, prior text versioned,
-    /// <c>cause=merged</c>). Confirmation from a different Project promotes the scope to Global.
-    /// </summary>
     private async Task MergeAsync(
         MimirDbContext db,
         Wisdom wisdom,
@@ -337,9 +206,6 @@ internal sealed class MergeGate(
         wisdom.Reinforcement++;
         wisdom.LastConfirmedAt = clock.GetUtcNow();
 
-        // Promotion needs confirmation from a *different Project* (§6.3). A candidate proposing
-        // Global scope carries no origin Project at all, so it cannot vouch for cross-Project
-        // recurrence — only a candidate scoped to some other Project promotes.
         if (wisdom.ScopeProjectId != Project.GlobalId
             && candidate.ScopeProjectId != Project.GlobalId
             && candidate.ScopeProjectId != wisdom.ScopeProjectId)
@@ -350,8 +216,6 @@ internal sealed class MergeGate(
         await UnionProvenanceAsync(db, wisdom.Id, candidate, cancellationToken);
         if (mergedText != wisdom.Text)
         {
-            // The arbiter invented this text just now, so its embedding is the one round-trip the
-            // gate cannot hoist out of the lock — the accepted wait (§6).
             await RewriteAsync(
                 db,
                 wisdom,
@@ -362,10 +226,6 @@ internal sealed class MergeGate(
         }
     }
 
-    /// <summary>
-    /// §6.4 Supersede: the candidate is inserted as new Wisdom (Contested), and the loser is
-    /// Retired with the <c>superseded_by</c> link — its text and chain untouched.
-    /// </summary>
     private void Supersede(
         MimirDbContext db, Wisdom wisdom, WisdomCandidate candidate, Vector embedding)
     {
@@ -375,12 +235,6 @@ internal sealed class MergeGate(
         wisdom.RetiredAt = successor.LastConfirmedAt;
     }
 
-    /// <summary>
-    /// §6.4 Scope-split: the matched row keeps its own side of the split — a Global row stays
-    /// Global, a Project row keeps its Project — and a sibling takes the other side, scoped to the
-    /// candidate's Project when the sibling is the project side. Both rows carry the full
-    /// provenance union and both are Contested; neither counts the contradiction as confirmation.
-    /// </summary>
     private async Task SplitAsync(
         MimirDbContext db,
         Wisdom wisdom,
@@ -439,11 +293,6 @@ internal sealed class MergeGate(
         }
     }
 
-    /// <summary>
-    /// The one keeper of a rewrite: the new text becomes current, with its embedding, appended to
-    /// the version chain. Every path that changes a Wisdom's words comes through here, holding the
-    /// advisory lock, so the <c>(wisdom_id, version)</c> chain only ever has one writer.
-    /// </summary>
     private async Task RewriteAsync(
         MimirDbContext db,
         Wisdom wisdom,
@@ -455,8 +304,6 @@ internal sealed class MergeGate(
         wisdom.Text = text;
         wisdom.Embedding = embedding;
 
-        // Version rows of a matched Wisdom are always flushed (the gate saves per admission),
-        // so the max is authoritative on this connection.
         var latest = await db.WisdomVersions
             .Where(v => v.WisdomId == wisdom.Id)
             .MaxAsync(v => (int?)v.Version, cancellationToken) ?? 0;
@@ -473,11 +320,6 @@ internal sealed class MergeGate(
     private async Task<Vector> EmbedAsync(string text, CancellationToken cancellationToken)
         => new(await embeddings.GenerateVectorAsync(text, cancellationToken: cancellationToken));
 
-    /// <summary>
-    /// Union semantics (§6): a link already recorded is not recorded again. Earlier candidates'
-    /// rows are always flushed (the gate saves per admission), so the database check sees them —
-    /// two sections of one HarvestedItem merging into one Wisdom is one provenance.
-    /// </summary>
     private static async Task UnionProvenanceAsync(
         MimirDbContext db, Guid wisdomId, WisdomCandidate candidate, CancellationToken cancellationToken)
     {
@@ -497,11 +339,6 @@ internal sealed class MergeGate(
 
     private readonly record struct ProvenanceLink(Guid? EpisodeId, Guid? EventId, Guid? HarvestedItemId);
 
-    /// <summary>
-    /// One Provenance row per provenance Event (§6); no Events means one row. A candidate carrying
-    /// nothing at all — a <c>mimir_remember</c> with no live Episode (§7.1) — yields no rows: born
-    /// with the "orphaned provenance" the UI already flags, never an all-null link.
-    /// </summary>
     private static IEnumerable<ProvenanceLink> LinksOf(WisdomCandidate candidate)
         => candidate.EventIds is { Count: > 0 }
             ? candidate.EventIds.Distinct()

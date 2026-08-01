@@ -3,13 +3,6 @@ using Mimir.Server.Health;
 
 namespace Mimir.Server.Distillation;
 
-/// <summary>
-/// The §6 single worker and sole owner of the Distillation tile: wakes on a Seal's trigger (or
-/// the idle poll, which is what makes the DB-state queue survive restarts and missed pokes),
-/// drains the queue one Episode at a time, and reports depth + last run live. A failed Episode
-/// degrades the tile and the loop backs off briefly before trying the next queue entry — the
-/// failure is parked as <c>failed</c> for the sweep, never retried hot.
-/// </summary>
 internal sealed class DistillerService(
     IServiceScopeFactory scopeFactory,
     IDistillationTrigger trigger,
@@ -33,7 +26,7 @@ internal sealed class DistillerService(
                 var wait = await WorkAsync(stoppingToken);
                 if (wait is null)
                 {
-                    continue; // Something distilled — drain on without waiting.
+                    continue;
                 }
 
                 using var tickCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -42,12 +35,12 @@ internal sealed class DistillerService(
                 if (woken == triggered)
                 {
                     triggered = trigger.WaitAsync(stoppingToken);
-                    // The trigger won; release the pending timer now instead of leaving one
-                    // abandoned Task.Delay alive per Seal until it lapses.
+                    // Not redundant with the using: this releases the timer now rather than one
+                    // Task.Delay later, so a Seal burst leaves none of them alive.
                     tickCancellation.Cancel();
                 }
 
-                await woken; // Rethrows the shutdown cancellation; a lapsed timer yields nothing.
+                await woken;
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -56,7 +49,6 @@ internal sealed class DistillerService(
         }
     }
 
-    /// <returns>How long to wait before the next look, or null to look again immediately.</returns>
     private async Task<TimeSpan?> WorkAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -93,8 +85,6 @@ internal sealed class DistillerService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Only a shutdown cancellation may escape and stop the loop (the Harvester's rule).
-            // Anything else — Postgres still migrating, say — degrades the tile and retries soon.
             logger.LogWarning(ex, "Distillation pass failed; retrying in {RetryInterval}", FailureRetryInterval);
             UpdateTile(HealthTileState.Degraded, ex.Message, depth: null);
             return FailureRetryInterval;
@@ -104,7 +94,6 @@ internal sealed class DistillerService(
     private static string Describe(int depth)
         => depth == 0 ? "queue empty" : $"{depth} queued";
 
-    /// <summary>Null figures keep the tile's last known ones — same contract as the Harvester.</summary>
     private void UpdateTile(HealthTileState state, string summary, int? depth, DateTimeOffset? lastRunAt = null)
         => health.Update(snapshot => snapshot with
         {

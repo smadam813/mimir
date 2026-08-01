@@ -14,8 +14,6 @@
 </head>
 
 <body>
-    @* Spec §8: the whole UI is Interactive Server — the SignalR circuit is what pushes live
-       health, unsealed episodes and queue depth without polling. *@
     <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>

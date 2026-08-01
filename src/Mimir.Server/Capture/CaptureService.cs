@@ -9,11 +9,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Capture;
 
-/// <summary>
-/// Spec §4: creates or resumes the Episode from the session id and the CLI-resolved Project, and
-/// appends Events in arrival order. Capture is dumb (ADR-0003): no judgment, no models — the only
-/// transformations are the §4 payload truncation and the Seal on SessionEnd.
-/// </summary>
 internal sealed class CaptureService(
     MimirDbContext db,
     ProjectResolver projects,
@@ -31,10 +26,6 @@ internal sealed class CaptureService(
         => await AppendEventAsync(
             await GetOrCreateEpisodeAsync(request, cancellationToken), request, type, cancellationToken);
 
-    /// <summary>
-    /// Append to an Episode the caller already resolved — the §4 single round-trip resolves once
-    /// and shares it between capture and recall rather than looking it up twice on the 500 ms path.
-    /// </summary>
     public async Task<Event> AppendEventAsync(
         Episode episode,
         HookEventRequest request,
@@ -45,11 +36,6 @@ internal sealed class CaptureService(
         return await AppendAsync(episode, truncated.Json, truncated.FullSizeBytes, type, cancellationToken);
     }
 
-    /// <summary>
-    /// Append a server-composed payload untouched — the <c>mimir_remember</c> lane (§7.1), whose
-    /// payload the server itself just built. Truncation is a hook-surface concern (§4, untrusted
-    /// tool output of any size); a deliberate save is never dropped, nor clipped.
-    /// </summary>
     public async Task<Event> AppendVerbatimEventAsync(
         Episode episode,
         JsonElement payload,
@@ -94,35 +80,22 @@ internal sealed class CaptureService(
             }
             catch (DbUpdateException ex) when (ex.IsUniqueViolation() && attempt < DbRaces.SeqRaceMaxAttempts)
             {
-                // Lost the per-Episode seq race to a concurrent hook; take the next slot.
                 db.Entry(evt).State = EntityState.Detached;
             }
         }
     }
 
-    /// <summary>
-    /// Seals the Episode with the hook-reported reason (§4). Session end is not an Event; a
-    /// duplicate SessionEnd changes nothing — the first Seal is the session's real end.
-    /// </summary>
     public async Task SealEpisodeAsync(HookEventRequest request, CancellationToken cancellationToken)
     {
         var episode = await GetOrCreateEpisodeAsync(request, cancellationToken);
         if (episode.SealedAt is not null)
         {
-            // A Seal is never unset, so a tracked sealed instance is always truthful; a stale
-            // unsealed one falls through to the guarded update, which is safe either way.
             return;
         }
 
         var sealedAt = clock.GetUtcNow();
         var reason = request.Payload.StringProperty("reason");
 
-        // The WHERE guard is first-seal-wins made atomic: a duplicate that lost the race updates
-        // zero rows instead of overwriting the session's real end.
-        // §6: Sealing is what enqueues, and it sets distillation=pending to say so. Creation
-        // already starts there (the §3 state set has no earlier value), so this restate matters
-        // only to readers of the spec and this code — DistillationQueue names it as one of the
-        // two deliberate queue writes living outside it.
         var sealedRows = await db.Episodes
             .Where(e => e.Id == episode.Id && e.SealedAt == null)
             .ExecuteUpdateAsync(
@@ -171,9 +144,6 @@ internal sealed class CaptureService(
             catch (DbUpdateException ex) when (
                 (ex.IsUniqueViolation() || ex.IsForeignKeyViolation()) && attempt < DbRaces.CreateRaceMaxAttempts)
             {
-                // Unique violation: lost the unique-session race to a concurrent hook — resume the
-                // winner's Episode. FK violation: a concurrent clone merge (#17) deleted the
-                // resolved Project between resolve and insert — re-resolve; it finds the survivor.
                 db.Entry(episode).State = EntityState.Detached;
             }
         }

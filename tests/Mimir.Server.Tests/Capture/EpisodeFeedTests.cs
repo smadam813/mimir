@@ -52,4 +52,16 @@ public sealed class EpisodeFeedTests
 
         received.ShouldBe([Change]);
     }
+
+    [Fact]
+    public void AnEpisodeChange_CarriesIdentitiesAndNothingElse()
+    {
+        // §8.2's live list re-queries on every notification, and this is the whole reason it can:
+        // the message names what changed and the database stays the single source of truth for
+        // what it changed to. Carry entity state here — a seal flag, an Event count — and a
+        // circuit can render it instead of re-querying, which races the writes still in flight.
+        typeof(EpisodeChange).GetProperties()
+            .Select(property => (property.Name, property.PropertyType))
+            .ShouldBe([("ProjectId", typeof(Guid)), ("EpisodeId", typeof(Guid))], ignoreOrder: true);
+    }
 }

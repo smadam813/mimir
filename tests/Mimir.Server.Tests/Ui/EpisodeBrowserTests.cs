@@ -154,6 +154,26 @@ public sealed class EpisodeBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         fragment.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// The search runs over the Event stream and nothing else. A curator scanning for a cwd or a
+    /// session id has the list itself, where both are on every row — so searching the metadata
+    /// would only ever narrow the list by something already in front of them.
+    /// </summary>
+    [Fact]
+    public async Task Searching_ReachesTheEventStreamAlone_NeverTheEpisodesOwnMetadata()
+    {
+        var project = await AddProjectAsync("metadata");
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddEventAsync(episode.Id, seq: 1, payload: """{"prompt":"the interceptor is firing"}""");
+
+        var byCwd = await Browser().ListEpisodesAsync(project.Id, "mimir-tests", Token);
+        var bySession = await Browser().ListEpisodesAsync(project.Id, episode.SessionId, Token);
+
+        episode.Cwd.ShouldContain("mimir-tests");
+        byCwd.ShouldBeEmpty();
+        bySession.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task AnEpisodeWithNoEvents_IsSearchedAway_ButListedWhenNothingIsTyped()
     {

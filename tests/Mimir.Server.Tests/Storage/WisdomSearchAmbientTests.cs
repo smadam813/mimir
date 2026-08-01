@@ -72,8 +72,27 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
             [projectScoped.Id, global.Id], ignoreOrder: true);
     }
 
+    [Fact]
+    public async Task TheQuerylessListing_IsUnlimited_HoweverSmallTheSearchLegsCapIs()
+    {
+        var project = await AddProjectAsync("unbounded");
+        var universe = new List<Guid>();
+        for (var row = 0; row < 5; row++)
+        {
+            universe.Add((await AddWisdomAsync(project.Id, $"ibex number {row}")).Id);
+        }
+
+        var ids = await Search(perLegTopN: 2).ListAmbientAsync(project.Id, Token);
+
+        ids.ShouldBe(
+            universe,
+            ignoreOrder: true,
+            "the lanes with no query rank the whole universe themselves, so a cap here could only "
+            + "truncate arbitrarily — brief_score is not computable in this query (#72)");
+    }
+
     private WisdomSearch Search(int perLegTopN = 50)
-        => new(Context, Options.Create(new SearchOptions { PerLegTopN = perLegTopN }));
+        => CreateWisdomSearch(new SearchOptions { PerLegTopN = perLegTopN });
 
     private async Task<Guid> AddEventProvenanceAsync(Guid wisdomId, Guid projectId)
     {

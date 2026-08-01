@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
@@ -71,6 +72,31 @@ public class EpisodeDistillerTests
         user.TrimEnd().ShouldEndWith("/no_think");
         options.ShouldNotBeNull().Temperature.ShouldBe(0);
         options.AdditionalProperties!["num_ctx"].ShouldBe(16384);
+    }
+
+    [Fact]
+    public async Task TheCall_CarriesTheCandidatesSchema_AsTheGenerationConstraint()
+    {
+        _chat.Reply("""{"candidates":[]}""");
+
+        await DistillAsync(NewEvent(1, EventType.PostToolUse, """{"tool_name":"Bash"}"""));
+
+        var format = _chat.Calls.ShouldHaveSingleItem().Options
+            .ShouldNotBeNull().ResponseFormat
+            .ShouldBeOfType<ChatResponseFormatJson>();
+        format.SchemaName.ShouldBe("wisdom_candidates");
+        var item = format.Schema.ShouldNotBeNull()
+            .GetProperty("properties").GetProperty("candidates").GetProperty("items");
+        Names(item.GetProperty("properties").GetProperty("kind").GetProperty("enum")).ShouldBe(
+            [.. Enum.GetNames<WisdomKind>().Select(k => k.ToLowerInvariant())],
+            "the kinds are enforced while decoding, so a new §3 kind the model may propose is one "
+            + "the domain has");
+        Names(item.GetProperty("properties").GetProperty("scope").GetProperty("enum"))
+            .ShouldBe(["global", "project"]);
+        Names(item.GetProperty("required")).ShouldBe(["kind", "scope", "text", "events"]);
+
+        static string?[] Names(JsonElement array)
+            => [.. array.EnumerateArray().Select(e => e.GetString())];
     }
 
     [Fact]
