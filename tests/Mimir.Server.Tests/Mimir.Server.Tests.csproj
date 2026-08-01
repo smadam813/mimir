@@ -11,6 +11,9 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="bunit" />
+    <!-- Lifts bUnit's transitive AngleSharp past GHSA-pgww-w46g-26qg; see Directory.Packages.props. -->
+    <PackageReference Include="AngleSharp" />
   </ItemGroup>
 
   <ItemGroup>

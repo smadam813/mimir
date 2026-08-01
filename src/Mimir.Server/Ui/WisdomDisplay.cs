@@ -54,9 +54,9 @@ public sealed record CauseGloss(string Word, string Meaning);
 ///
 /// Pure by construction, and deliberately so — a pin that needs Postgres to run is a pin that skips
 /// on the machine where the mistake is being made (the prior art is <see cref="InjectionDisplay"/>
-/// and the recall module's own builders). It is also the only place a rule in this surface can be
-/// pinned at all: nothing renders a component in this suite, so an <c>@code</c> block's wording is
-/// wording nothing can hold to.
+/// and the recall module's own builders). bUnit renders components here now, but only as the
+/// ladder's last rung (#130): wording is a rule about what is *computed*, so it stays on this side
+/// of the seam and a render test's job is at most that the markup asks for it.
 /// </summary>
 public static class WisdomDisplay
 {
@@ -94,8 +94,8 @@ public static class WisdomDisplay
     /// <summary>
     /// What Save will do, in the curator's words beside the button that does it (§8.1's own
     /// criterion). It states <see cref="Distillation.MergeGate.EditAsync"/>'s mechanics, so it
-    /// lives here where a test can hold it to them rather than in markup nothing renders in this
-    /// suite: change the gate's version numbering, its cause, or what it leaves Reinforcement and
+    /// lives here where a test can hold it to them rather than in an <c>@code</c> block a renderer
+    /// could only quote: change the gate's version numbering, its cause, or what it leaves Reinforcement and
     /// recency doing, and this sentence is the other place to change.
     /// </summary>
     public static string EditExplanation(int nextVersion, int reinforcement)

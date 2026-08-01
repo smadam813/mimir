@@ -1,13 +1,16 @@
+using Bunit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
 using Mimir.Server.Storage.Entities;
 using Mimir.Server.Tests.Distillation;
+using Mimir.Server.Ui;
 using Pgvector;
 
 namespace Mimir.Server.Tests;
@@ -35,6 +38,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
 
     private MimirDbContext? _context;
 
+    /// <summary>Every renderer <see cref="CreateRenderContext"/> handed out, torn down with the class.</summary>
+    private readonly List<BunitContext> _renderContexts = [];
+
     /// <summary>The deterministic stand-in for qwen3-embedding; see <see cref="TestVectors"/>.</summary>
     private protected FakeEmbeddings Embeddings { get; } = new();
 
@@ -48,7 +54,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected FakeTimeProvider Clock { get; } = new(Now);
 
     /// <summary>The ambient test cancellation token.</summary>
-    private protected static CancellationToken Token => TestContext.Current.CancellationToken;
+    private protected static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
     /// <summary>
     /// The test's own long-lived context on the throwaway database — the one a SUT taking a scoped
@@ -142,6 +148,46 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             options.UseNpgsql(connectionString, npgsql => npgsql.UseVector());
         services.AddDbContextFactory<MimirDbContext>(Configure);
         services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+    }
+
+    /// <summary>
+    /// A bUnit renderer over this test's throwaway database — the Postgres render tier (#130). A
+    /// §8 surface injects the <c>Ui/</c> browsers, so pinning what it renders means seeding rows,
+    /// and this is where the two halves meet: the seeders and the per-test truncation are the
+    /// class's own, and <see cref="AddThrowawayStorage"/> registers storage the way
+    /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
+    /// Registered on top of that is what a §8 surface actually takes: the browsers and the
+    /// header's per-circuit <c>SurfaceSearch</c> from the real <c>AddMimirUi</c>, so a
+    /// registration this harness invented could never diverge from the app's, plus the Episode
+    /// feed — the one line restated from <c>CaptureModule</c> rather than reused, since a module's
+    /// registrations and its HTTP surface come as one — and logging for the debouncers.
+    /// <para>
+    /// This class's fakes are deliberately <em>not</em> here. Nothing a surface injects takes one:
+    /// the browsers read Postgres and no more, so registering an embedder or an arbiter a surface
+    /// never resolves would be scaffolding for a caller that does not exist. A surface that does
+    /// need one adds it to the returned context's <c>Services</c> before the first render — which
+    /// is also how anything else missing arrives.
+    /// </para>
+    /// <para>
+    /// Disposed with the test class. Skips when no Postgres is reachable, like every other member
+    /// here — a component whose whole behaviour arrives through its parameters wants
+    /// <c>RenderTestBase</c>'s disconnected tier instead, so its pins still run on a machine
+    /// without Docker.
+    /// </para>
+    /// </summary>
+    private protected BunitContext CreateRenderContext()
+    {
+        // Before the context exists: this reads ConnectionString, and skipping out of a
+        // half-constructed renderer would leave it unregistered for disposal.
+        SkipIfUnavailable();
+
+        var context = new BunitContext();
+        AddThrowawayStorage(context.Services);
+        context.Services.AddMimirUi();
+        context.Services.AddSingleton<IEpisodeFeed, EpisodeFeed>();
+        context.Services.AddLogging();
+        _renderContexts.Add(context);
+        return context;
     }
 
     /// <summary>
@@ -377,6 +423,11 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
 
     public virtual async ValueTask DisposeAsync()
     {
+        foreach (var render in _renderContexts)
+        {
+            render.Dispose();
+        }
+
         if (_context is not null)
         {
             await _context.DisposeAsync();

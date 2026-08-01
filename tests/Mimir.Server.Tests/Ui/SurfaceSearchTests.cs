@@ -94,7 +94,8 @@ public sealed class SurfaceSearchTests
     /// stale-and-inert. Disposing it afterwards would hand the box back out from under the claim
     /// that replaced it, leaving the header disabled over a surface still on screen — which is why
     /// a surface re-claiming for itself releases first (#94, #108). This pins the mechanic and not
-    /// the ordering: with no bUnit, a surface that reverses the two goes uncaught here.
+    /// the ordering — a surface that reverses the two is caught where it renders, which for the
+    /// Episode list is <c>EpisodeListTests</c> and for the other two ported surfaces is nowhere yet.
     /// </summary>
     [Fact]
     public void AnEarlierTokenFromTheSameHolder_StillReleases_SoASurfaceReleasesBeforeReClaiming()
