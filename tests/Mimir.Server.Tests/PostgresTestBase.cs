@@ -120,6 +120,13 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Clock);
 
     /// <summary>
+    /// Storage's §7 universe keeper over the fixture's database — both the ranking below and a
+    /// test asserting against the ambient universe itself want the same one.
+    /// </summary>
+    private protected WisdomSearch CreateWisdomSearch(SearchOptions? search = null)
+        => new(Context, Options.Create(search ?? new SearchOptions()));
+
+    /// <summary>
     /// The §7 query ranking over the fixture's database, the fake embedder and the base clock —
     /// the four consumers that replay a query through it all want the same graph.
     /// </summary>
@@ -128,7 +135,7 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         => new(
             Context,
             Embeddings,
-            new WisdomSearch(Context, Options.Create(search ?? new SearchOptions())),
+            CreateWisdomSearch(search),
             // Takes its own RecallOptions rather than always the defaults: the ranking reads the
             // scoring knobs (AffinityBoost, SalienceBoost, RecencyHalfLifeDays), so a caller that
             // overrides one for the service under test has to be able to hand the same instance

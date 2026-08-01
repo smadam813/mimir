@@ -271,6 +271,58 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
     }
 
     /// <summary>
+    /// A Provenance row naming an Event and no Episode still opens an Episode: the side is
+    /// backfilled from the Event's own. Seeded with <c>episode_id</c> null, which is the shape the
+    /// gate writes when a candidate names Events alone.
+    /// </summary>
+    [Fact]
+    public async Task AnEventOnlyProvenance_BackfillsItsEpisode_FromTheEventItself()
+    {
+        var project = await AddProjectAsync("backfilled");
+        var episode = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-3));
+        var evt = await AddEventAsync(episode.Id, seq: 1, at: Now.AddHours(-2));
+        var wisdom = await AddWisdomAsync(project.Id, "drawn from one Event");
+        await AddProvenanceAsync(wisdom.Id, episodeId: null, eventId: evt.Id);
+
+        var detail = await Browser().GetAsync(wisdom.Id, Token);
+
+        var link = detail.ShouldNotBeNull().Provenance.ShouldHaveSingleItem();
+        link.EpisodeId.ShouldBe(episode.Id);
+        link.EpisodeCwd.ShouldBe(episode.Cwd);
+        link.EpisodeStartedAt.ShouldBe(Now.AddHours(-3));
+    }
+
+    /// <summary>
+    /// The §8 universe is deliberately not the recall lanes' one. The lanes drop Retired rows and
+    /// apply §7's native-content exclusion; a curation surface has to show both, since Wisdom a
+    /// curator cannot see is Wisdom they cannot retire. Asserted against
+    /// <see cref="WisdomSearch.ListAmbientAsync"/> itself rather than against a restatement of what
+    /// it excludes, so the two cannot drift into agreement.
+    /// </summary>
+    [Fact]
+    public async Task TheCurationUniverse_ShowsWhatTheRecallLanesExclude_HarvestOnlyWisdomIncluded()
+    {
+        var project = await AddProjectAsync("curated");
+        var ordinary = await AddWisdomAsync(project.Id, "both universes hold this one");
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddProvenanceAsync(ordinary.Id, episode.Id);
+        var harvested = await AddWisdomAsync(project.Id, "harvested out of auto-memory");
+        await AddHarvestProvenanceAsync(harvested.Id, project.Id);
+        var retired = await AddWisdomAsync(project.Id, "retired since", retiredAt: Now);
+
+        var lanes = await CreateWisdomSearch().ListAmbientAsync(project.Id, Token);
+        var listed = await Browser().ListAsync(new WisdomQuery(project.Id), Token);
+        var retiredLens = await Browser()
+            .ListAsync(new WisdomQuery(project.Id, Lens: WisdomLens.Retired), Token);
+
+        // The ordinary row is in both, so "the lanes exclude the other two" is the only thing the
+        // three assertions can be reading — not a universe that came back empty for its own reasons.
+        lanes.ShouldBe([ordinary.Id]);
+        listed.Entries.Select(e => e.Id).ShouldBe([ordinary.Id, harvested.Id], ignoreOrder: true);
+        retiredLens.Entries.Select(e => e.Id).ShouldBe([retired.Id]);
+    }
+
+    /// <summary>
     /// The aside's lane figures, aggregated over the injected-items payload: every lane that
     /// carried this Wisdom, counted across every Project — a Global Wisdom is recalled from all of
     /// them, so a figure scoped to the sidebar's selection would change with it. The three lanes'
