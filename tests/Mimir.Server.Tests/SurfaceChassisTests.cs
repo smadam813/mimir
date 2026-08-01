@@ -5,8 +5,9 @@ namespace Mimir.Server.Tests;
 /// <summary>
 /// #119: the three §8 surfaces draw one chassis — the detail frame, the aside, and the list head's
 /// chips — and it lives once, in the Mimir token layer rather than as three hand-synced copies in
-/// their scoped stylesheets. CLAUDE.md's stylesheet section states the rule and why a rule two
-/// components share can only live there; this pins the shape it put them in.
+/// their scoped stylesheets. The <c>.claude/rules/blazor-ui.md</c> stylesheet section states the
+/// rule and why a rule two components share can only live there; this pins the shape it put
+/// them in.
 ///
 /// Four properties: every shared selector is defined in <c>mimir.css</c>; no scoped stylesheet
 /// styles one of the chassis's classes, bar the licensed per-surface deltas below and each held to
