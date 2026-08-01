@@ -10,7 +10,9 @@ Run it: `docker compose up -d postgres ollama`, then `dotnet run --project src/M
 
 Service visibility follows the module, not the surface: taking an internal type in a public constructor is CS0051, so an internal service makes its consumers internal too (`MergeGate` → `WisdomBrowser`, #66). Blazor is the exception, because `@inject` generates a private property, so a public component injects an internal service from the same assembly fine.
 
-Doc comments carry normative rules, and the thin `Ui/` delegates restate their service's. `WisdomBrowser.EditAsync` restated the Merge Gate's no-op set and went stale the moment #71 named the full one. Change a rule stated in a comment and grep for the other statements of it.
+A comment never carries a behavioral rule. A rule has exactly one home: the test that pins it, or — where no test can reach it — one path-scoped entry in `.claude/rules/`. Three comment kinds are legal: a constraint imported from outside the code ("Npgsql refuses non-UTC"); a one-line guard on a deliberate oddity — an empty catch, a seemingly redundant re-assert, a name chosen against the grain — saying why it exists and, where relevant, why nothing pins it; and tooling (`#pragma` justifications, `<inheritdoc/>`). Where prose would restate a rule enforced elsewhere in code, delegate to the enforcing member instead (`MergeGate.NoOpOf`) rather than describing it. (#129)
+
+RRF-fused scores order candidates and nothing else. Every threshold in the system is a cosine similarity, never a fused score (§3) — here rather than in a rules file because it binds every site that writes one, and each of those pins only its own reading of it.
 
 Raw string literals carry the file's line endings, and the checkout decides those: the index is LF (`core.autocrlf=true`, no `.gitattributes`), so a Windows working copy reads CRLF while a Linux one (CI, and the Docker image that ships) reads LF. Every prompt assembled in a `"""…"""` block therefore has platform-dependent separators, and no prompt pin catches it: they assert with `ShouldContain` and `TrimEnd().ShouldEndWith`. So don't extract a text builder that supplies its own newline for anything sent verbatim to a model: `"\n"` would pin LF on Windows too, and `Environment.NewLine` only agrees by accident. Keep the text in one literal. #77 kept `/no_think` a `const` interpolated into each caller's own prompt for that reason.
 
@@ -31,7 +33,7 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 
 ## Path-scoped rules
 
-This file is the repo's only always-on instruction file, so ambient context has exactly one place to audit. Path-specific material lives in `.claude/rules/*.md`, each scoped by a `paths:` frontmatter glob and loaded only once Claude reads a file it governs — `blazor-ui.md`, `tests.md`, `storage.md`, `claude-settings.md`, each naming its own paths. No rule there goes unscoped — a rule that would cause mistakes in a session that never touches its governed paths belongs here instead. Path-scoped rules drop out after compaction until re-triggered, which is why nothing load-bearing outside its paths may live in one.
+This file is the repo's only always-on instruction file, so ambient context has exactly one place to audit. Path-specific material lives in `.claude/rules/*.md`, each scoped by a `paths:` frontmatter glob and loaded only once Claude reads a file it governs — `blazor-ui.md`, `tests.md`, `storage.md`, `claude-settings.md`, `recall.md`, `harvest.md`, `host.md`, `cli.md`, each naming its own paths. No rule there goes unscoped — a rule that would cause mistakes in a session that never touches its governed paths belongs here instead. Path-scoped rules drop out after compaction until re-triggered, which is why nothing load-bearing outside its paths may live in one.
 
 ## Agent skills
 

@@ -70,13 +70,6 @@ internal static class InjectionDisplay
     /// The §7 score this lane ranked by. The Brief has no query at session start, so it ranks on
     /// each Wisdom's own record; the two query lanes fuse a ranked search instead and damp
     /// reinforcement far more gently. Two expressions, because there really are two.
-    ///
-    /// The expressions restate <see cref="RecallScoring.BriefScore"/> and
-    /// <see cref="RecallScoring.QueryScore"/>, and deliberately: one is arithmetic a lane runs, the
-    /// other is prose a curator reads, and rendering a curator-facing formula out of the live
-    /// computation is not a thing C# can do. What is *not* restated is the numbers in them — every
-    /// factor below is read off <see cref="RecallOptions"/>, so a §11 retune cannot leave this
-    /// explaining the old one. Change either scoring method's shape and change these too.
     /// </summary>
     public static ScoringFormula Formula(InjectionLane lane, RecallOptions options)
     {

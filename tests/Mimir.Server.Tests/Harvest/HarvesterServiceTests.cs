@@ -122,6 +122,45 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         degraded.Summary.ShouldBe("embedding model offline");
     }
 
+    [Fact]
+    public async Task ACancellationThatIsNotTheShutdowns_DegradesTheTile_AndTheLoopKeepsScanning()
+    {
+        WriteMemoryFile("MEMORY.md", "scanned fine, cancelled mid-embed");
+        var embeddings = new CancelOnceEmbeddings(Embeddings);
+
+        // A query timeout surfaces as an OperationCanceledException with nobody's shutdown behind
+        // it. That is a failed scan to degrade and retry, not a reason to tear the host down.
+        await StartServiceAsync(embeddings);
+        await TileAsync(t => t.State == HealthTileState.Degraded);
+
+        Clock.Advance(TimeSpan.FromSeconds(1));
+        _trigger.Request();
+
+        var recovered = await TileAsync(t => t.State == HealthTileState.Ready);
+        recovered.LastScanAt.ShouldBe(Clock.GetUtcNow(), "the loop was still alive to rescan");
+    }
+
+    /// <summary>Cancels the first embedding call out of nowhere, then behaves.</summary>
+    private sealed class CancelOnceEmbeddings(IEmbeddingGenerator<string, Embedding<float>> inner)
+        : IEmbeddingGenerator<string, Embedding<float>>
+    {
+        private int _calls;
+
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values,
+            EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => Interlocked.Increment(ref _calls) == 1
+                ? throw new OperationCanceledException("the query timed out")
+                : inner.GenerateAsync(values, options, cancellationToken);
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class ThrowingEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
     {
         public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(

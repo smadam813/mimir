@@ -240,6 +240,16 @@ public class HarvestCandidatesTests
     }
 
     [Fact]
+    public void OnlyABareFenceLineClosesAnOpenFence()
+    {
+        // The second ```csharp opens a run of its own in CommonMark rather than closing the
+        // first, so the heading between them is still inside a fence and must not split.
+        var content = "# Docs\n```csharp\n```csharp\n# not a heading\n```\nafter";
+
+        HarvestCandidates.Of(content, Cap).ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public void ACapLandingInsideASurrogatePair_NeverEmitsAnEmptyCandidate()
     {
         HarvestCandidates.Of("🙂 emoji first", cap: 1).ShouldBeEmpty();
