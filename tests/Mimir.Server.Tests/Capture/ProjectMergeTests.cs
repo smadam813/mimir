@@ -4,12 +4,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// Spec §3.1 clone merge: when an identity upgrade collides with an existing Project already
-/// holding the same remote identity, the two rows merge — every reference re-pointed to the
-/// survivor, <c>root_paths</c> unioned, loser removed. Two clones of one repository are one
-/// Project.
-/// </summary>
 public sealed class ProjectMergeTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -38,11 +32,6 @@ public sealed class ProjectMergeTests(ThrowawayDatabaseFixture fixture) : Postgr
     [Fact]
     public async Task TheMerge_RePointsReferencesFromTablesThisCodeHasNeverHeardOf()
     {
-        // A referencing table that exists only in this test — the stand-in for HarvestedItem,
-        // Wisdom scope, Injection and GoldenCase, which arrive with later tickets. It is covered
-        // because re-pointing enumerates foreign keys from the database catalog at merge time,
-        // not from a hand-list of today's tables. No drop: the fixture database is throwaway, and
-        // later merges re-pointing through an emptied extra table is exactly the production shape.
         await Context.Database.ExecuteSqlAsync(
             $"""
             CREATE TABLE IF NOT EXISTS test_future_references (
@@ -89,10 +78,21 @@ public sealed class ProjectMergeTests(ThrowawayDatabaseFixture fixture) : Postgr
         merged.RootPaths.ShouldBe([rootA, rootB, rootB2]);
     }
 
+    [Fact]
+    public async Task TwoIdentitiesAtTwoRootsFromTheHelpers_ResolveToTwoProjects()
+    {
+        var first = await Resolve(Identity("same"), Root("C", "same"));
+        var second = await Resolve(Identity("same"), Root("C", "same"));
+
+        second.Id.ShouldNotBe(
+            first.Id,
+            "one test resolves several Projects against one another, so both helpers answer a fresh "
+            + "value each call — a repeat on either would be §3.1 matching them onto one row");
+    }
+
     private async Task<Project> Resolve(string identity, string root)
         => await new ProjectResolver(Context).ResolveAsync(identity, root, Token);
 
-    /// <summary>Unique per call: one test resolves several Projects against one another.</summary>
     private static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
 
     private static string Root(string drive, string name) => $@"{drive}:\git\{name}-{Guid.NewGuid():N}";

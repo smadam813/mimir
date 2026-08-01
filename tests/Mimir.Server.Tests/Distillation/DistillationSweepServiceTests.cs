@@ -10,10 +10,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The sweep's hosted loop: the boot pass runs the <see cref="DistillationSweep"/> and, having
-/// grown the queue, pokes the worker's trigger.
-/// </summary>
 public sealed class DistillationSweepServiceTests(ThrowawayDatabaseFixture fixture)
     : PostgresTestBase(fixture)
 {
@@ -65,8 +61,6 @@ public sealed class DistillationSweepServiceTests(ThrowawayDatabaseFixture fixtu
             NullLogger<DistillationSweepService>.Instance);
         await _service.StartAsync(Token);
 
-        // The poke proves the pass both ran and reported queue growth; the row state proves what
-        // it did. WaitAsync (not a poll) so a missing poke fails loudly at the patience limit.
         await _trigger.WaitAsync(Token).WaitAsync(Patience, Token);
         (await FromDb(db => db.Episodes.SingleAsync(e => e.Id == failed.Id, Token)))
             .Distillation.ShouldBe(DistillationState.Pending);

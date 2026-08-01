@@ -8,15 +8,8 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// The Prompt lane (§7) against a real Postgres: the cosine gate over the ambient candidate
-/// universe, query-ranked injection within the 1,500-char budget, and the §3 logging rule — every
-/// actual injection logs a row with the prompt as <c>query_context</c>, an empty decision leaves
-/// no trace.
-/// </summary>
 public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>A prompt with no word overlap with any test Wisdom, so only the vector leg ranks.</summary>
     private const string Prompt = "how do I deploy the pipeline?";
 
     public override async ValueTask InitializeAsync()
@@ -39,7 +32,6 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
         injection.Length.ShouldBeLessThanOrEqualTo(1500);
         injection.ShouldContain(scoped.Text);
         injection.ShouldContain(global.Text);
-        // Affinity (1.5×) dwarfs the nearer global row's fused-rank edge — project Wisdom leads.
         injection.IndexOf(scoped.Text, StringComparison.Ordinal)
             .ShouldBeLessThan(injection.IndexOf(global.Text, StringComparison.Ordinal));
 
@@ -71,8 +63,6 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
     public async Task TheGateReadsCosine_ATopFusedRankBelowTheGateStaysShut()
     {
         var project = await AddProjectAsync("prompt");
-        // Both legs surface this row — the best possible fused rank (≈ 2/61, far above any
-        // single-leg fusion) — yet its cosine sits below 0.75, so nothing injects (§3).
         await AddWisdomAsync(project.Id, "deploy the pipeline notes", cosine: 0.6);
 
         var injection = await ComposeAsync(project.Id);
@@ -84,9 +74,8 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
     public async Task ZeroNormEmbeddingsNaNCosine_NeverOpensTheGate()
     {
         var project = await AddProjectAsync("prompt");
-        // pgvector computes a literal NaN cosine for a zero-magnitude embedding (no zero-norm
-        // guard in its distance function). The gate's affirmative >= must hold shut for NaN —
-        // a `< threshold` reading would let the degenerate row slip through.
+        // pgvector answers a literal NaN cosine for a zero-magnitude embedding: its distance
+        // function carries no zero-norm guard.
         await AddWisdomAsync(
             project.Id, "unrelated filler one", embedding: new float[TestVectors.Dimensions]);
 
@@ -129,7 +118,6 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
         var injected = await AddWisdomAsync(project.Id, new string('a', 200), cosine: 0.9);
         await AddWisdomAsync(project.Id, new string('b', 200), cosine: 0.8);
 
-        // A budget with room for the header and one 200-char entry, not two.
         var injection = await ComposeAsync(
             project.Id, options: new RecallOptions { PromptBudgetChars = 450 });
 
@@ -141,8 +129,6 @@ public sealed class PromptRecallServiceTests(ThrowawayDatabaseFixture fixture) :
     private async Task<string> ComposeAsync(
         Guid projectId, string? sessionId = null, RecallOptions? options = null)
     {
-        // One RecallOptions for both: the ranking scores with the same knobs the service budgets
-        // against, so an override here reaches the whole path rather than half of it.
         var recall = options ?? new RecallOptions();
         var service = new PromptRecallService(
             CreateQueryRanking(recall: recall),

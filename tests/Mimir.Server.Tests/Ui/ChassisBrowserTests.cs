@@ -4,13 +4,6 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// Spec §8 against a real Postgres: every number the chassis renders — the Project sidebar (moved
-/// here from <c>EpisodeBrowserTests</c> with the methods, #89), the header's whole-install
-/// pipeline, the tab strip's per-Project counts, and the sidebar's three swapping second groups.
-/// Each query is seeded with both a row that should count and one that should not, so dropping
-/// either half of a predicate reddens a specific test rather than only ever passing.
-/// </summary>
 public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -76,7 +69,7 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     public async Task TheHeaderPipeline_QueuesSealedNotDone_FailedIncluded_UnsealedAndDoneExcluded()
     {
         var project = await AddProjectAsync("queue");
-        await AddEpisodeAsync(project.Id, sealedAt: null, distillation: DistillationState.Pending); // unsealed
+        await AddEpisodeAsync(project.Id, sealedAt: null, distillation: DistillationState.Pending);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Pending);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Failed);
@@ -167,12 +160,6 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
         attention.Retired.ShouldBe(2);
     }
 
-    /// <summary>
-    /// Each of these three is the label on a link into the Wisdom surface's matching lens, so the
-    /// count has to be the length of the list that link opens — Global included (#91). Only the
-    /// Global arm of the shared universe keeper can redden this one: nothing of the Project's own
-    /// is seeded.
-    /// </summary>
     [Fact]
     public async Task WisdomAttention_CountsGlobalToo_SoEachFigureIsItsOwnLinksList()
     {
@@ -206,7 +193,7 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     {
         var project = await AddProjectAsync("capture");
         var other = await AddProjectAsync("other");
-        await AddEpisodeAsync(project.Id, sealedAt: null, distillation: DistillationState.Pending); // unsealed
+        await AddEpisodeAsync(project.Id, sealedAt: null, distillation: DistillationState.Pending);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Pending);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Failed);
@@ -265,9 +252,6 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task FirstRun_StaysFalse_OnceIntroduced_EvenWithEveryEpisodeDeleted()
     {
-        // §8.2 permits deleting every Episode, so "no Episodes" would send an established curator
-        // back to a screen telling them to register hooks they already have. The Project is what
-        // proves the introduction happened, and nothing deletes it here.
         var project = await AddProjectAsync("introduced");
         await AddEpisodeAsync(project.Id);
 

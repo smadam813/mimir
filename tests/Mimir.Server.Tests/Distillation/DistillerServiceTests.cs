@@ -13,12 +13,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The §6 worker loop end to end: a Sealed Episode distills on boot and the tile drains live; a
-/// Seal's trigger wakes the worker with no timer involved (the fake clock never ticks); a failure
-/// parks the Episode as failed and degrades the tile; a Running claim left by a dead process is
-/// re-queued and worked on the next boot.
-/// </summary>
 public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -73,7 +67,6 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
         var episode = await AddSealedEpisodeAsync();
         Chat.Reply("""{"candidates":[]}""");
-        // The fake clock never ticks, so only the trigger can be what wakes the worker.
         _trigger.Request();
 
         await TileAsync(t => t.LastRunAt is not null);
@@ -124,11 +117,7 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
     private async Task StartServiceAsync()
     {
         var services = new ServiceCollection();
-        // The scoped context the run claims its Episode through, and the factory the gate opens
-        // each Admission batch on.
         AddThrowawayStorage(services);
-        // The worker's whole graph — with the scripted chat model and deterministic fake
-        // embeddings in place of Ollama.
         services.AddScoped<DistillationQueue>();
         services.AddScoped<DistillationRun>();
         services.AddScoped<IEpisodeDistiller, EpisodeDistiller>();
@@ -151,7 +140,6 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         await _service.StartAsync(Token);
     }
 
-    /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
     private async Task<DistillationTile> TileAsync(Func<DistillationTile, bool> accept)
     {
         var seen = new TaskCompletionSource<DistillationTile>(TaskCreationOptions.RunContinuationsAsynchronously);

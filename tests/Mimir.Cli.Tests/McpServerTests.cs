@@ -5,11 +5,6 @@ using System.Text.Json;
 
 namespace Mimir.Cli.Tests;
 
-/// <summary>
-/// <c>mimir mcp</c> at its stdio boundary: newline-delimited JSON-RPC in, one-line responses out,
-/// each tool call one HTTP POST carrying the §7.1-resolved Project. The lane is deliberate, so a
-/// dead Mimir answers an honest MCP tool error (<c>isError</c>) — never hook-style silence.
-/// </summary>
 public class McpServerTests
 {
     private static readonly ProjectLocation Location = new("github.com/test/repo", @"C:\repo");
@@ -17,8 +12,7 @@ public class McpServerTests
     [Fact]
     public async Task Initialize_AnswersTheOneServedProtocolVersion_NeverAnEcho()
     {
-        // 2025-03-26 allows request batching, which this server does not speak — affirming it
-        // would license the client to send a batch. The handshake rule: answer a served version.
+        // 2025-03-26 licenses request batching, which this server does not speak.
         var responses = await RunAsync(
             ReplyingHandler(),
             """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{}}}""",
@@ -171,7 +165,6 @@ public class McpServerTests
     [Fact]
     public async Task ASuccessResponseWithANonJsonBody_AnswersAnHonestToolError()
     {
-        // A reverse proxy or captive portal answering 200 with HTML in Mimir's stead.
         var handler = new RecordingHandler("<html>you are on hotel wifi</html>", "text/html");
 
         var responses = await RunAsync(
@@ -214,8 +207,6 @@ public class McpServerTests
         responses[1].RootElement.GetProperty("error").GetProperty("code").GetInt32().ShouldBe(-32700);
     }
 
-    /// <summary>Feeds the lines to a server backed by <paramref name="handler"/>, returning one
-    /// parsed document per response line.</summary>
     private static async Task<List<JsonDocument>> RunAsync(RecordingHandler handler, params string[] lines)
     {
         using var http = new HttpClient(handler) { BaseAddress = new("http://127.0.0.1:6464") };
@@ -234,7 +225,6 @@ public class McpServerTests
     private static RecordingHandler ReplyingHandler(string replyJson = """{"text":"ok"}""")
         => new(replyJson);
 
-    /// <summary>A port with nothing listening, for the dead-server path.</summary>
     private static Uri ClosedPort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

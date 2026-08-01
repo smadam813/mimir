@@ -3,17 +3,8 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// The one §7 injection label line, shared by the ambient lanes and <c>mimir_search</c>'s Wisdom
-/// leg. Pure by construction — no database — so the date rule fails on every machine, not only one
-/// with Postgres up.
-/// </summary>
 public class InjectionLabelTests
 {
-    /// <summary>
-    /// 2026-07-02 01:30 at +13:00 is 2026-07-01 12:30 UTC: the two readings name different
-    /// calendar days, so a label formatting in the value's own offset cannot pass this.
-    /// </summary>
     private static readonly DateTimeOffset AcrossTheDateLine =
         new(2026, 7, 2, 1, 30, 0, TimeSpan.FromHours(13));
 

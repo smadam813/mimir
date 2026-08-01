@@ -1,14 +1,9 @@
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// Hand-built 1024-dim unit vectors with exact cosine geometry against <see cref="Basis"/>:
-/// <c>WithCosine(c)</c> = [c, √(1−c²), 0, …], so its cosine similarity to the basis is c itself.
-/// </summary>
 internal static class TestVectors
 {
     public const int Dimensions = 1024;
 
-    /// <summary>[1, 0, 0, …] — the reference direction queries embed to.</summary>
     public static float[] Basis { get; } = WithCosine(1.0);
 
     public static float[] WithCosine(double cosine)

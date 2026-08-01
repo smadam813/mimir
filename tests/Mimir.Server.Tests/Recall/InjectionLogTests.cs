@@ -4,13 +4,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// The one keeper of the §7 recording rules, exercised directly rather than through a lane: the
-/// empty-trace rule in both of its shapes — read off what was included for a rendered injection,
-/// off the answer for one <c>mimir_search</c> composed itself — and the row it writes for the
-/// decisions that survive. The wrapper it renders is pinned in <see cref="InjectionWrapperTests"/>,
-/// which needs no database to say whether the budget arithmetic is right.
-/// </summary>
 public sealed class InjectionLogTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private static readonly DateTimeOffset Confirmed = new(2026, 7, 1, 8, 30, 0, TimeSpan.Zero);
@@ -24,8 +17,6 @@ public sealed class InjectionLogTests(ThrowawayDatabaseFixture fixture) : Postgr
 
         var text = await RenderAndRecordAsync([first, second, third], budgetChars: 2500);
 
-        // The row reports the injection, not the candidate list: the entry the budget turned away
-        // was never put in front of the session and has no business in its items.
         var logged = await SingleInjectionAsync();
         logged.Items.Select(i => i.WisdomId).ShouldBe([first.WisdomId, second.WisdomId]);
         logged.Chars.ShouldBe(text.Length);
@@ -36,9 +27,6 @@ public sealed class InjectionLogTests(ThrowawayDatabaseFixture fixture) : Postgr
     {
         var text = await RenderAndRecordAsync([], notice: "⚠ notice\n");
 
-        // Injecting nothing is how a lane says "nothing to recall". A notice that vanished with
-        // the last entry would therefore be silent in exactly the case it was raised for — but a
-        // notice is not an injection, so §7 still leaves no trace of it.
         text.ShouldContain("⚠ notice");
         await ShouldHaveNoInjectionAsync("a notice with no Wisdom behind it is not an injection (§7)");
     }
@@ -107,8 +95,6 @@ public sealed class InjectionLogTests(ThrowawayDatabaseFixture fixture) : Postgr
             [],
             Token);
 
-        // mimir_search may answer with Episodes alone. That answer went in front of the session,
-        // so it is an injection — one with no items, not one that never happened.
         var logged = await SingleInjectionAsync();
         logged.Lane.ShouldBe(InjectionLane.Mcp);
         logged.Chars.ShouldBe("Mimir results: one Episode, no Wisdom.".Length);

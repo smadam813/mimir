@@ -9,16 +9,8 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// <c>mimir_search</c> (§7) against a real Postgres: fused Wisdom + Episode results, deliberate
-/// reach beyond the ambient universe (other Projects' Wisdom, Retired only on request), the
-/// documented filters, and the §3 logging rule — a non-empty answer logs lane=MCP with the query
-/// as <c>query_context</c>, an empty one leaves no trace.
-/// </summary>
 public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>No word overlap with the test Wisdom, so only the vector leg ranks Wisdom;
-    /// Episode payloads deliberately contain "deploy…pipeline" so the FTS leg finds them.</summary>
     private const string Query = "how do I deploy the pipeline?";
 
     public override async ValueTask InitializeAsync()
@@ -93,8 +85,6 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         var lesson = await AddWisdomAsync(
             project.Id, "unrelated filler two", cosine: 0.8, kind: WisdomKind.Lesson);
 
-        // PerLegTopN = 1: the unfiltered pool holds only the Fact. The kind filter must apply
-        // in SQL, before that limit, so the Lesson still surfaces — never a false "no matches".
         var text = await SearchAsync(
             project,
             new() { Kind = "Lesson", IncludeEpisodes = false },
@@ -145,8 +135,6 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         var project = await AddProjectAsync("mcp");
         await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.5);
 
-        // Nothing crosses either leg: the lone Wisdom ranks (its cosine is real) but MCP has no
-        // cosine gate — so force emptiness the honest way, an off-vocabulary kind filter.
         var text = await SearchAsync(
             project, new() { Kind = "Procedure", IncludeEpisodes = false });
 
@@ -166,7 +154,6 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         text.ShouldContain("Fact, Preference, Lesson, Procedure");
     }
 
-    /// <summary>Overridable request defaults, merged over the requester's §7.1 resolution.</summary>
     private sealed record Overrides
     {
         public string? SessionId { get; init; }

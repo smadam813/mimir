@@ -7,13 +7,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The §6 queue turn against a real Postgres, over a scripted <see cref="IEpisodeDistiller"/>:
-/// Seal → pending → done with candidates reaching the gate carrying Event Provenance; an unusable
-/// answer → failed with nothing admitted; an Episode's candidates reaching the gate as one batch,
-/// so a later one merges with the Wisdom an earlier one just created. What the model said, and
-/// what it takes to get candidates out of it, is the Distiller's own suite.
-/// </summary>
 public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private readonly FakeDistiller _distiller = new();
@@ -23,9 +16,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
     {
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
-        // Seeded newest-first so the rows' natural order is not already seq order: the run's
-        // ORDER BY is the only thing that can put them right, which is what makes the assertion
-        // below able to fail.
         await AddEventAsync(episode.Id, seq: 2);
         var evt = await AddEventAsync(episode.Id, seq: 1);
         const string text = "Always pin the SDK feature band";
@@ -38,9 +28,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         attempt.EpisodeId.ShouldBe(episode.Id);
         attempt.Candidates.ShouldBe(1);
 
-        // The run's own work before the seam: the claimed Episode, its Project's identity, and its
-        // whole Event stream in seq order, handed over in one call — the Episode is the unit the
-        // seam is answered for, so two Events are still one call (§6, IEpisodeDistiller).
         var call = _distiller.Calls.ShouldHaveSingleItem();
         call.EpisodeId.ShouldBe(episode.Id);
         call.ProjectIdentity.ShouldBe(project.Identity);
@@ -71,8 +58,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         await AddEpisodeAsync(project.Id, sealedAt: Now.AddDays(-1), distillation: DistillationState.Done);
         await AddEventAsync(newer.Id, seq: 1, EventType.Stop);
         await AddEventAsync(older.Id, seq: 1, EventType.Stop);
-        // Both turns distil to no candidates — said, not left unscripted, so the two turns this
-        // test does expect are the two it gets.
         _distiller.Enqueue();
         _distiller.Enqueue();
 
@@ -88,9 +73,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         var project = await AddProjectAsync("distiller");
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
         await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
-        // The Distiller declares this failure and answers nothing on it (whether one chunk failed
-        // or all of them is behind its seam); the Episode must land Failed, never Done, so the
-        // sweep's re-queue redoes it without inflating Reinforcement.
         _distiller.Failure = new DistillerException("the distiller's answer is not JSON");
 
         var attempt = (await NewRun().RunNextAsync(Token)).ShouldNotBeNull();
@@ -110,12 +92,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
         var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
         var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
-        // Both candidates reach the gate as one batch, where the second matches the first and the
-        // arbiter throws. The unusable-answer test fails at the Distiller, before the gate; this
-        // one fails inside the batch, which is the path that used to run in the Run's own
-        // transaction and now runs in the gate's — the Episode must come back Failed and owed,
-        // never Done, with the first candidate's already-saved admission taken back with the
-        // failing one.
         const string born = "The lock serializes the gate";
         const string confirming = "Gate admissions are serialized";
         Embeddings.Map(born, TestVectors.Basis);
@@ -144,9 +120,6 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
         var first = await AddEventAsync(episode.Id, seq: 1, EventType.PostToolUse);
         var second = await AddEventAsync(episode.Id, seq: 2, EventType.PostToolUse);
-        // The Merge Gate is the reduce (§6): a candidate the Distiller produced later in the same
-        // Episode meets the Wisdom an earlier one just created, rather than duplicating it — which
-        // is what makes chunking behind the Distiller's seam need no reduce step of its own.
         const string born = "The build needs the full SDK version";
         const string confirming = "Full SDK version required by the build";
         Embeddings.Map(born, TestVectors.Basis);

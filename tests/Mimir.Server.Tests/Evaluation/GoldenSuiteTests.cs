@@ -10,23 +10,9 @@ using OllamaSharp;
 
 namespace Mimir.Server.Tests.Evaluation;
 
-/// <summary>
-/// The §9 dev-time golden suite: every GoldenCase in the development database — promoted from
-/// the injection log and hand-inserted alike — replayed through the shared §7 query ranking with
-/// the real embedding model, against the real Wisdom tier. The pass rate is reported either way;
-/// one failing case fails the test. Needs the compose stack up (postgres and ollama), and skips
-/// without it like every other integration test. The trait keeps it out of CI's zero-skip run
-/// (.github/workflows/ci.yml): CI provides Postgres but never Ollama, so under FailSkips this
-/// dev-time suite would fail every build for a dependency CI is never meant to have.
-///
-/// Deliberately NOT over <c>PostgresTestBase</c>, unlike every other Postgres-backed class: the
-/// harness hands out an emptied throwaway database, and the cases this suite exists to replay only
-/// live in the development one. Converted, it would sweep zero cases and pass forever.
-/// </summary>
 [Trait("requires", "ollama")]
 public sealed class GoldenSuiteTests(ITestOutputHelper output)
 {
-    /// <summary>Ollama from the host, like <see cref="TestPostgres"/> reaches postgres.</summary>
     private static readonly Uri OllamaEndpoint = new(
         Environment.GetEnvironmentVariable("MIMIR_TEST_OLLAMA") ?? "http://localhost:11434");
 
@@ -86,7 +72,6 @@ public sealed class GoldenSuiteTests(ITestOutputHelper output)
             "every GoldenCase must rank its expected Wisdom within the golden-set k (§9)");
     }
 
-    /// <summary>Reachability probe that reports instead of throwing, so absence skips.</summary>
     private static async Task<bool> CanConnectAsync(MimirDbContext db, CancellationToken token)
     {
         try
@@ -99,7 +84,6 @@ public sealed class GoldenSuiteTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>Same for Ollama: a refused connection means "not up", not a test error.</summary>
     private static async Task<bool> IsOllamaUpAsync(OllamaApiClient ollama, CancellationToken token)
     {
         try

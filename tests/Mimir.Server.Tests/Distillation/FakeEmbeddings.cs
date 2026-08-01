@@ -4,12 +4,6 @@ using Microsoft.Extensions.AI;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// A deterministic stand-in for qwen3-embedding: mapped texts return their mapped vector; any
-/// other text hashes to a pseudo-random unit vector. Identical text always embeds identically
-/// (cosine 1), while unrelated texts land nearly orthogonal (|cos| ≲ 0.1 at 1024 dims) — far on
-/// either side of the 0.80 gate, which is what makes gate tests deterministic.
-/// </summary>
 internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
 {
     private readonly Dictionary<string, float[]> _mapped = new(StringComparer.Ordinal);
@@ -18,16 +12,10 @@ internal sealed class FakeEmbeddings : IEmbeddingGenerator<string, Embedding<flo
 
     public void Map(string text, float[] vector) => _mapped[text] = vector;
 
-    /// <summary>Batches served — lets a test assert an embedding was reused, not regenerated.</summary>
     public int Batches { get; private set; }
 
-    /// <summary>Any batch containing this text throws — a deterministically unembeddable item.</summary>
     public void Poison(string text) => _poisoned.Add(text);
 
-    /// <summary>
-    /// Runs as a batch is served — the gate's first step, so a test can make the world change
-    /// exactly as an Admission begins (a caller giving up, say).
-    /// </summary>
     public Action? OnGenerate { get; set; }
 
     public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(

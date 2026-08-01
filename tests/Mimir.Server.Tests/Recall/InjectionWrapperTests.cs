@@ -3,15 +3,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// The §7 provenance-labeled wrapper shared by the ambient lanes: a header identifying the content
-/// as Mimir memory (not user instructions), each Wisdom tagged kind/scope/last-confirmed, filled to
-/// the caller's char budget in the caller's order.
-///
-/// Deliberately Postgres-free — the budget arithmetic is wrong or right without a database in the
-/// picture, and these pins have to run on the machine where it is being changed rather than only
-/// where the harness can reach one.
-/// </summary>
 public class InjectionWrapperTests
 {
     private static readonly DateTimeOffset Confirmed = new(2026, 7, 1, 8, 30, 0, TimeSpan.Zero);
@@ -76,9 +67,6 @@ public class InjectionWrapperTests
     [Fact]
     public void Build_ChargesTheClosingTagAgainstTheBudget()
     {
-        // The header and one labeled 1000-char entry come to 1145 chars, a second takes it to 2187,
-        // and the footer to 2202. At a budget of 2195 the second entry fits only if the closing tag
-        // is measured as free — which is how a Brief overruns §11 by exactly the footer.
         var (first, second) = (Entry(new string('a', 1000)), Entry(new string('b', 1000)));
 
         var (text, included) = InjectionWrapper.Build([first, second], budgetChars: 2195);
@@ -90,7 +78,6 @@ public class InjectionWrapperTests
     [Fact]
     public void Build_SkipsAnOversizedEntry_AndKeepsFillingWithLaterOnes()
     {
-        // §7 "filled to ≤ 4,000 chars": one oversized entry must not starve the rest of the Brief.
         var fits = Entry(new string('a', 500));
         var oversized = Entry(new string('b', 5000));
         var alsoFits = Entry(new string('c', 500));
@@ -104,8 +91,6 @@ public class InjectionWrapperTests
     [Fact]
     public void Build_ReservesANoticeOutOfTheBudget_AndPlacesItAfterTheEntries()
     {
-        // The header, two 1000-char entries and the footer come to 2202 chars: inside a 2250-char
-        // budget on their own, and one entry too many once a 60-char notice is reserved as well.
         var notice = new string('!', 59) + "\n";
         var (first, second) = (Entry(new string('a', 1000)), Entry(new string('b', 1000)));
 
@@ -124,8 +109,6 @@ public class InjectionWrapperTests
     {
         var (text, included) = InjectionWrapper.Build([], budgetChars: 4000, notice: "⚠ notice\n");
 
-        // Injecting nothing is how a lane says "nothing to recall". A notice that vanished with
-        // the last entry would therefore be silent in exactly the case it was raised for.
         text.ShouldContain("⚠ notice");
         text.ShouldEndWith("</mimir-memory>");
         included.ShouldBeEmpty();
@@ -134,10 +117,6 @@ public class InjectionWrapperTests
     [Fact]
     public void Build_WithANoticeTooLargeForTheBudget_StaysEmpty()
     {
-        // The budget has to straddle the notice, or this pins nothing: header and footer come to
-        // 118 chars, which fits inside 130 on its own, and the 40-char notice is what pushes it
-        // out. Pick a budget the wrapper alone already overruns and the result is empty whether or
-        // not the notice was ever reserved.
         var (text, included) = InjectionWrapper.Build(
             [], budgetChars: 130, notice: new string('!', 39) + "\n");
 

@@ -3,12 +3,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Storage;
 
-/// <summary>
-/// The §3 deletion contract, declared by the Provenance schema and exercised against a real
-/// Postgres: hard-deleting an Event or Episode (§8.2) is the sole operation that removes
-/// Provenance rows — and Wisdom whose Provenance empties survives, as the orphaned-provenance
-/// case the UI flags. Deleting Wisdom cascades its own version chain and Provenance (§10).
-/// </summary>
 public sealed class ProvenanceDeletionTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -65,7 +59,6 @@ public sealed class ProvenanceDeletionTests(ThrowawayDatabaseFixture fixture) : 
 
     private sealed record ReferencedRecords(Guid EpisodeId, Guid EventId, Guid HarvestedItemId);
 
-    /// <summary>A Project with one Episode, one Event on it, and one HarvestedItem.</summary>
     private async Task<ReferencedRecords> AddReferencedRecordsAsync()
     {
         var project = await AddProjectAsync("provenance");

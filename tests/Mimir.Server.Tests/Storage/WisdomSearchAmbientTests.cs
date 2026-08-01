@@ -8,13 +8,6 @@ using Pgvector;
 
 namespace Mimir.Server.Tests.Storage;
 
-/// <summary>
-/// The ambient Candidate Universe as a §3 search mode: the session's Project plus Global,
-/// non-Retired, minus the native-content exclusion — restricted inside both legs before the
-/// per-leg LIMIT. The eligibility matrix is the pin: one seeding, hand-computed in-set and
-/// out-of-set rows, asserted against <em>both</em> methods that reach the universe, so a future
-/// fork of the shared clause cannot leave the two disagreeing.
-/// </summary>
 public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -40,10 +33,6 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
             new Vector(TestVectors.Basis), "yak", project.Id, Token);
         var listed = await Search().ListAmbientAsync(project.Id, Token);
 
-        // The per-leg top-N (50) far exceeds the eight seeded rows, so nothing truncates: each
-        // method returns exactly the universe. Equality is the whole matrix in both directions —
-        // the three ineligible rows seeded above (foreign scope, Retired, harvest-only) are out
-        // by their absence from it, so no separate exclusion assertion could add anything.
         Guid[] eligible = [projectScoped.Id, global.Id, foreignHarvest.Id, orphaned.Id, mixed.Id];
         hits.Select(h => h.WisdomId).ShouldBe(eligible, ignoreOrder: true);
         listed.ShouldBe(eligible, ignoreOrder: true);
@@ -53,7 +42,6 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
     public async Task AmbientUniverse_RestrictsBeforeThePerLegLimit_NotAfterFusion()
     {
         var (project, foreign) = (await AddProjectAsync("ambient"), await AddProjectAsync("ambient"));
-        // Three foreign rows outrank the ambient two on both legs: nearer vectors, denser matches.
         foreach (var cosine in (double[])[0.99, 0.97, 0.95])
         {
             await AddWisdomAsync(foreign.Id, "ibex ibex ibex ibex", cosine);
@@ -65,9 +53,6 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
         var hits = await Search(perLegTopN: 2).SearchAmbientAsync(
             new Vector(TestVectors.Basis), "ibex", project.Id, Token);
 
-        // Applied after the per-leg LIMIT, the universe would be the filtered residue of an
-        // unfiltered top-2 — both legs full of foreign rows, ambient recall empty while eligible
-        // matches sit deeper. Applied before it, both ambient rows fill the legs and rank.
         hits.Select(h => h.WisdomId).ShouldBe(
             [projectScoped.Id, global.Id], ignoreOrder: true);
     }
@@ -84,10 +69,6 @@ public sealed class WisdomSearchAmbientTests(ThrowawayDatabaseFixture fixture) :
         return episode.Id;
     }
 
-    /// <summary>
-    /// The §8.2 orphaning path for real: hard-deleting the Episode cascades the Provenance rows
-    /// away at the database, leaving the Wisdom provenance-less — which the universe keeps in.
-    /// </summary>
     private async Task AddThenOrphanEventProvenanceAsync(Guid wisdomId, Guid projectId)
     {
         var episodeId = await AddEventProvenanceAsync(wisdomId, projectId);

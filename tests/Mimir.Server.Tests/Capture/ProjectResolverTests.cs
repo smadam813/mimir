@@ -4,12 +4,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Capture;
 
-/// <summary>
-/// Spec §3.1 server side: match a Project by identity, else by a known root, create it when new,
-/// remember every root it has been seen at, and upgrade a path-born Project in place when hook
-/// traffic first reports its remote identity. (The collision case — clone merge — is
-/// <see cref="ProjectMergeTests"/>.)
-/// </summary>
 public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
@@ -52,9 +46,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
     [Fact]
     public async Task AKnownRootWithADifferentRemoteIdentity_MatchesByRoot_AndKeepsItsStoredIdentity()
     {
-        // Only a path-born Project is ever upgraded (§3.1). A Project that already carries a
-        // remote identity keeps it when a hook reports a different remote from a shared root —
-        // re-identifying an established repository on one stray hook would be irreversible.
         var root = @"C:\git\pathborn";
         var remoteIdentity = Identity("pathborn-root");
         var born = await Resolve(remoteIdentity, root);
@@ -68,9 +59,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
     [Fact]
     public async Task ARootAppendedByAnotherContext_SurvivesThisContextsAppend()
     {
-        // Two sessions can race the same Project with different new roots. This context still
-        // tracks the stale array; its append must not overwrite the other's (§3.1 — roots
-        // accumulate, they are how a Project is found again).
         var identity = Identity("racing");
         await Resolve(identity, @"C:\git\racing");
 
@@ -93,9 +81,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
     [Fact]
     public async Task APathIdentityProject_ReportingARemote_IsUpgradedInPlace()
     {
-        // §3.1 identity upgrade: identity follows the repository. A Project born without a remote
-        // carries its root as identity; the first hook that knows the real remote fixes the row —
-        // same row, id stable, roots kept.
         var root = $@"C:\git\upgrade-{Guid.NewGuid():N}";
         var born = await Resolve(root, root);
         var remote = Identity("upgraded");
@@ -111,8 +96,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
     [Fact]
     public async Task APathIdentityProject_SeenAtASecondRootWithoutARemote_KeepsItsPathIdentity()
     {
-        // A hook that knows no remote sends its root as identity (§3.1 fallback). That reveals
-        // nothing about the repository — a path-born Project keeps its birth root as identity.
         var rootA = $@"C:\git\stay-{Guid.NewGuid():N}";
         var rootB = $@"D:\work\stay-{Guid.NewGuid():N}";
         var born = await Resolve(rootA, rootA);
@@ -132,12 +115,23 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         project.DisplayName.ShouldBe("toolbox");
     }
 
+    [Fact]
+    public async Task TwoIdentitiesFromTheHelper_ResolveToTwoProjects()
+    {
+        var first = await Resolve(Identity("same"), @"C:\git\first");
+        var second = await Resolve(Identity("same"), @"C:\git\second");
+
+        second.Id.ShouldNotBe(
+            first.Id,
+            "one test resolves several identities against one another, so the helper answers a "
+            + "fresh one each call — a repeated identity would be §3.1 matching them onto one row");
+    }
+
     private async Task<Project> Resolve(string identity, string root)
         => await new ProjectResolver(Context).ResolveAsync(identity, root, Token);
 
     private async Task<int> Count(string identity)
         => await Context.Projects.CountAsync(p => p.Identity == identity, Token);
 
-    /// <summary>Unique per call: one test resolves several identities against one another.</summary>
     private static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
 }

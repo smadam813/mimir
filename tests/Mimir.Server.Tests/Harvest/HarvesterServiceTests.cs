@@ -14,11 +14,6 @@ using Mimir.Server.Storage;
 
 namespace Mimir.Server.Tests.Harvest;
 
-/// <summary>
-/// The §5 service loop end to end: the boot scan reports on the Harvester tile, and a SessionEnd
-/// trigger causes a rescan with no timer involved — the fake clock never ticks, so any second
-/// scan can only have come from the trigger.
-/// </summary>
 public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -34,7 +29,6 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     public override async ValueTask InitializeAsync()
     {
-        // Base first — see HarvestScannerTests: a temp root created before the skip outlives it.
         await base.InitializeAsync();
         _root = Directory.CreateTempSubdirectory("mimir-harvester-").FullName;
     }
@@ -78,8 +72,6 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         await TileAsync(t => t.State == HealthTileState.Ready);
 
         WriteMemoryFile("MEMORY.md", "second thoughts");
-        // One second is far short of the 5-minute interval, so the timer cannot be what rescans;
-        // it only re-stamps the clock so the second scan is distinguishable from the first.
         Clock.Advance(TimeSpan.FromSeconds(1));
         _trigger.Request();
 
@@ -111,8 +103,6 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
     {
         WriteMemoryFile("MEMORY.md", "scanned fine, never embedded");
 
-        // The scan itself succeeds; only the §5 handoff to the Merge Gate fails. The tile must
-        // say so without discarding what the scan just found.
         await StartServiceAsync(new ThrowingEmbeddings());
 
         var degraded = await TileAsync(t => t.State == HealthTileState.Degraded);
@@ -140,13 +130,9 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
     private async Task StartServiceAsync(IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
         var services = new ServiceCollection();
-        // The scoped context the converter reads through, and the factory the gate opens each
-        // Admission batch on.
         AddThrowawayStorage(services);
         services.AddScoped<ProjectResolver>();
         services.AddScoped<HarvestScanner>();
-        // The scan loop hands changed items straight to the Merge Gate (§5), so the converter's
-        // whole graph rides along — with deterministic fake embeddings in place of Ollama.
         services.AddScoped<HarvestConverter>();
         services.AddSingleton<MergeGate>();
         services.AddSingleton<IMergeArbiter>(Arbiter);
@@ -168,7 +154,6 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         await _service.StartAsync(Token);
     }
 
-    /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
     private async Task<HarvesterTile> TileAsync(Func<HarvesterTile, bool> accept)
     {
         var seen = new TaskCompletionSource<HarvesterTile>(TaskCreationOptions.RunContinuationsAsynchronously);

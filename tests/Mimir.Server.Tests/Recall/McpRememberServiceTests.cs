@@ -8,19 +8,12 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Tests.Recall;
 
-/// <summary>
-/// <c>mimir_remember</c> (§4, §7.1) against a real Postgres: the save lands salient on the most
-/// recently active unsealed Episode of the Project — activity, not start order — and with no
-/// unsealed Episode the content goes straight through the Merge Gate as a candidate. A deliberate
-/// save is never dropped.
-/// </summary>
 public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
     public async Task LandsSalient_OnTheMostRecentlyActiveUnsealedEpisode()
     {
         var project = await AddProjectAsync("mcp-remember");
-        // Started earlier but active later — activity, not start order, picks the target (§7.1).
         var activeLater = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-3));
         await AddEventAsync(activeLater.Id, seq: 1, at: Now.AddMinutes(-5));
         var startedLater = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
@@ -68,11 +61,6 @@ public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : 
         await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-2), sealedAt: Now.AddHours(-1));
         const string content = "The gate outlasted the caller";
 
-        // The gate's lock can be held across a background batch's arbiter calls, well past the
-        // CLI's 30 s MCP timeout, and the endpoint's token is RequestAborted — so the caller can
-        // vanish mid-admission. Standing in for that here: the token trips the moment the gate
-        // starts work. Bound to it, the admission would roll back with nothing left to retry
-        // from — no marker, no queue — and the save would be gone.
         using var abandoned = CancellationTokenSource.CreateLinkedTokenSource(Token);
         Embeddings.OnGenerate = abandoned.Cancel;
 
@@ -88,7 +76,6 @@ public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : 
     {
         var project = await AddProjectAsync("mcp-remember");
         var episode = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
-        // Well past the §4 per-field cap (4 KB) — hook payloads would be clipped at this size.
         var content = new string('c', 10_000);
 
         await RememberAsync(project, content, "Fact");

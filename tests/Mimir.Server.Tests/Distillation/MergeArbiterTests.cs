@@ -5,12 +5,6 @@ using Pgvector;
 
 namespace Mimir.Server.Tests.Distillation;
 
-/// <summary>
-/// The arbiter's contract with qwen3:8b: a JSON-mode prompt carrying both texts and the
-/// <c>/no_think</c> switch in, a verdict object out — parsed strictly, with rewrites capped at
-/// 500 chars. Unusable answers throw <see cref="MergeArbiterException"/> so admission retries
-/// instead of guessing.
-/// </summary>
 public sealed class MergeArbiterTests
 {
     private readonly FakeChatClient _chat = new();
@@ -93,8 +87,6 @@ public sealed class MergeArbiterTests
         options.ShouldNotBeNull();
         options.Temperature.ShouldBe(0);
 
-        // Structured output: the schema rides the response format, so Ollama constrains
-        // generation to it instead of being merely asked for JSON.
         var format = options.ResponseFormat.ShouldBeOfType<ChatResponseFormatJson>();
         format.Schema.ShouldNotBeNull();
         format.Schema.Value.GetRawText().ShouldContain("scope_split");

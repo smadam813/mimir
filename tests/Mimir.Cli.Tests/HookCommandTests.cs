@@ -6,11 +6,6 @@ using System.Text.Json;
 
 namespace Mimir.Cli.Tests;
 
-/// <summary>
-/// The hook relay at its public boundary: stdin JSON in, one HTTP POST out, stdout and exit code
-/// back. The fail-open rules (spec §4) are the contract that matters most — a dead Mimir must
-/// never break or slow a session.
-/// </summary>
 public class HookCommandTests
 {
     [Theory]
@@ -36,10 +31,9 @@ public class HookCommandTests
     [Fact]
     public async Task AStdinThatNeverEnds_StillExitsZeroWithinTheCap()
     {
-        // Console.In reads synchronously beneath its async surface: an un-capped read would hang
-        // the hook — and the session — until the host closed the pipe (spec §4 forbids exactly
-        // that). A tight cap keeps this test honest without a 3 s wait.
         using var http = new HttpClient { BaseAddress = ClosedPort() };
+        // Console.In reads synchronously beneath its async surface, so an un-capped read blocks the
+        // hook — and the session — until the host closes the pipe.
         using var stdin = new NeverEndingReader();
         var output = new StringWriter();
         var stopwatch = Stopwatch.StartNew();
@@ -144,7 +138,6 @@ public class HookCommandTests
         return output.ToString();
     }
 
-    /// <summary>A realistic Claude Code hook stdin document.</summary>
     private static string Stdin(string? cwd = null, string? prompt = null)
     {
         var fields = new Dictionary<string, object?>
@@ -164,7 +157,6 @@ public class HookCommandTests
         return JsonSerializer.Serialize(fields);
     }
 
-    /// <summary>A loopback port that was just proven closed: bind, note, release.</summary>
     private static Uri ClosedPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -174,7 +166,6 @@ public class HookCommandTests
         return new Uri($"http://127.0.0.1:{port}");
     }
 
-    /// <summary>Blocks every read until disposed, like a host that never closes the hook's stdin.</summary>
     private sealed class NeverEndingReader : TextReader
     {
         private readonly ManualResetEventSlim _released = new();
@@ -192,7 +183,6 @@ public class HookCommandTests
         }
     }
 
-    /// <summary>Captures the one request the relay makes and answers with canned JSON.</summary>
     private sealed class RecordingHandler(string responseJson) : HttpMessageHandler
     {
         public string? Path { get; private set; }

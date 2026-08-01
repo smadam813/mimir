@@ -5,19 +5,8 @@ using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Ui;
 
-/// <summary>
-/// Spec §8.1 against a real Postgres: the queries behind the Wisdom browser — the Ambient
-/// Candidate Universe the listing is (ADR-0009), the four lenses, the Kind chips' counts, search,
-/// the orphaned-provenance flag, the detail with its version chain and Provenance drill-down — and
-/// the curation actions: edit (new version, <c>cause=edited</c>, re-embed), Retire/unretire, and
-/// the confirmed Delete.
-/// </summary>
 public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    /// <summary>
-    /// The Project arm of the universe, alone: no Global row is seeded, so only dropping
-    /// <c>scope_project_id = @project</c> can redden this one.
-    /// </summary>
     [Fact]
     public async Task SelectingAProject_ListsItsOwnWisdom_AndNoOtherProjects()
     {
@@ -32,10 +21,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         listing.Entries[0].ScopeName.ShouldBe(mine.DisplayName);
     }
 
-    /// <summary>
-    /// The Global arm, alone: the Project's own Wisdom is deliberately absent from the fixture, so
-    /// only dropping <c>scope_project_id = Global</c> can redden this one (ADR-0009).
-    /// </summary>
     [Fact]
     public async Task SelectingAProject_AlsoListsGlobal_TheSetASessionThereRecalls()
     {
@@ -48,7 +33,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         listing.Entries[0].ScopeName.ShouldBe("Global");
     }
 
-    /// <summary>Global's own ambient universe is itself; nothing special is coded for it.</summary>
     [Fact]
     public async Task SelectingGlobal_ListsGlobalAlone()
     {
@@ -242,11 +226,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         fromHarvest.HarvestedPath.ShouldBe(item.Path);
     }
 
-    /// <summary>
-    /// What the aside names each Provenance by (§8.1): the moment itself and where the session ran,
-    /// rather than the ids the link is followed by. Seeded away from the Episode's own times so a
-    /// line reading the wrong column cannot come out right by accident.
-    /// </summary>
     [Fact]
     public async Task TheProvenanceDrillDown_CarriesTheMomentAndTheWorkingDirectory()
     {
@@ -270,12 +249,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         fromEpisode.EpisodeStartedAt.ShouldBe(Now.AddHours(-3));
     }
 
-    /// <summary>
-    /// The aside's lane figures, aggregated over the injected-items payload: every lane that
-    /// carried this Wisdom, counted across every Project — a Global Wisdom is recalled from all of
-    /// them, so a figure scoped to the sidebar's selection would change with it. The three lanes'
-    /// counts are deliberately distinct, so swapping any two arms reddens this.
-    /// </summary>
     [Fact]
     public async Task TheDetail_CountsEveryLaneThatRecalledIt_AcrossEveryProject()
     {
@@ -302,7 +275,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         detail.Recall.Injections.ShouldBe(6);
     }
 
-    /// <summary>The §9 mark is per entry, so it counts against every line that entry carried.</summary>
     [Fact]
     public async Task TheDetail_CountsTheMarksLeftOnTheEntriesThatCarriedIt()
     {
@@ -326,10 +298,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         detail.Recall.Unmarked.ShouldBe(1, "which is what the aside says is left to judge");
     }
 
-    /// <summary>
-    /// The figures are this line's, not its neighbours' on the same payload: an entry that carried
-    /// something else counts nowhere here, mark included.
-    /// </summary>
     [Fact]
     public async Task TheDetail_CountsNoEntryThatCarriedAnotherWisdomAlone()
     {
@@ -347,10 +315,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         detail.Recall.MarkedUseful.ShouldBe(0);
     }
 
-    /// <summary>
-    /// Every lane, including the ones that never carried it: a row dropped at zero reads as "this
-    /// lane cannot recall it" rather than "this lane never has" — the rule the §8.3 chips keep.
-    /// </summary>
     [Fact]
     public async Task TheDetail_OfNeverRecalledWisdom_StillNamesEveryLane()
     {
@@ -366,13 +330,6 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         detail.Recall.MarkedNoise.ShouldBe(0);
     }
 
-    /// <summary>
-    /// Both ends of the chain, read off its rows rather than derived from how many there are: the
-    /// "first version" stamp is its foot, not the row's own recency (which an Admission moves and
-    /// an edit does not), and the version the editor is about to bump is its head. Seeded so the
-    /// recency differs from the foot, and with a gap in the chain — the gate numbers versions
-    /// <c>MAX + 1</c>, so a chain missing a row is one whose length is no longer its version.
-    /// </summary>
     [Fact]
     public async Task TheDetail_ReadsBothEndsOfTheChain_OffItsRowsRatherThanItsLength()
     {
@@ -467,9 +424,5 @@ public sealed class WisdomBrowserTests(ThrowawayDatabaseFixture fixture) : Postg
         (await FromDb(db => db.Episodes.CountAsync(e => e.Id == episode.Id, Token))).ShouldBe(1);
     }
 
-    /// <summary>
-    /// The browser over the fixture's database, its edit wired to a real Merge Gate — the gate is
-    /// where the edit's re-embed, version append and lock live now (§6, ADR-0004).
-    /// </summary>
     private WisdomBrowser Browser() => new(Contexts, CreateMergeGate(), Clock);
 }

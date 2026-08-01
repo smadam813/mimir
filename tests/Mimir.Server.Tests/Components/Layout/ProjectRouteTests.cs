@@ -2,10 +2,6 @@ using Mimir.Server.Components.Layout;
 
 namespace Mimir.Server.Tests.Components.Layout;
 
-/// <summary>
-/// Pure parsing, no database — <see cref="ProjectRoute.Parse"/> reads a relative path only, so
-/// this must run everywhere including with no Postgres reachable.
-/// </summary>
 public class ProjectRouteTests
 {
     [Fact]

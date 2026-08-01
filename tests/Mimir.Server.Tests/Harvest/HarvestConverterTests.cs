@@ -8,18 +8,11 @@ using Mimir.Server.Tests.Distillation;
 
 namespace Mimir.Server.Tests.Harvest;
 
-/// <summary>
-/// The §5 handoff against a real Postgres: every HarvestedItem version with a null conversion
-/// marker — new or backfilled — flows through the Merge Gate exactly once, and re-harvested
-/// equivalent content reinforces the Wisdom its earlier version produced (the #20 demo).
-/// </summary>
 public sealed class HarvestConverterTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
     public async Task PendingVersions_FlowThroughTheGateExactlyOnce()
     {
-        // Rows born without the marker are exactly what the Backfill left behind before this
-        // ticket shipped — the first run must carry them to the gate, the second must not.
         var project = await AddProjectAsync("convert");
         await AddHarvestedItemAsync(project.Id, "a/memory/MEMORY.md", "Fact alpha");
         await AddHarvestedItemAsync(project.Id, "a/memory/beta.md", "Fact beta");
@@ -30,8 +23,6 @@ public sealed class HarvestConverterTests(ThrowawayDatabaseFixture fixture) : Po
         (await FromDb(db => db.HarvestedItems.CountAsync(i => i.ConvertedAt == null, Token))).ShouldBe(0);
 
         (await Converter().ConvertPendingAsync(Token)).ShouldBe(0);
-        // The count first: the return value above counts conversions, not rows, so a second pass
-        // that *removed* Wisdom would still report zero — and ShouldAllBe passes over an empty set.
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(2);
         (await FromDb(db => db.Wisdom.ToListAsync(Token)))
             .ShouldAllBe(w => w.ScopeProjectId == project.Id && w.Reinforcement == 1);
@@ -110,8 +101,6 @@ public sealed class HarvestConverterTests(ThrowawayDatabaseFixture fixture) : Po
         var healthy = await AddHarvestedItemAsync(
             project.Id, "e/memory/healthy.md", "Fact gamma", Now.AddMinutes(1));
 
-        // The failure still surfaces — that is what degrades the tile — but only after the
-        // items ordered behind the poisoned one got their turn at the gate.
         await Should.ThrowAsync<InvalidOperationException>(() => Converter().ConvertPendingAsync(Token));
 
         (await FromDb(db => db.HarvestedItems.SingleAsync(i => i.Id == healthy.Id, Token)))
