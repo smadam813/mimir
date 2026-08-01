@@ -23,6 +23,8 @@
     <Content Include="..\..\src\Mimir.Server\wwwroot\**\*.css" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" />
     <!-- SurfaceChassisTests reads the scoped stylesheets against the token layer they hoisted into. -->
     <Content Include="..\..\src\Mimir.Server\Components\**\*.razor.css" LinkBase="Components" CopyToOutputDirectory="PreserveNewest" />
+    <!-- AppShellTests reads the render mode off the shell, which no renderer can observe. -->
+    <Content Include="..\..\src\Mimir.Server\Components\App.razor" LinkBase="Components" CopyToOutputDirectory="PreserveNewest" />
     <!-- FirstRunCommandsTests asserts the README still states the registrations the app hands out. -->
     <Content Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

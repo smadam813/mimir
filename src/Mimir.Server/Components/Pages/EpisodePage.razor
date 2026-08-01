@@ -4,11 +4,6 @@
 @using Mimir.Server.Ui
 @inject ChassisBrowser Browser
 
-@* Spec §8.2 (#95): one screen on both routes — the listing route renders it unselected, the
-   drill-down route with that Episode selected — so a curator works down the list without the
-   surface being torn down and re-queried on every click. The literal "episodes" segment outranks
-   ProjectPage's {Tab} parameter, the way WisdomPage's own does (#91), so this page owns the
-   surface; ProjectPage keeps it only for the tabless /projects/{id} route. *@
 <PageTitle>Episodes · Mimir</PageTitle>
 
 @if (_project is null)
@@ -29,7 +24,6 @@ else
     [Parameter]
     public Guid ProjectId { get; set; }
 
-    /// <summary>Null on the listing route: the surface renders its unselected placeholder.</summary>
     [Parameter]
     public Guid? EpisodeId { get; set; }
 
@@ -38,8 +32,6 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        // Selecting an Episode re-runs this on the same instance, and the Project has not moved;
-        // only a sidebar switch is a different one.
         if (_loadedProject == ProjectId)
         {
             return;

@@ -10,10 +10,6 @@
 @inject IOptions<DistillationOptions> Distillation
 @inject ILogger<EpisodeSurface> Logger
 
-@* Spec §8.2 on the four-pane shape (#95): the list, the session it is opened on, and that
-   session's own numbers down the side. One component across both routes — the listing route
-   renders the placeholder, the drill-down route renders with that Episode selected — so clicking a
-   row keeps the list in place instead of tearing the surface down and re-querying it. *@
 <div class="episode-surface">
     <EpisodeList ProjectId="ProjectId" ProjectName="@ProjectName" IsGlobal="IsGlobal"
                  SelectedId="SelectedId" />
@@ -34,10 +30,6 @@
             <EpisodeDrillDown Detail="detail" ProjectId="ProjectId" Error="@FailureFor(detail.Episode.Id)"
                               OnDeleteEvent="DeleteEventAsync" OnDeleteEpisode="DeleteEpisodeAsync" />
 
-            @* The aside is this same Episode's numbers, so it renders from the branch that already
-               has it rather than re-asking whether there is one. Two conditions for one fact would
-               let the panes disagree — and no render test pins this surface, so the drift would
-               land on a curator rather than on CI. *@
             <aside class="pane-aside">
                 <div>
                     <h6>This session</h6>
@@ -49,10 +41,8 @@
                             @(detail.PromptCount == 1 ? "prompt" : "prompts")
                         </span>
                     </div>
-                    @* is-prose, because this is the one aside whose values are phrases rather than
-                       numerals — a formatted stamp, and a Seal reason that is the hook's own
-                       unbounded string. The modifier gives the slack to the value's column, so a
-                       long reason wraps there instead of wrapping the labels beside it. *@
+                    @* is-prose: the one aside whose values are phrases rather than numerals, so the
+                       slack goes to the value's column. *@
                     <dl class="aside-rows is-prose">
                         <dt>Duration</dt>
                         <dd class="is-strong">
@@ -61,9 +51,6 @@
                         </dd>
                         <dt>Wisdom produced</dt>
                         <dd class="is-accent">@detail.Produced.Count.ToString("N0")</dd>
-                        @* The moment itself, not only the span to it: Duration reads in the largest
-                           unit it fills, so a curator correlating a session against an outside
-                           timeline cannot recover the Seal from StartedAt plus "3d 04h". *@
                         @if (detail.Episode.SealedAt is { } sealedAt)
                         {
                             <dt>Sealed</dt>
@@ -93,10 +80,6 @@
                         @EpisodeDisplay.DistillationPhrase(
                             detail.Episode.SealedAt, detail.Episode.Distillation)
                     </p>
-                    @* The four elements the design drew here and #86 dropped are absent rather than
-                       stubbed: the claiming model, the candidate count and the chunk count are
-                       nothing §6 records, and "Recalled since" would need a link from an Injection
-                       back to the Episode a carried Wisdom came from, which does not exist. *@
                     <p class="aside-note">
                         Sealing enqueues; a worker claims one Episode at a time. The sweep runs every
                         @EpisodeDisplay.Hours(Sweep.SweepInterval), resets a claim still standing after
@@ -136,48 +119,27 @@
     [Parameter]
     public bool IsGlobal { get; set; }
 
-    /// <summary>Null on the listing route; the drill-down route supplies the Episode.</summary>
     [Parameter]
     public Guid? SelectedId { get; set; }
 
     private Mimir.Server.Ui.EpisodeDetail? _detail;
 
-    /// <summary>
-    /// Which id <see cref="_detail"/> answers for, including when the answer was "nothing". Without
-    /// it a deleted Episode and one whose query is still in flight both render as no detail, and
-    /// the "hard-deleted" note would flash on every drill-down.
-    /// </summary>
+    // Which id _detail answers for, including when the answer was "nothing" — against
+    // _requestedId's "was asked for".
     private Guid? _loadedId;
 
-    /// <summary>
-    /// Which id the last read was <em>asked</em> for, as against <see cref="_loadedId"/>'s "answered
-    /// for". Set before the await, so a parameter set naming the Episode already on screen — a
-    /// second §8.1 Provenance link into it, one fragment apart — costs nothing rather than three
-    /// more queries. The feed's refresh does not come through here.
-    /// </summary>
     private Guid? _requestedId;
 
-    /// <summary>
-    /// A failed delete, and the record it failed on. The pair rather than the text alone, because a
-    /// delete confirmed on the Episode still on screen can fail after the curator has clicked
-    /// another row: bare, its "this session is untouched" would then render under that row's detail
-    /// and read as a claim about it. Cleared by the id no longer matching what is on screen, which
-    /// needs no reset anywhere and cannot be forgotten on a path that grows later.
-    /// </summary>
     private (Guid Subject, string Text)? _failure;
 
     private IDisposable? _subscription;
     private Debouncer? _debounce;
     private int _generation;
 
-    /// <summary>The §11 knobs the Distillation aside states the sweep's rules from.</summary>
     private DistillationOptions Sweep => Distillation.Value;
 
     protected override void OnInitialized()
     {
-        // A live session's Episode grows while this pane is open (§8.2). Coalesced with the
-        // feed-driven ceiling for the reason the list states: a burst of captured Events must
-        // neither be answered one query at a time nor postpone the pane indefinitely.
         _debounce = new Debouncer(
             Debouncer.DefaultDelay, Logger, "Episode drill-down refresh", Debouncer.DefaultCeilingMultiple);
 
@@ -192,8 +154,6 @@
 
     protected override Task OnParametersSetAsync()
     {
-        // The router reuses this instance across both routes and re-sets the parameters on every
-        // navigation, fragment-only ones included, so the same Episode arrives here repeatedly.
         if (_requestedId == SelectedId)
         {
             return Task.CompletedTask;
@@ -207,8 +167,8 @@
     {
         if (SelectedId is not { } episodeId)
         {
-            // Counts as a read: a query still in flight for the Episode just left would otherwise
-            // pass the generation check below and paint its detail over the cleared pane.
+            // Counts as a read, so a query still in flight for the Episode just left cannot pass
+            // the generation check below and paint over the cleared pane.
             _generation++;
             (_detail, _loadedId) = (null, null);
             return;
@@ -217,8 +177,6 @@
         var generation = ++_generation;
         var detail = await Browser.GetEpisodeAsync(episodeId, CancellationToken.None);
 
-        // A newer read — another row clicked, a later Event — may have landed while this one was
-        // awaiting its queries; drop this one rather than paint the Episode the curator just left.
         if (generation != _generation)
         {
             return;
@@ -228,24 +186,12 @@
         StateHasChanged();
     }
 
-    // No explicit refresh after the Event delete: the browser announces it on the feed, and this
-    // pane's own subscription is a subscriber like any other.
     private Task DeleteEventAsync(Guid eventId) => DeleteAsync(
         _detail?.Episode.Id ?? Guid.Empty,
         () => Browser.DeleteEventAsync(eventId, CancellationToken.None),
         "The Event was not deleted — Postgres has to be reachable. "
             + "Check the Health pill; this Event is untouched.");
 
-    /// <summary>
-    /// Takes the Episode <see cref="ConfirmDelete.OnConfirm"/> named, never
-    /// <see cref="SelectedId"/> — see that callback for the window the two disagree in.
-    ///
-    /// The navigation is conditional on them agreeing for the same reason. Deleting the Episode the
-    /// route names leaves the route pointing at a dead record, so the surface has to leave; deleting
-    /// the one still on screen after the curator clicked elsewhere does not, and navigating anyway
-    /// would throw away the selection they just made. The list needs no telling either way —
-    /// <see cref="EpisodeBrowser.DeleteEpisodeAsync"/> publishes on the feed and it is a subscriber.
-    /// </summary>
     private Task DeleteEpisodeAsync(Guid episodeId) => DeleteAsync(
         episodeId,
         async () =>
@@ -260,12 +206,6 @@
         "The Episode was not deleted — Postgres has to be reachable. "
             + "Check the Health pill; this session is untouched.");
 
-    /// <summary>
-    /// Both hard deletes keep a transient failure inline, the shape <c>WisdomSurface.CurateAsync</c>
-    /// already had and for its reason: unhandled, an exception out of a Blazor event handler takes
-    /// the circuit down with it — the whole page reloads and the curator loses their place, over a
-    /// blipped connection that a line above the button would have ridden out.
-    /// </summary>
     private async Task DeleteAsync(Guid subject, Func<Task> delete, string failure)
     {
         _failure = null;
@@ -275,12 +215,13 @@
         }
         catch (Exception ex)
         {
+            // Swallowed and said inline: unhandled, an exception out of a Blazor event handler
+            // takes the circuit down and the curator loses their place.
             Logger.LogWarning(ex, "Episode delete failed");
             _failure = (subject, failure);
         }
     }
 
-    /// <summary>The failure to say above <paramref name="onScreen"/>, if it is that one's.</summary>
     private string? FailureFor(Guid onScreen)
         => _failure is { } failed && failed.Subject == onScreen ? failed.Text : null;
 

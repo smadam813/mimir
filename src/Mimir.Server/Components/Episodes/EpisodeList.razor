@@ -6,11 +6,6 @@
 @inject SurfaceSearch Search
 @inject ILogger<EpisodeList> Logger
 
-@* Spec §8.2 on the four-pane shape (#94): this Project's Sealed and live Episodes, newest first,
-   each row marking where its session and its distillation are. The list grows over the circuit as
-   capture announces changes — no refresh, no polling — and the header's search box narrows it
-   while this component is mounted. The 400px pane alone; <EpisodeSurface> lays it out beside the
-   drill-down it links into (#95). *@
 <div class="episode-pane">
     <div class="pane-head">
         <div class="pane-title-row">
@@ -18,9 +13,6 @@
             <span class="pane-count">@_episodes.Count.ToString("N0") · @ProjectName</span>
         </div>
 
-        @* The drawn chips are All / Live / Pending / Failed; Running joins them so every state a
-           row can mark is also a state the curator can filter to. Done is the resting majority —
-           it is what "All" is mostly made of, and marks nothing on its row. *@
         @if (_episodes.Count > 0)
         {
             <div class="chips">
@@ -49,9 +41,6 @@
         }
         else if (_episodes.Count == 0 && Search.Term.Trim() is { Length: > 0 } term)
         {
-            @* Word-aware, not substring — §7's Episode leg is FTS-only over Event.tsv, so a
-               fragment, an unstemmed form or a word too common to index matches nothing. The note
-               says how the search reads rather than asserting the Events never mention it. *@
             <p class="pane-note">
                 No Event of this Project's Episodes matches “@term”. Search reads whole words out of
                 Event text, so a fragment or a very common word finds nothing.
@@ -70,8 +59,6 @@
             @foreach (var episode in Visible)
             {
                 var (dot, mark) = Classes(episode.State);
-                @* The session id keys the Episode (ADR-0003) but is a hash, so it rides as the
-                   row's tooltip and the drill-down's heading rather than taking a line here. *@
                 <a class="episode-row @(SelectedId == episode.Id ? "is-selected" : null)"
                    href="@($"projects/{ProjectId}/episodes/{episode.Id}")"
                    title="@($"session {episode.SessionId}")">
@@ -92,7 +79,6 @@
 </div>
 
 @code {
-    /// <summary>The four states a row marks, in the order the chips carry them.</summary>
     private static readonly EpisodeState[] Chips =
         [EpisodeState.Live, EpisodeState.Pending, EpisodeState.Running, EpisodeState.Failed];
 
@@ -105,32 +91,20 @@
     [Parameter]
     public bool IsGlobal { get; set; }
 
-    /// <summary>The row the drill-down is open on, or null on the listing route (#95).</summary>
     [Parameter]
     public Guid? SelectedId { get; set; }
 
     private IReadOnlyList<EpisodeSummary> _episodes = [];
     private EpisodeState? _filter;
 
-    /// <summary>Which list is on screen — see <c>OnParametersSetAsync</c> for why Global is in it.</summary>
     private (Guid ProjectId, bool IsGlobal) _shown;
 
     private IDisposable? _subscription;
     private IDisposable? _claim;
     private int _generation;
 
-    /// <summary>
-    /// The feed's lane. This is the one surface driven by both triggers, and it is the only one
-    /// that needs two instances: a burst of captured Events must not postpone the list forever, so
-    /// this one carries the ceiling. What that costs is coalescing across the lanes — a keystroke
-    /// and a captured Event inside the same window used to collapse into one refresh, and no longer
-    /// do. That is the price of the ceiling, not an oversight: one instance cannot hold both, since
-    /// a ceiling armed by an Event would fire a refresh that reads the search term live, querying a
-    /// half-typed word (#101, D5).
-    /// </summary>
     private Debouncer? _feedDebounce;
 
-    /// <summary>The search box's lane, deliberately without a ceiling — see <see cref="_feedDebounce"/>.</summary>
     private Debouncer? _searchDebounce;
 
     private IReadOnlyList<EpisodeSummary> Visible => _filter is { } state
@@ -145,18 +119,12 @@
             Debouncer.DefaultDelay, Logger, "Episode list refresh", Debouncer.DefaultCeilingMultiple);
         _searchDebounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Episode list refresh");
 
-        // Claim, keystroke and release all arrive as one event (#91), and every one of them changes
-        // what this list should show — so all three are the search lane, the release and re-claim
-        // on a Project switch included. A keystroke otherwise costs one Event-and-Provenance count
-        // per row per letter.
         Search.Changed += ScheduleSearchRefresh;
 
         _subscription = Feed.Subscribe(change =>
         {
             if (change.ProjectId == ProjectId)
             {
-                // Coalesced: the feed fires on every captured Event, and this list's query counts
-                // Events and Provenance per row — one refresh per burst, not one per Event.
                 ScheduleFeedRefresh();
             }
         });
@@ -164,27 +132,13 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        // Selecting a row is a route change on this same surface (#95), so this runs on every
-        // drill-down click with nothing about the list itself changed. Only a different Project is
-        // a different list; everything else that moves this one — a captured Event, a keystroke —
-        // arrives on its own lane and refreshes there.
-        //
-        // Global rides in the key rather than being derived from the id, because the page resolves
-        // the Project asynchronously and renders once in between: the incoming ProjectId arrives
-        // beside the outgoing Project's IsGlobal, and a guard on the id alone would take that first
-        // pass for the whole switch and never see the flag land.
         if (_shown == (ProjectId, IsGlobal))
         {
             return;
         }
 
-        // Both narrowings belong to the Project they were made on. Blazor keeps this one instance
-        // across a sidebar switch — same route, no @key — so shedding them is ours to do: a carried
-        // chip says "No failed Episodes here" over a list that has some, and a carried term
-        // silently narrows the new Project by something nobody typed for it. Releasing and
-        // re-claiming is what sheds the term, since a claim starts empty on both edges; released
-        // first, because the claim is held by identity and disposing a stale token afterwards would
-        // hand the box back out from under the new claim.
+        // Released first, because the claim is held by identity: disposing a stale token after the
+        // re-claim would hand the box back out from under it.
         if (_shown.ProjectId != ProjectId)
         {
             _filter = null;
@@ -194,20 +148,12 @@
 
         _shown = (ProjectId, IsGlobal);
 
-        // Two refreshes land on a switch, and that is accepted rather than accidental: the release
-        // and the re-claim each raise Changed, which schedules one on the search lane, and the
-        // await below runs another straight away. The direct one is what paints the incoming
-        // Project without a debounce's wait — the first load has no claim to release and would
-        // otherwise sit empty for it — and the debounced pair collapses to a single duplicate query
-        // a moment later, against the same (now empty) term.
+        // The direct refresh below paints the incoming Project without a debounce's wait; the two
+        // the claim's own Changed schedules collapse into one duplicate query a moment later.
         UpdateClaim();
         await RefreshAsync();
     }
 
-    /// <summary>
-    /// Claims the header's search box while there is something here to narrow. Global's tab has no
-    /// Episodes at all, so it hands the box back rather than offering a search over nothing.
-    /// </summary>
     private void UpdateClaim()
     {
         if (IsGlobal)
@@ -234,8 +180,6 @@
             ? []
             : await Browser.ListEpisodesAsync(ProjectId, Search.Term, CancellationToken.None);
 
-        // A newer refresh — a later Event, another keystroke, a different Project — may have landed
-        // while this one was awaiting its query; drop this one rather than overwrite fresher rows.
         if (generation != _generation)
         {
             return;
@@ -254,11 +198,6 @@
         _searchDebounce?.Dispose();
     }
 
-    /// <summary>
-    /// How a row wears its state, dot and word together in one answer. Live and failed are words in
-    /// their own hue — the two states a curator is looking for; the queue's two are pills, so a
-    /// row's distillation reads as a stage rather than an alarm.
-    /// </summary>
     private static (string Dot, string Mark) Classes(EpisodeState state) => state switch
     {
         EpisodeState.Live => ("dot-live", "state-word is-live"),
