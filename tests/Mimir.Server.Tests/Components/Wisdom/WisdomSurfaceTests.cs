@@ -23,12 +23,6 @@ namespace Mimir.Server.Tests.Components.Wisdom;
 /// </summary>
 public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private (BunitContext Render, SurfaceSearch Search) NewCircuit()
-    {
-        var render = CreateRenderContext();
-        return (render, render.Services.GetRequiredService<SurfaceSearch>());
-    }
-
     private static IRenderedComponent<WisdomSurface> RenderAt(
         BunitContext render, Guid projectId, Guid? selectedId = null,
         WisdomLens lens = WisdomLens.Active)
@@ -65,7 +59,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "prefer explicit over clever");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id);
         WaitForRows(surface, 1);
         surface.Find("p.detail-empty").TextContent.ShouldContain("Pick a Wisdom");
@@ -87,7 +81,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     public async Task ADeadDeepLink_SaysSoAndOffersTheListBack()
     {
         var project = await AddProjectAsync();
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id, selectedId: Guid.CreateVersion7());
 
@@ -109,7 +103,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var project = await AddProjectAsync("mimir");
         await AddWisdomAsync(project.Id, "a project fact");
         await AddWisdomAsync(Project.GlobalId, "a global fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id);
 
@@ -127,7 +121,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     public async Task BrowsingGlobal_StatesOneFigureRatherThanASum()
     {
         await AddWisdomAsync(Project.GlobalId, "a global fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, Project.GlobalId);
 
@@ -144,7 +138,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     public async Task EveryLens_TitlesItselfAndExplainsItsOwnEmptiness()
     {
         var project = await AddProjectAsync();
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         foreach (var lens in Enum.GetValues<WisdomLens>())
         {
@@ -173,7 +167,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var global = await AddWisdomAsync(Project.GlobalId, "a global fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id);
 
@@ -197,7 +191,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var evt = await AddEventAsync(episode.Id, seq: 1);
         await AddProvenanceAsync(wisdom.Id, episodeId: episode.Id, eventId: evt.Id);
         await AddHarvestProvenanceAsync(wisdom.Id, project.Id);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id, wisdom.Id);
 
@@ -218,7 +212,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id);
         WaitForRows(surface, 1);
 
@@ -244,7 +238,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id, wisdom.Id);
 
@@ -269,7 +263,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         await AddWisdomAsync(project.Id, "a fact", kind: WisdomKind.Lesson);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var surface = RenderAt(render, project.Id);
 
@@ -290,7 +284,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
         surface.FindComponents<ConfirmDelete>().ShouldHaveSingleItem();
@@ -312,7 +306,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var project = await AddProjectAsync();
         var first = await AddWisdomAsync(project.Id, "the first fact");
         var second = await AddWisdomAsync(project.Id, "the second fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, first.Id);
         await ReadyForClicksAsync(surface);
         await surface.ClickAsync("div.detail-actions button", "Edit");
@@ -338,7 +332,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
         await surface.ClickAsync("div.detail-actions button", "Edit");
@@ -361,7 +355,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
         await surface.ClickAsync("div.detail-actions button", "Edit");
@@ -382,7 +376,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, wisdom.Id);
         await ReadyForClicksAsync(surface);
         await surface.ClickAsync("div.detail-actions button", "Edit");
@@ -407,7 +401,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var project = await AddProjectAsync();
         var first = await AddWisdomAsync(project.Id, "the first fact");
         var second = await AddWisdomAsync(project.Id, "the second fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var surface = RenderAt(render, project.Id, first.Id);
         await ReadyForClicksAsync(surface);
 
@@ -434,7 +428,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     public async Task Mounting_ClaimsTheSearchBoxForThisSurface()
     {
         var project = await AddProjectAsync();
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
 
         RenderAt(render, project.Id);
 
@@ -455,7 +449,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
         var incoming = await AddProjectAsync("incoming");
         await AddWisdomAsync(outgoing.Id, "an outgoing fact", kind: WisdomKind.Lesson);
         await AddWisdomAsync(incoming.Id, "an incoming fact", kind: WisdomKind.Procedure);
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var surface = RenderAt(render, outgoing.Id);
         WaitForRows(surface, 1);
         await surface.SettleAsync();
@@ -489,7 +483,7 @@ public class WisdomSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTest
     {
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var nav = render.Services.GetRequiredService<NavigationManager>();
         var surface = RenderAt(render, project.Id, wisdom.Id, WisdomLens.Retired);
         await ReadyForClicksAsync(surface);

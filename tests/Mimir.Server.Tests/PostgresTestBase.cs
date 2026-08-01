@@ -210,6 +210,20 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     }
 
     /// <summary>
+    /// The same renderer, with one of its own services handed back beside it — the circuit-scoped
+    /// <c>SurfaceSearch</c> a surface claims through, or the <c>NavigationManager</c> a route-aware
+    /// component reads. Resolved from the renderer rather than constructed, because the whole point
+    /// of this tier is that the test drives the same instance the component was injected with.
+    /// </summary>
+    private protected BunitContext CreateRenderContext<TService>(out TService service)
+        where TService : notnull
+    {
+        var context = CreateRenderContext();
+        service = context.Services.GetRequiredService<TService>();
+        return context;
+    }
+
+    /// <summary>
     /// A Project displayed under <paramref name="name"/>, at an identity and root unique to this
     /// call so a test seeding two of them gets two rows rather than a unique-index violation.
     /// Name them apart when a test filters by display name — nothing makes that column unique.

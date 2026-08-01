@@ -13,12 +13,6 @@ namespace Mimir.Server.Tests.Components.Injections;
 /// </summary>
 public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private (BunitContext Render, SurfaceSearch Search) NewCircuit()
-    {
-        var render = CreateRenderContext();
-        return (render, render.Services.GetRequiredService<SurfaceSearch>());
-    }
-
     private static IRenderedComponent<InjectionLogTab> RenderAt(BunitContext render, Guid projectId)
         => render.Render<InjectionLogTab>(p => p.Add(c => c.ProjectId, projectId));
 
@@ -34,7 +28,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
     {
         var project = await AddProjectAsync();
         await AddInjectionAsync(project.Id, sessionId: "sess-one");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var tab = RenderAt(render, project.Id);
 
@@ -57,7 +51,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         await AddInjectionAsync(project.Id, lane: InjectionLane.Prompt);
         await AddInjectionAsync(project.Id, lane: InjectionLane.Brief, queryContext: null);
         await AddInjectionAsync(project.Id, lane: InjectionLane.Brief, queryContext: null);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var tab = RenderAt(render, project.Id);
         WaitForRows(tab, 3);
         await tab.SettleAsync();
@@ -80,7 +74,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
         await AddInjectionAsync(project.Id, items: [(wisdom.Id, 0.9)]);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var tab = RenderAt(render, project.Id);
         WaitForRows(tab, 1);
         await tab.SettleAsync();
@@ -105,7 +99,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         var project = await AddProjectAsync();
         var wisdom = await AddWisdomAsync(project.Id, "a fact");
         await AddInjectionAsync(project.Id, items: [(wisdom.Id, 0.9)]);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var tab = RenderAt(render, project.Id);
         WaitForRows(tab, 1);
         await tab.SettleAsync();
@@ -138,7 +132,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         var incoming = await AddProjectAsync("incoming");
         await AddInjectionAsync(outgoing.Id, lane: InjectionLane.Brief, queryContext: null);
         await AddInjectionAsync(incoming.Id, sessionId: "sess-incoming");
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
         var tab = RenderAt(render, outgoing.Id);
         WaitForRows(tab, 1);
         await tab.SettleAsync();
@@ -169,7 +163,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
     {
         var outgoing = await AddProjectAsync("outgoing");
         var incoming = await AddProjectAsync("incoming");
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var tab = RenderAt(render, outgoing.Id);
         search.IsClaimed.ShouldBeTrue();
         search.Set("a prompt");
@@ -191,7 +185,7 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
     {
         var project = await AddProjectAsync();
         await AddInjectionAsync(project.Id, queryContext: "a prompt");
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var tab = RenderAt(render, project.Id);
         WaitForRows(tab, 1);
 

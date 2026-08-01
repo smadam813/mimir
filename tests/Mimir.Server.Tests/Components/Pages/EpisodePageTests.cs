@@ -66,9 +66,10 @@ public class EpisodePageTests(ThrowawayDatabaseFixture fixture) : PostgresTestBa
         page.Render(p => p
             .Add(c => c.ProjectId, project.Id)
             .Add(c => c.EpisodeId, episode.Id));
-        // Settled, because a second query would land on a later render: asserting straight after
-        // the parameter set would read the screen before the regression could reach it.
-        await page.SettleAsync();
+        // Silence for the span a positive pin waits a query to arrive in, not the default window:
+        // a second query would land on a later render, and one still in flight renders nothing, so
+        // a shorter wait would read the screen before the regression could reach it.
+        await page.SettleAsync(Patience);
 
         page.FindComponents<EpisodeSurface>().ShouldHaveSingleItem();
         page.FindAll("div.page-notice").ShouldBeEmpty();

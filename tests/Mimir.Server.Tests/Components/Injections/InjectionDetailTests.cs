@@ -24,6 +24,14 @@ public class InjectionDetailTests : RenderTestBase
 
     private static readonly Guid WisdomId = Guid.Parse("99999999-9999-9999-9999-999999999999");
 
+    /// <summary>
+    /// The second line an entry carries, Global-scoped — the browsed Project's ambient universe
+    /// includes Global (ADR-0009), so an entry mixing the two is the ordinary case rather than a
+    /// contrived one, and it is the only fixture in which a link written from the record's own
+    /// scope can be told apart from one written from the Project being browsed.
+    /// </summary>
+    private static readonly Guid GlobalWisdomId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
     private static InjectionLogEntry Entry(InjectionVerdict? verdict = null)
         => new(
             Id: Guid.Parse("88888888-8888-8888-8888-888888888888"),
@@ -48,6 +56,22 @@ public class InjectionDetailTests : RenderTestBase
                         "mimir",
                         "Sealing enqueues distillation",
                         Reinforcement: 3,
+                        LastConfirmedAt: Now,
+                        ContestedAt: null,
+                        RetiredAt: null,
+                        SupersededBy: null,
+                        OrphanedProvenance: false)),
+                new InjectedWisdom(
+                    GlobalWisdomId,
+                    Score: 0.71,
+                    Salient: false,
+                    Wisdom: new WisdomListEntry(
+                        GlobalWisdomId,
+                        WisdomKind.Preference,
+                        Project.GlobalId,
+                        "Global",
+                        "Prefer the smallest diff that holds",
+                        Reinforcement: 5,
                         LastConfirmedAt: Now,
                         ContestedAt: null,
                         RetiredAt: null,
@@ -105,6 +129,28 @@ public class InjectionDetailTests : RenderTestBase
         detail.Find("span.detail-actions-note").TextContent
             .ShouldContain("One mark for the whole entry, not per line");
         detail.FindAll("div.score-row button").ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Every score row links into the universe being <em>browsed</em>, never into the linked
+    /// Wisdom's own Scope — the third member of that family, after the Wisdom surface's row links
+    /// and the drill-down's produced links. The Global row is the one that can tell them apart:
+    /// written from <c>ScopeProjectId</c> its link would switch the curator to Global's universe
+    /// mid-read, and the score table beside it would then be explaining a ranking from a screen
+    /// that is no longer the one it ranked for.
+    /// </summary>
+    [Fact]
+    public void EveryScoreRowLinks_IntoTheBrowsedProjectsUniverse_NotTheWisdomsOwnScope()
+    {
+        var detail = RenderAt();
+
+        detail.FindAll("a.score-text").Select(a => a.GetAttribute("href")).ShouldBe(
+        [
+            $"projects/{ProjectId}/wisdom/{WisdomId}",
+            $"projects/{ProjectId}/wisdom/{GlobalWisdomId}",
+        ]);
+        // The row still *says* Global, so what the link drops is the navigation, not the fact.
+        detail.FindAll("span.score-facts")[1].TextContent.ShouldContain("Global");
     }
 
     /// <summary>

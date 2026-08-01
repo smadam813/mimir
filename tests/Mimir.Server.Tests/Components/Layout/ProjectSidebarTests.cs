@@ -17,12 +17,6 @@ namespace Mimir.Server.Tests.Components.Layout;
 /// </summary>
 public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private (BunitContext Render, NavigationManager Nav) NewCircuit()
-    {
-        var render = CreateRenderContext();
-        return (render, render.Services.GetRequiredService<NavigationManager>());
-    }
-
     /// <summary>
     /// A real <see cref="CascadingValue{TValue}"/> through the render tree rather than bUnit's
     /// <c>AddCascadingValue</c>, whose value is constrained <c>notnull</c> — and null is one of the
@@ -51,7 +45,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     public async Task TheProjectList_PutsGlobalFirst()
     {
         await AddProjectAsync("alpha");
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, "");
 
@@ -74,7 +68,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     public async Task AnAttentionRow_IsALinkOnlyWhereTheTabCanReadTheFilterBack(string tab, bool linked)
     {
         var project = await AddProjectAsync();
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, $"projects/{project.Id}/{tab}");
 
@@ -94,7 +88,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     public async Task TheWisdomAttentionRows_LinkToTheListingUnderTheirOwnLens()
     {
         var project = await AddProjectAsync();
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, $"projects/{project.Id}/wisdom");
 
@@ -118,7 +112,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     [Fact]
     public void OnFirstRun_TheSecondGroupGivesWayToTheNoteAboutHooks()
     {
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, "", isFirstRun: true);
 
@@ -137,7 +131,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     public async Task WhileFirstRunIsUnknown_TheSidebarRendersItsOrdinarySecondGroup()
     {
         var project = await AddProjectAsync();
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, $"projects/{project.Id}/episodes", isFirstRun: null);
 
@@ -154,7 +148,7 @@ public class ProjectSidebarTests(ThrowawayDatabaseFixture fixture) : PostgresTes
     [Fact]
     public void TheSelectedRow_IsTheOneTheUrlNames()
     {
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
 
         var sidebar = RenderAt(render, nav, $"projects/{Project.GlobalId}/episodes");
 

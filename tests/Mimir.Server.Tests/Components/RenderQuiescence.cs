@@ -36,17 +36,45 @@ internal static class RenderQuiescence
     internal static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Returns once <paramref name="component"/> has gone <see cref="Quiet"/> without rendering.
-    /// Anything that dispatches an event — a click, a keystroke — wants this first.
+    /// Returns once <paramref name="component"/> has gone <paramref name="quiet"/> (by default
+    /// <see cref="Quiet"/>) without rendering. Anything that dispatches an event — a click, a
+    /// keystroke — wants this first.
+    /// <para>
+    /// What this measures is render silence, not the absence of work in flight: a query that has
+    /// been issued and not yet come back renders nothing, so the loop can exit while it runs. That
+    /// is harmless for a test that then clicks — a click needs the handler ids to be current, and
+    /// they are — but a test asserting a query did <em>not</em> run cannot infer it from silence,
+    /// and must pass a <paramref name="quiet"/> that outlasts the query it forbids.
+    /// <see cref="Patience"/> is the bound every positive pin in the suite already trusts a query
+    /// to land inside, so it is the one the negative pins wait.
+    /// </para>
     /// </summary>
-    internal static async Task SettleAsync<TComponent>(this IRenderedComponent<TComponent> component)
+    /// <exception cref="TimeoutException">
+    /// The component never went quiet — a refresh loop feeding itself, rather than a slow one.
+    /// Thrown rather than waited out, so it reads as its own failure instead of the run-level
+    /// cancellation the loop would otherwise sit in.
+    /// </exception>
+    internal static async Task SettleAsync<TComponent>(
+        this IRenderedComponent<TComponent> component, TimeSpan? quiet = null)
         where TComponent : IComponent
     {
+        var window = quiet ?? Quiet;
+        var deadline = window + Patience;
+        var waited = TimeSpan.Zero;
         var renders = -1;
+
         while (renders != component.RenderCount)
         {
+            if (waited > deadline)
+            {
+                throw new TimeoutException(
+                    $"{typeof(TComponent).Name} was still rendering after {waited.TotalSeconds:0} s " +
+                    $"({component.RenderCount} renders) and never went quiet for {window.TotalSeconds:0.##} s.");
+            }
+
             renders = component.RenderCount;
-            await Task.Delay(Quiet, TestContext.Current.CancellationToken);
+            await Task.Delay(window, TestContext.Current.CancellationToken);
+            waited += window;
         }
     }
 

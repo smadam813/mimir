@@ -19,12 +19,6 @@ namespace Mimir.Server.Tests.Components.Layout;
 /// </summary>
 public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
-    private (BunitContext Render, SurfaceSearch Search) NewCircuit()
-    {
-        var render = CreateRenderContext();
-        return (render, render.Services.GetRequiredService<SurfaceSearch>());
-    }
-
     /// <summary>
     /// The cascade <c>MainLayout</c> supplies, in whichever of its three states. Wrapped in a real
     /// <see cref="CascadingValue{TValue}"/> through the render tree rather than bUnit's
@@ -50,12 +44,13 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     public async Task WhileFirstRunIsUnknown_NeitherTheFigureNorTheChipIsAskedFor()
     {
         await AddProjectAsync();
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var header = RenderUnder(render, isFirstRun: null);
-        // Settled rather than asserted straight away: the claim under test is that a query the
-        // header could have run did not run, so the wait has to outlast the one it would have.
-        await header.SettleAsync();
+        // Silence for the same span a positive pin waits a query to arrive in, rather than the
+        // default window: the claim is that a query did not run, and a query in flight renders
+        // nothing, so a shorter wait would read the screen before the regression could reach it.
+        await header.SettleAsync(Patience);
 
         header.FindAll("div.pipeline").ShouldBeEmpty();
         header.FindComponents<ModelPullChip>().ShouldBeEmpty();
@@ -71,7 +66,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     {
         var project = await AddProjectAsync();
         await AddEpisodeAsync(project.Id, sealedAt: Now);
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var header = RenderUnder(render, isFirstRun: false);
 
@@ -88,7 +83,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     [Fact]
     public void OnFirstRun_ThePullChipTakesThePipelinesPlace()
     {
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var header = RenderUnder(render, isFirstRun: true);
 
@@ -104,7 +99,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     [Fact]
     public void WithNoSurfaceHoldingTheClaim_TheBoxIsDisabledAndSaysWhy()
     {
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var box = RenderUnder(render, isFirstRun: false).Find("input.input");
 
@@ -121,7 +116,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     [Fact]
     public async Task WhenASurfaceClaimsTheBox_TheHeaderReRendersAroundIt()
     {
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var header = RenderUnder(render, isFirstRun: false);
         // Settled first, or the pipeline query's own StateHasChanged lands after the claim and
         // repaints the box for reasons that have nothing to do with the subscription under test.
@@ -145,7 +140,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     [Fact]
     public async Task WhenTheClaimIsHandedBack_TheBoxEmptiesAndDisablesAgain()
     {
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var header = RenderUnder(render, isFirstRun: false);
         await header.SettleAsync();
         var claim = search.Claim(this, "Search this Project's Events…");
@@ -172,7 +167,7 @@ public class AppHeaderTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase
     [Fact]
     public async Task TypingInTheBox_SetsTheTermOnTheService()
     {
-        var (render, search) = NewCircuit();
+        var render = CreateRenderContext(out SurfaceSearch search);
         var header = RenderUnder(render, isFirstRun: false);
         using var claim = search.Claim(this, "Search…");
         await header.SettleAsync();

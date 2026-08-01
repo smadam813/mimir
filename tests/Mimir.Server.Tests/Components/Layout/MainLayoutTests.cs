@@ -20,12 +20,6 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
 {
     private const string BodyMarker = "the-routed-body";
 
-    private (BunitContext Render, NavigationManager Nav) NewCircuit()
-    {
-        var render = CreateRenderContext();
-        return (render, render.Services.GetRequiredService<NavigationManager>());
-    }
-
     private static IRenderedComponent<MainLayout> RenderShell(BunitContext render)
         => render.Render<MainLayout>(p => p.Add(
             c => c.Body, b => b.AddMarkupContent(0, $"<p id=\"{BodyMarker}\">routed</p>")));
@@ -38,7 +32,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
     [Fact]
     public void OnFirstRun_TheShellSwapsItsBodyAndDropsTheTabStrip()
     {
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var shell = RenderShell(render);
 
@@ -59,7 +53,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
     public async Task OnceAProjectExists_TheRoutedBodyRendersUnderTheFullChassis()
     {
         await AddProjectAsync();
-        var (render, _) = NewCircuit();
+        var render = CreateRenderContext();
 
         var shell = RenderShell(render);
 
@@ -84,7 +78,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
     public async Task TheBodyIsFlush_ExactlyOnTheSurfaceRoutes(string relativePath, bool flush)
     {
         await AddProjectAsync();
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
         nav.NavigateTo(relativePath);
 
         var shell = RenderShell(render);
@@ -104,7 +98,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
     public async Task AnUnresolvableProjectUrl_StillTakesTheFlushBody()
     {
         await AddProjectAsync();
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
         nav.NavigateTo($"projects/{Guid.CreateVersion7()}/episodes");
 
         var shell = RenderShell(render);
@@ -122,7 +116,7 @@ public class MainLayoutTests(ThrowawayDatabaseFixture fixture) : PostgresTestBas
     [Fact]
     public void OnFirstRun_TheBodyIsNeverFlushWhateverTheUrlSays()
     {
-        var (render, nav) = NewCircuit();
+        var render = CreateRenderContext(out NavigationManager nav);
         nav.NavigateTo($"projects/{Guid.CreateVersion7()}/wisdom");
 
         var shell = RenderShell(render);

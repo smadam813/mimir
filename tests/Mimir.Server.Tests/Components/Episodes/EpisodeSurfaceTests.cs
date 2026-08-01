@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mimir.Server.Components.Episodes;
 using Mimir.Server.Components.Shared;
 using Mimir.Server.Storage.Entities;
+using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Components.Episodes;
 
@@ -68,6 +69,12 @@ public class EpisodeSurfaceTests(ThrowawayDatabaseFixture fixture) : PostgresTes
         var unit = string.Join(' ', aside.QuerySelector("span.aside-figure-unit")!
             .TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         unit.ShouldBe("Events, 1 prompt");
+        // The Seal's own moment, beside the span rather than instead of it: Duration reads in its
+        // largest unit alone, so a curator correlating this session against an outside timeline
+        // cannot recover the Seal from StartedAt plus "3d". Dropping this row as redundant with
+        // Duration is the edit that has to go red.
+        var terms = aside.QuerySelectorAll("dl dt, dl dd").Select(e => e.TextContent.Trim()).ToArray();
+        terms[Array.IndexOf(terms, "Sealed") + 1].ShouldBe(EpisodeDisplay.Stamp(Now));
     }
 
     /// <summary>
