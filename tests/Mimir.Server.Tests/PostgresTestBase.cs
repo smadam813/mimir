@@ -99,32 +99,85 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     private protected MimirDbContext CreateContext() => Contexts.CreateDbContext();
 
     /// <summary>
-    /// Waits until some session on this database is blocked on another transaction — the handshake
-    /// a capture race test needs between starting the losing write and committing the winner's.
-    /// Filtered to <c>current_database()</c> because the classes run in parallel on their own
-    /// throwaway databases and each would otherwise see the others' waits (#70).
+    /// Runs a race whose winner has to be uncommitted for the loser to collide with it: opens a
+    /// transaction, lets <paramref name="seedUncommittedWinner"/> write into it, starts
+    /// <paramref name="losing"/>, waits for it to block, then commits and answers with what the
+    /// loser resolved to. The winner's entities are the caller's locals, so a test asserts the
+    /// loser reached them by closure rather than by anything handed back here.
     /// </summary>
-    private protected async Task WaitForABlockedSessionAsync()
+    private protected async Task<T> RaceAsync<T>(
+        Func<MimirDbContext, Task> seedUncommittedWinner, Func<Task<T>> losing)
     {
-        await using var probe = CreateContext();
-        for (var attempt = 0; attempt < 200; attempt++)
+        await using var winner = CreateContext();
+        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
+        await seedUncommittedWinner(winner);
+
+        var racing = Task.Run(losing, Token);
+        await WaitForABlockedSessionAsync(Token, racing);
+        await transaction.CommitAsync(Token);
+        return await racing;
+    }
+
+    /// <summary>
+    /// Polls until some other session on this database is blocked on one of the two locks a racing
+    /// write can collide on. Both are named rather than accepting any <c>Lock</c> wait for two
+    /// reasons: an unrelated waiter — autovacuum, a stray backend — would otherwise release the
+    /// test early and leave the collision it is named for unexercised, and a mutant that skips a
+    /// lock usually still blocks on the unique index behind it, so the check goes red on that
+    /// collision instead of timing out here waiting for a lock it never takes.
+    /// <c>pg_stat_activity</c>, not <c>pg_locks</c>, because the <c>transactionid</c> lock carries
+    /// no database oid to filter this class's throwaway database by — and an unfiltered
+    /// <c>pg_locks</c> would see other classes' databases (#70).
+    /// </summary>
+    /// <param name="racing">
+    /// The write expected to block, where the caller holds it. Observed on every poll so a racer
+    /// that faults, or that finishes without ever colliding, fails here with its own exception
+    /// instead of burning the whole budget and dying as an unexplained timeout. Omitted where the
+    /// racer is started after this call and there is no handle to pass.
+    /// </param>
+    private protected async Task WaitForABlockedSessionAsync(
+        CancellationToken cancellationToken, Task? racing = null)
+        => await PollUntilAnyAsync(
+            """
+            SELECT count(*)::int AS "Value"
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND wait_event IN ('advisory', 'transactionid')
+              AND pid <> pg_backend_pid()
+            """,
+            "no session ever blocked behind the uncommitted winner",
+            cancellationToken,
+            racing);
+
+    /// <summary>Runs <paramref name="countingSql"/> every 25 ms until it counts something.</summary>
+    private protected async Task PollUntilAnyAsync(
+        string countingSql,
+        string timeoutMessage,
+        CancellationToken cancellationToken,
+        Task? racing = null)
+    {
+        await using var context = CreateContext();
+        for (var attempt = 0; attempt < 400; attempt++)
         {
-            var blocked = await probe.Database.SqlQuery<int>(
-                $"""
-                SELECT count(*)::int AS "Value"
-                FROM pg_stat_activity
-                WHERE datname = current_database()
-                  AND wait_event IN ('transactionid', 'advisory')
-                """).SingleAsync(Token);
-            if (blocked > 0)
+            if (racing is { IsCompleted: true })
+            {
+                await racing;
+                throw new InvalidOperationException(
+                    $"The racing write finished without ever blocking, so {timeoutMessage} — "
+                    + "the collision this test is named for did not happen.");
+            }
+
+            var found = await context.Database.SqlQueryRaw<int>(countingSql).SingleAsync(cancellationToken);
+            if (found > 0)
             {
                 return;
             }
 
-            await Task.Delay(25, Token);
+            await Task.Delay(25, cancellationToken);
         }
 
-        Assert.Fail("No session blocked within 5s — the race under test never started.");
+        throw new TimeoutException(timeoutMessage);
     }
 
     /// <summary>
@@ -280,6 +333,33 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         };
         Context.Projects.Add(project);
         await Context.SaveChangesAsync(Token);
+        return project;
+    }
+
+    /// <summary>
+    /// A Project at exactly the <paramref name="identity"/> and <paramref name="rootPaths"/> named,
+    /// for the resolver cases that turn on two rows sharing one root — which the minting overload
+    /// above cannot set up. Seeded on its own context so the row arrives untracked, the way a
+    /// rival written by another process does.
+    /// </summary>
+    /// <param name="displayName">
+    /// Only where a test reads it. It deliberately does not re-derive
+    /// <c>ProjectResolver.DisplayNameOf</c>: a fixture that hand-copies a production derivation
+    /// pins yesterday's version of it the first time it changes.
+    /// </param>
+    private protected async Task<Project> AddProjectAsync(
+        string identity, string[] rootPaths, string displayName = "seeded")
+    {
+        await using var seeding = CreateContext();
+        var project = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = identity,
+            RootPaths = rootPaths,
+            DisplayName = displayName,
+        };
+        seeding.Projects.Add(project);
+        await seeding.SaveChangesAsync(Token);
         return project;
     }
 

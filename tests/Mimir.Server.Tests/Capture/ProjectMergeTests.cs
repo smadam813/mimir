@@ -121,7 +121,17 @@ public sealed class ProjectMergeTests(ThrowawayDatabaseFixture fixture) : Postgr
             thrown.Message.ShouldContain("test_unmergeable_references");
             await using var fresh = CreateContext();
             (await fresh.Projects.CountAsync(p => p.Id == survivor.Id || p.Id == loser.Id, Token))
-                .ShouldBe(2, "a merge that cannot complete leaves both rows where they were");
+                .ShouldBe(2, "a merge that cannot complete removes neither row");
+
+            // Not the same claim as AFailedMerge_LeavesNoHalfRePointedRows: the root union that
+            // precedes a merge is ProjectResolver's, not MergeAsync's, and it committed on its own
+            // before the merge was ever attempted (ProjectResolver.ResolveAsync's array_append runs
+            // outside any transaction). So a refused merge is not side-effect-free — both rows
+            // claim rootB afterwards, and only the merge's own writes rolled back.
+            var kept = await fresh.Projects.SingleAsync(p => p.Id == survivor.Id, Token);
+            kept.RootPaths.ShouldContain(rootB, "the pre-merge append is already durable");
+            var stillThere = await fresh.Projects.SingleAsync(p => p.Id == loser.Id, Token);
+            stillThere.RootPaths.ShouldContain(rootB, "and the loser was never re-pointed off it");
         }
         finally
         {

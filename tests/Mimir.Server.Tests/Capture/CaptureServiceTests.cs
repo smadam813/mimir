@@ -301,28 +301,26 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
         var request = Request();
         var episode = await Service().ResumeEpisodeAsync(request, Token);
 
-        await using var winner = CreateContext();
-        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
-        winner.Events.Add(new Event
-        {
-            Id = Guid.CreateVersion7(),
-            EpisodeId = episode.Id,
-            Seq = 1,
-            Type = EventType.PostToolUse,
-            At = Now,
-            Payload = "{}",
-            PayloadFullSize = 2,
-        });
-        await winner.SaveChangesAsync(Token);
+        // The max-seq read misses the uncommitted row, so the losing append claims seq 1 too and
+        // blocks on the (episode_id, seq) unique index until the winner commits.
+        var losing = await RaceAsync(
+            winner =>
+            {
+                winner.Events.Add(new Event
+                {
+                    Id = Guid.CreateVersion7(),
+                    EpisodeId = episode.Id,
+                    Seq = 1,
+                    Type = EventType.PostToolUse,
+                    At = Now,
+                    Payload = "{}",
+                    PayloadFullSize = 2,
+                });
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Service().AppendEventAsync(request, EventType.Stop, Token));
 
-        // The max-seq read misses the uncommitted row, so this append claims seq 1 too and blocks
-        // on the (episode_id, seq) unique index until the winner commits.
-        var losing = Task.Run(
-            async () => await Service().AppendEventAsync(request, EventType.Stop, Token), Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
-
-        (await losing).Seq.ShouldBe(2);
+        losing.Seq.ShouldBe(2);
     }
 
     [Fact]
@@ -347,8 +345,6 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
         var request = Request();
         var project = await AddProjectAsync();
 
-        await using var winner = CreateContext();
-        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
         var winning = new Episode
         {
             Id = Guid.CreateVersion7(),
@@ -358,16 +354,18 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
             Cwd = request.Cwd,
             Distillation = DistillationState.Pending,
         };
-        winner.Episodes.Add(winning);
-        await winner.SaveChangesAsync(Token);
 
-        // The session lookup misses the uncommitted row, so this insert blocks on the unique
+        // The session lookup misses the uncommitted row, so the losing insert blocks on the unique
         // session_id index until the winner commits.
-        var losing = Task.Run(async () => await Service().ResumeEpisodeAsync(request, Token), Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
+        var losing = await RaceAsync(
+            winner =>
+            {
+                winner.Episodes.Add(winning);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Service().ResumeEpisodeAsync(request, Token));
 
-        (await losing).Id.ShouldBe(winning.Id);
+        losing.Id.ShouldBe(winning.Id);
         (await FromDb(db => db.Episodes.CountAsync(e => e.SessionId == request.SessionId, Token)))
             .ShouldBe(1);
     }
@@ -378,28 +376,24 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
         // The other #17 race on this path: the Project was resolved, then a concurrent clone merge
         // removed it before the Episode landed. The insert's FK violation is the signal to
         // re-resolve, and the survivor holds the loser's roots by then.
-        var suffix = Guid.NewGuid().ToString("N");
-        var root = $@"C:\git\merged-{suffix}";
+        var root = Root("C", "merged");
         var survivor = await AddProjectAsync("survivor");
         var loser = await new ProjectResolver(Context).ResolveAsync(root, root, Token);
 
-        await using var merging = CreateContext();
-        await using var transaction = await merging.Database.BeginTransactionAsync(Token);
-        await merging.Database.ExecuteSqlAsync(
-            $"UPDATE projects SET root_paths = array_append(root_paths, {root}) WHERE id = {survivor.Id}",
-            Token);
-        await merging.Database.ExecuteSqlAsync(
-            $"DELETE FROM projects WHERE id = {loser.Id}", Token);
-
         // The resolve still sees the uncommitted-deleted row, so the Episode insert takes an FK
         // lock on it and blocks until the merge commits — then fails, and retries onto the survivor.
-        var racing = Task.Run(
-            async () => await Service().ResumeEpisodeAsync(Request(identity: root, root: root), Token),
-            Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
+        var racing = await RaceAsync(
+            async merging =>
+            {
+                await merging.Database.ExecuteSqlAsync(
+                    $"UPDATE projects SET root_paths = array_append(root_paths, {root}) WHERE id = {survivor.Id}",
+                    Token);
+                await merging.Database.ExecuteSqlAsync(
+                    $"DELETE FROM projects WHERE id = {loser.Id}", Token);
+            },
+            () => Service().ResumeEpisodeAsync(Request(identity: root, root: root), Token));
 
-        (await racing).ProjectId.ShouldBe(survivor.Id);
+        racing.ProjectId.ShouldBe(survivor.Id);
     }
 
     private async Task<string> StoredPayloadAsync(Guid eventId)

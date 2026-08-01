@@ -141,7 +141,7 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         var remote = Identity("known-root");
         var root = Root("C", "known-root");
         var survivor = await Resolve(remote, root);
-        var rival = await SeedProjectAsync(root, [root]);
+        var rival = await AddProjectAsync(root, [root]);
 
         var resolved = await Resolve(remote, root);
 
@@ -157,9 +157,9 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         // the path-born row. Only the path-born one is the merge's loser.
         var remote = Identity("masking");
         var root = Root("C", "masking");
-        var survivor = await SeedProjectAsync(remote, [Root("C", "masking-home"), root]);
-        var remoteHolder = await SeedProjectAsync(Identity("masking-other"), [Root("D", "masking-other"), root]);
-        var pathBorn = await SeedProjectAsync(root, [root]);
+        var survivor = await AddProjectAsync(remote, [Root("C", "masking-home"), root]);
+        var remoteHolder = await AddProjectAsync(Identity("masking-other"), [Root("D", "masking-other"), root]);
+        var pathBorn = await AddProjectAsync(root, [root]);
 
         var resolved = await Resolve(remote, root);
 
@@ -176,8 +176,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         var identity = Identity("create-race");
         var root = Root("C", "create-race");
 
-        await using var winner = CreateContext();
-        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
         var winning = new Project
         {
             Id = Guid.CreateVersion7(),
@@ -185,16 +183,17 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
             RootPaths = [Root("D", "create-race-winner")],
             DisplayName = "winner",
         };
-        winner.Projects.Add(winning);
-        await winner.SaveChangesAsync(Token);
 
-        // Neither query sees the uncommitted row, so this resolve inserts and blocks on the unique
-        // identity index until the winner commits.
-        var losing = Task.Run(async () => await Resolve(identity, root), Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
+        // Neither query sees the uncommitted row, so the losing resolve inserts and blocks on the
+        // unique identity index until the winner commits.
+        var resolved = await RaceAsync(
+            winner =>
+            {
+                winner.Projects.Add(winning);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Resolve(identity, root));
 
-        var resolved = await losing;
         resolved.Id.ShouldBe(winning.Id);
         (await Count(identity)).ShouldBe(1);
     }
@@ -206,8 +205,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         var root = Root("C", "collide");
         await Resolve(root, root);
 
-        await using var winner = CreateContext();
-        await using var transaction = await winner.Database.BeginTransactionAsync(Token);
         var survivor = new Project
         {
             Id = Guid.CreateVersion7(),
@@ -215,16 +212,17 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
             RootPaths = [Root("D", "collide-survivor")],
             DisplayName = "survivor",
         };
-        winner.Projects.Add(survivor);
-        await winner.SaveChangesAsync(Token);
 
-        // The identity query misses the uncommitted row, so this matches by root and tries the
-        // upgrade, blocking on the unique index until the survivor commits.
-        var upgrading = Task.Run(async () => await Resolve(remote, root), Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
+        // The identity query misses the uncommitted row, so the losing resolve matches by root and
+        // tries the upgrade, blocking on the unique index until the survivor commits.
+        var resolved = await RaceAsync(
+            winner =>
+            {
+                winner.Projects.Add(survivor);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Resolve(remote, root));
 
-        var resolved = await upgrading;
         resolved.Id.ShouldBe(survivor.Id);
         resolved.RootPaths.ShouldContain(root, "the re-read resolves onto the survivor, clones and all");
         (await FromDb(db => db.Projects.CountAsync(p => p.RootPaths.Contains(root), Token)))
@@ -262,8 +260,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
         var survivor = await Resolve(remote, rootA);
         var loser = await Resolve(rootB, rootB);
 
-        await using var concurrent = CreateContext();
-        await using var transaction = await concurrent.Database.BeginTransactionAsync(Token);
         var straggler = new Episode
         {
             Id = Guid.CreateVersion7(),
@@ -273,16 +269,18 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
             Cwd = rootB,
             Distillation = DistillationState.Pending,
         };
-        concurrent.Episodes.Add(straggler);
-        await concurrent.SaveChangesAsync(Token);
 
         // The insert holds a key-share lock on the loser's row, so the merge's DELETE blocks; once
         // it commits the delete sees a referencing Episode and the whole merge rolls back.
-        var merging = Task.Run(async () => await Resolve(remote, rootB), Token);
-        await WaitForABlockedSessionAsync();
-        await transaction.CommitAsync(Token);
+        var merged = await RaceAsync(
+            concurrent =>
+            {
+                concurrent.Episodes.Add(straggler);
+                return concurrent.SaveChangesAsync(Token);
+            },
+            () => Resolve(remote, rootB));
 
-        (await merging).Id.ShouldBe(survivor.Id);
+        merged.Id.ShouldBe(survivor.Id);
         (await FromDb(db => db.Projects.AnyAsync(p => p.Id == loser.Id, Token)))
             .ShouldBeFalse("the retried merge removes the loser");
         var repointed = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == straggler.Id, Token));
@@ -291,25 +289,6 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
 
     private async Task<Project> Resolve(string identity, string root)
         => await new ProjectResolver(Context).ResolveAsync(identity, root, Token);
-
-    /// <summary>
-    /// A Project at exactly the identity and roots a test names — <c>AddProjectAsync</c> mints
-    /// both, and every rival case here turns on two rows sharing one root.
-    /// </summary>
-    private async Task<Project> SeedProjectAsync(string identity, string[] rootPaths)
-    {
-        await using var seeding = CreateContext();
-        var project = new Project
-        {
-            Id = Guid.CreateVersion7(),
-            Identity = identity,
-            RootPaths = rootPaths,
-            DisplayName = identity.Split('/', '\\')[^1],
-        };
-        seeding.Projects.Add(project);
-        await seeding.SaveChangesAsync(Token);
-        return project;
-    }
 
     private async Task<int> Count(string identity)
         => await Context.Projects.CountAsync(p => p.Identity == identity, Token);
