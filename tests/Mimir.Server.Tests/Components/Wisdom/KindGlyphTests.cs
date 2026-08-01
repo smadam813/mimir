@@ -26,4 +26,21 @@ public class KindGlyphTests : RenderTestBase
         // Decorative: every caller writes the Kind's word beside it, and that is what is read out.
         span.GetAttribute("aria-hidden").ShouldBe("true");
     }
+
+    /// <summary>
+    /// Kind is told apart by shape, never by hue (#86) — so the four have to be four, and the
+    /// enum rather than a hand-list is what says how many: a §3 Kind added tomorrow either draws
+    /// its own outline or lands here rather than sharing Fact's circle in silence. A set-level
+    /// property of the rendered markup, which is why it is not the single-case pin above.
+    /// </summary>
+    [Fact]
+    public void EveryKindTheDomainHas_DrawsItsOwnShape()
+    {
+        var shapes = Enum.GetValues<WisdomKind>()
+            .Select(kind => Render<KindGlyph>(p => p.Add(g => g.Kind, kind))
+                .Find("span.kind-glyph").ClassList
+                .Single(c => c.StartsWith("glyph-", StringComparison.Ordinal)));
+
+        shapes.ShouldBeUnique();
+    }
 }

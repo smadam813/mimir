@@ -7,6 +7,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Capture;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
+using Mimir.Server.Health;
 using Mimir.Server.Modules;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage;
@@ -167,8 +168,9 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
     /// <c>AddMimirStorage</c> does, so the surface resolves what it resolves in production.
     /// Registered on top of that is what a §8 surface actually takes, and every registration comes
     /// from the app's own composition rather than a copy of it: <c>AddMimirUi</c> for the four
-    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, and <c>CaptureModule</c> for the
-    /// Episode feed. The module is constructed and asked, not restated — its <c>AddServices</c>
+    /// browsers and the header's per-circuit <c>SurfaceSearch</c>, <c>AddMimirHealth</c> for the
+    /// snapshot the header's pill and pull chip read, and <c>CaptureModule</c> for the Episode
+    /// feed. The module is constructed and asked, not restated — its <c>AddServices</c>
     /// ignores the configuration it takes and its two other registrations are inert here, which is
     /// a small price for a line that cannot drift the day Capture decorates the feed or changes its
     /// lifetime. That drift is the class this tier exists to close (#94/#108), so the harness must
@@ -198,11 +200,26 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         var context = new BunitContext();
         AddThrowawayStorage(context.Services);
         context.Services.AddMimirUi();
+        context.Services.AddMimirHealth();
         new CaptureModule().AddServices(context.Services, new ConfigurationBuilder().Build());
         context.Services.AddSingleton<TimeProvider>(Clock);
         context.Services.AddSingleton(CreateMergeGate());
         context.Services.AddLogging();
         _renderContexts.Add(context);
+        return context;
+    }
+
+    /// <summary>
+    /// The same renderer, with one of its own services handed back beside it — the circuit-scoped
+    /// <c>SurfaceSearch</c> a surface claims through, or the <c>NavigationManager</c> a route-aware
+    /// component reads. Resolved from the renderer rather than constructed, because the whole point
+    /// of this tier is that the test drives the same instance the component was injected with.
+    /// </summary>
+    private protected BunitContext CreateRenderContext<TService>(out TService service)
+        where TService : notnull
+    {
+        var context = CreateRenderContext();
+        service = context.Services.GetRequiredService<TService>();
         return context;
     }
 

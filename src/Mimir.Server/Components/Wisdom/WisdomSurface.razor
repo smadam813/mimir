@@ -7,12 +7,6 @@
 @inject NavigationManager Nav
 @inject ILogger<WisdomSurface> Logger
 
-@* Spec §8.1, one screen: the list and the detail are panes of the same surface, so a curator can
-   work down a list without losing their place (#91). The list is the selected Project's Ambient
-   Candidate Universe — its Wisdom plus Global (ADR-0009) — which is what a session in that
-   repository actually recalls, and what makes the per-row Scope label mean something. Both routes
-   render this: the listing route with nothing selected, the detail route with that Wisdom
-   selected, so every existing deep link still resolves. *@
 <div class="wisdom-surface">
     <section class="list-pane" aria-label="Wisdom">
         <header class="list-head">
@@ -20,9 +14,6 @@
                 <h4>@Words.Heading</h4>
                 @if (_listing is { } counts)
                 {
-                    @* Both figures, not one: the sidebar's counts stay Project-owned, so they no
-                       longer match this list's length. Stating the arithmetic beats leaving it as
-                       an inference (ADR-0009). *@
                     <span class="list-counts" title="This Project's own Wisdom plus Global — the set a session here recalls (§7)">
                         @if (IsGlobal)
                         {
@@ -170,9 +161,6 @@
                             }
                         </div>
 
-                        @* §8.1's own acceptance criterion: what saving does, on the screen rather than
-                           in the spec. The sentence itself lives in WisdomDisplay, where a test holds
-                           it to the gate it describes — markup no test renders holds it to nothing. *@
                         <p class="edit-explains">
                             @WisdomDisplay.EditExplanation(detail.CurrentVersion + 1, entry.Reinforcement)
                         </p>
@@ -202,9 +190,6 @@
                         <p class="pane-error" role="alert">@failure</p>
                     }
 
-                    @* §8.1's version chain (#93). Two views of one list: what each version changed
-                       against the one below it, or every version whole. The choice outlives the
-                       selection deliberately — see _chainView. *@
                     <div class="chain-head">
                         <h5 class="detail-section">
                             Version chain
@@ -224,20 +209,11 @@
                         </span>
                     </div>
                     <ol class="version-list">
-                        @* The draft rides in as the version it would become, so a curator reads their
-                           own rewording against what stands before committing it. Passed raw, beside
-                           the same text the Save button reads: whether it is a version at all is the
-                           gate's no-op set to decide, which is what keeps this row and that button
-                           from disagreeing. The chain under it was diffed when the Wisdom was read —
-                           only this row is a function of the keystroke. *@
                         @foreach (var version in WisdomDisplay.WithPendingEdit(
                             _chain, entry.Text, _mode is DetailMode.Editing ? _draft : null))
                         {
-                            @* Keyed on the version, because this is the one list on the surface that
-                               grows at its head: the first keystroke that parts the draft from the
-                               stored text inserts the pending row, and positionally Blazor would
-                               re-patch every row below it — each one's badge, stamp and whole run
-                               tree — rather than the one node that arrived. *@
+                            @* Keyed because this is the one list on the surface that grows at its
+                               head, where positional patching would re-render every row below. *@
                             <li @key="version.Version"
                                 class="version-row @(version.Pending ? "is-pending" : null)">
                                 <span class="version-rail" aria-hidden="true">
@@ -263,11 +239,8 @@
                                     </div>
                                     @if (_chainView is VersionChainView.Changed)
                                     {
-                                        @* The roles are each element's own implicit one, spelled out
-                                           because browsers largely do not expose it otherwise: bare
-                                           del and ins, a screen reader reads straight through, and
-                                           the row becomes the old wording and the new one spoken as
-                                           one sentence no version ever said. *@
+                                        @* role= spells out each element's own implicit role, which
+                                           browsers largely do not expose to a screen reader. *@
                                         <p class="version-text">@foreach (var run in version.Changed)
                                             {
                                                 @if (run.Change is TextChange.Removed)
@@ -300,12 +273,6 @@
                         }
                     </ol>
 
-                    @* §8.1: Delete is the permanent act — confirmed, and kept visibly apart from Retire,
-                       which is not (§10). Absent entirely while the editor is open, so "Delete forever"
-                       can never be the click that throws away a draft the curator is still typing.
-
-                       Keyed and captioned off the detail on screen rather than off SelectedId, for
-                       the reason ConfirmDelete.OnConfirm gives. *@
                     @if (_mode is not DetailMode.Editing)
                     {
                         <div class="pane-danger">
@@ -317,25 +284,14 @@
                 }
             </main>
 
-            @* What the chain's badges mean, on the screen rather than looked up (§8.1). Pinned under
-               the pane it explains, and only beside a Wisdom — over the unselected placeholder it
-               would be a glossary for badges that are not there. Its entries are the enum's, so a
-               cause §3 gains cannot go missing from it.
-
-               The condition is the chain's own, both halves: a list-only refresh deliberately leaves
-               _detail alone, so one that wins the generation check over a navigation to the listing
-               route leaves a detail standing under a null selection. _detail alone would draw the
-               legend over the placeholder there. *@
             @if (SelectedId is not null && _detail is not null)
             {
                 <footer class="cause-legend">
                     <p>
                         @foreach (var gloss in WisdomDisplay.CauseLegend)
                         {
-                            @* One flowing paragraph, so each entry ends in a real space rather than a
-                               margin: two elements with only a gap between them give the renderer
-                               nowhere to break the line. It rides in the expression because Razor
-                               trims literal whitespace between elements. *@
+                            @* The trailing space rides inside the expression because Razor trims
+                               literal whitespace between elements. *@
                             <b>@gloss.Word</b>@($" — {gloss.Meaning} ")
                         }
                     </p>
@@ -343,9 +299,6 @@
             }
         </div>
 
-        @* The numbers a curator judges by: what has confirmed this Wisdom, what Recall has done
-           with it, and what it came from. Only ever beside a Wisdom — an aside of blanks over the
-           unselected placeholder would be three headings claiming nothing. *@
         @if (_detail is { } aside)
         {
             <aside class="pane-aside">
@@ -412,8 +365,6 @@
                                 }
                                 else
                                 {
-                                    @* Nothing to open: a harvested file and a deliberate save are
-                                       records with no §8.2 surface of their own. *@
                                     <span class="aside-link" @key="link.Id">
                                         <span class="aside-link-title">@WisdomDisplay.ProvenanceTitle(link)</span>
                                         <span class="aside-link-detail">@WisdomDisplay.ProvenanceDetail(link)</span>
@@ -433,36 +384,21 @@
 </div>
 
 @code {
-    /// <summary>The sidebar's selected Project — whose ambient universe this list is.</summary>
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
-    /// <summary>The Wisdom the detail route named, or null on the listing route.</summary>
     [Parameter]
     public Guid? SelectedId { get; set; }
 
-    /// <summary>Which slice of the universe — the sidebar's "Needs attention" links set this.</summary>
     [Parameter]
     public WisdomLens Lens { get; set; }
 
-    /// <summary>
-    /// Whether the detail pane is reading or editing. The confirmation that used to be a third
-    /// state here is <see cref="Shared.ConfirmDelete"/>'s own since #106; what stays this surface's
-    /// is the gate above it — Delete is absent entirely while the editor is open, so "Delete
-    /// forever" can never be the click that throws away a draft the curator is still typing.
-    /// </summary>
     private enum DetailMode { Viewing, Editing }
 
     private WisdomListing? _listing;
     private WisdomDetail? _detail;
 
-    /// <summary>
-    /// The selected Wisdom's saved version chain, diffed once when it is read rather than on every
-    /// render: the rows below the editor cannot change while a curator types, and re-diffing the
-    /// whole chain per keystroke is work the screen would only throw away. Kept in step with
-    /// <see cref="_detail"/> — the two are assigned together, and neither is touched by a refresh
-    /// that did not re-read the detail.
-    /// </summary>
+    // Diffed once when the detail is read, not per render, and assigned with it.
     private IReadOnlyList<VersionEntry> _chain = [];
     private Guid? _boundSelection;
     private Guid _boundProject;
@@ -472,20 +408,10 @@
     private DetailMode _mode;
     private bool _saving;
     private string _draft = "";
-    /// <summary>
-    /// A curation action that did not land, and the Wisdom it did not land on. The pair rather than
-    /// the text alone: an action confirmed on the Wisdom still on screen can fail after the curator
-    /// has clicked another row, and bare, its "this Wisdom is untouched" would render under that
-    /// row's detail as a claim about it.
-    /// </summary>
     private (Guid Subject, string Text)? _failure;
 
-    /// <summary>
-    /// How the version chain reads, and the one piece of detail state a selection deliberately
-    /// does not reset: a curator working down a list to see what a run of edits did would
-    /// otherwise re-pick it on every row. Not a URL parameter either — it is how this screen is
-    /// being read right now, not what it is showing, so it has no business in a link (§8.1).
-    /// </summary>
+    // Stated rather than left to the enum's declaration order: which view the chain opens on is
+    // not pinned anywhere — the render test switches views and asserts on the switch (#134).
     private VersionChainView _chainView = VersionChainView.Changed;
 
     private IDisposable? _claim;
@@ -500,18 +426,10 @@
 
     private string DetailHref(Guid wisdomId) => WisdomRoute.Detail(ProjectId, wisdomId, Lens);
 
-    /// <summary>
-    /// The §8.1 drill to the underlying Event: its Episode page, anchored on the Event. The
-    /// fragment is <see cref="EpisodeDisplay.EventAnchorHref"/>'s, which is also what the stream
-    /// writes its ids from and what opens the stream's bound on arrival — spelling it here a second
-    /// time is how the link silently stops landing.
-    /// </summary>
     private static string EpisodeHref(ProvenanceEntry link)
         => $"projects/{link.EpisodeProjectId}/episodes/{link.EpisodeId}"
             + (link.EventId is { } eventId ? EpisodeDisplay.EventAnchorHref(eventId) : "");
 
-    /// <summary>What the lens is called and what its emptiness means — one switch, so the two
-    /// can never describe different lenses.</summary>
     private (string Heading, string Empty) Words => Lens switch
     {
         WisdomLens.Contested => ("Contested",
@@ -528,25 +446,16 @@
 
     protected override void OnInitialized()
     {
-        // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
-        // answering each one — the same debounce the chassis's own live readouts use (#89), minus
-        // the ceiling they take: Debouncer's ceilingMultiple says why a search lane gets none.
         _debounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Wisdom listing refresh");
 
-        // One search box, claimed by whichever surface is on screen (§8). Claiming before
-        // subscribing keeps the claim's own reset from costing a query the first load already does.
-        // Parameters are set before this runs, so anchoring here is also the first anchor: it is
-        // what keeps OnParametersSetAsync's re-anchor from re-claiming over a claim one line old.
+        // Claimed before subscribing, so the claim's own reset does not schedule a query the first
+        // load already does.
         AnchorOnProject();
         Search.Changed += OnSearchChanged;
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        // Selecting another row must not carry the outgoing one's half-typed draft or its inline
-        // failure onto it. An armed Delete is the same rule, and it is ConfirmDelete's own to
-        // enforce off SubjectKey (#106) — every host of it gets that, not just the one that
-        // remembered to write the reset.
         if (_boundSelection != SelectedId)
         {
             _boundSelection = SelectedId;
@@ -554,9 +463,6 @@
             _failure = null;
         }
 
-        // Landing in another Project re-anchors the list on its universe, the way the tab this
-        // replaced re-anchored its project filter — so nothing picked against the outgoing one
-        // keeps narrowing the incoming one, and the header re-reads its name.
         if (_boundProject != ProjectId)
         {
             AnchorOnProject();
@@ -565,15 +471,6 @@
         await RefreshAsync();
     }
 
-    /// <summary>
-    /// Binds this surface to <see cref="ProjectId"/>. It holds the header's box for the Project on
-    /// screen, not for its own lifetime: Blazor keeps the one instance across a Project change —
-    /// same route, no <c>@key</c> — so the outgoing Project's narrowings are this method's to shed,
-    /// the typed term as much as the Kind chip. Re-claiming is what sheds it, since
-    /// <see cref="SurfaceSearch.Claim"/> resets the term on the claiming edge and nothing else does
-    /// while one instance lives (#108). Released first, for the reason
-    /// <see cref="SurfaceSearch.Claim"/> states.
-    /// </summary>
     private void AnchorOnProject()
     {
         _boundProject = ProjectId;
@@ -583,33 +480,19 @@
         _claim = Search.Claim(this, "Search this Project's Wisdom…");
     }
 
-    /// <summary>
-    /// ARIA states are strings: a <c>bool</c> here would render as a boolean <em>attribute</em>,
-    /// present-or-absent, which is not what <c>aria-pressed</c> means.
-    /// </summary>
+    // A string, not a bool: a bool renders as a present-or-absent attribute, which is not what
+    // aria-pressed means.
     private static string Pressed(bool active) => active ? "true" : "false";
 
     private void OnSearchChanged()
         => _debounce?.Schedule(() => InvokeAsync(() => RefreshAsync(reloadDetail: false)));
 
-    /// <summary>The whole surface: the list, and the detail beside it.</summary>
     private Task RefreshAsync() => RefreshAsync(reloadDetail: true);
 
-    /// <summary>
-    /// Re-reads the surface. <paramref name="reloadDetail"/> is false for the two triggers that
-    /// cannot have changed it: <see cref="WisdomBrowser.GetAsync"/> takes neither the search term
-    /// nor the Kind, so a keystroke and a chip narrow the list beside the detail and nothing else.
-    /// That matters more than the duplicate read it saves — the aside's recall figures are an
-    /// aggregate over every logged injection, by far the most expensive read on this surface, and
-    /// a debounced burst would otherwise re-run it per burst with a row selected.
-    /// </summary>
     private async Task RefreshAsync(bool reloadDetail)
     {
         var generation = ++_generation;
 
-        // The Project row only answers the header's name and Global-ness, neither of which a
-        // keystroke or a chip click can change — so it is read once per universe, not once per
-        // refresh. OnParametersSetAsync drops it when the Project does change.
         var project = _project ?? await Chassis.GetProjectAsync(ProjectId, CancellationToken.None);
         var listing = await Browser.ListAsync(
             new WisdomQuery(ProjectId, Search.Term, _kind, Lens), CancellationToken.None);
@@ -617,9 +500,6 @@
             ? await Browser.GetAsync(selected, CancellationToken.None)
             : null;
 
-        // A newer refresh — a later keystroke, a chip, a row click — may have landed while this
-        // one was awaiting its queries; drop this one rather than overwrite fresher state with
-        // stale. The same guard the sidebar carries, and this surface has more triggers than it.
         if (generation != _generation)
         {
             return;
@@ -628,9 +508,6 @@
         _project = project;
         _listing = listing;
 
-        // Left alone, not assigned null, when this refresh did not read it: a list-only refresh
-        // that raced the first load would otherwise win the generation check and blank a detail
-        // that was still on its way.
         if (reloadDetail)
         {
             _detail = detail;
@@ -658,14 +535,11 @@
         _saving = true;
         _failure = null;
 
-        // The one action left that may read SelectedId: the editor is dropped by the selection
-        // reset above before the window's first frame, so it can only be open while the selection
-        // and the record on screen still agree.
+        // The one action that may read SelectedId: the selection reset above drops the editor
+        // before the window opens, so it is only ever open while the two still agree.
         var wisdomId = SelectedId!.Value;
         try
         {
-            // The edit re-embeds the new text (§8.1), so this is the one curation action that
-            // needs Ollama up; the failure stays inline and the draft stays editable.
             await Browser.EditAsync(wisdomId, _draft, CancellationToken.None);
             _mode = DetailMode.Viewing;
             await RefreshAsync();
@@ -682,11 +556,6 @@
         }
     }
 
-    // Both take the Wisdom whose row drew the button, never SelectedId: which of the two renders is
-    // chosen by the on-screen record's RetiredAt, and in the window SelectedId already names a row
-    // the curator has not seen — see ConfirmDelete.OnConfirm for that window. Retire is reversible
-    // where Delete is not, but a reversal still has to be found first, on a record nobody knew was
-    // touched.
     private Task RetireAsync(Guid wisdomId) => CurateAsync(
         wisdomId,
         () => Browser.RetireAsync(wisdomId, CancellationToken.None),
@@ -697,12 +566,6 @@
         () => Browser.UnretireAsync(wisdomId, CancellationToken.None),
         "The unretire did not land — Postgres has to be reachable. Check the Health pill.");
 
-    /// <summary>
-    /// The standing changes share the shape the edit already had: do it, re-read, and keep a
-    /// transient failure inline. Unhandled, an exception out of a Blazor event handler takes the
-    /// circuit down with it — the whole page reloads and the curator loses their place, over a
-    /// blipped connection that a banner above a stale row would have ridden out.
-    /// </summary>
     private async Task CurateAsync(Guid wisdomId, Func<Task> curate, string failure)
     {
         _failure = null;
@@ -713,25 +576,16 @@
         }
         catch (Exception ex)
         {
+            // Swallowed and said inline: unhandled, an exception out of a Blazor event handler
+            // takes the circuit down and the curator loses their place.
             Logger.LogWarning(ex, "Wisdom curation failed");
             _failure = (wisdomId, failure);
         }
     }
 
-    /// <summary>The failure to say above <paramref name="onScreen"/>, if it is that one's.</summary>
     private string? FailureFor(Guid onScreen)
         => _failure is { } failed && failed.Subject == onScreen ? failed.Text : null;
 
-    /// <summary>
-    /// Takes the Wisdom <see cref="ConfirmDelete.OnConfirm"/> named, never <see cref="SelectedId"/>
-    /// — see that callback for the window the two disagree in.
-    ///
-    /// The navigation is conditional on them agreeing for the same reason. Deleting the Wisdom the
-    /// route names leaves the route pointing at a dead record, so the surface has to leave; deleting
-    /// the one still on screen after the curator clicked elsewhere does not, and navigating anyway
-    /// would throw away the selection they just made. Either way the list has to be re-read, since
-    /// nothing announces a Wisdom delete on the feed.
-    /// </summary>
     private async Task DeleteAsync(Guid wisdomId)
     {
         _failure = null;
@@ -741,7 +595,7 @@
         }
         catch (Exception ex)
         {
-            // Nothing was deleted, so the row is still there to try again on — say so and stay.
+            // Swallowed and said inline: nothing was deleted, so the row is still there to retry on.
             Logger.LogWarning(ex, "Wisdom delete failed");
             _failure = (wisdomId, "The delete did not land — Postgres has to be reachable. "
                 + "Check the Health pill; this Wisdom is untouched.");

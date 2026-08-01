@@ -3,10 +3,6 @@
 @using Mimir.Server.Components.Wisdom
 @using Mimir.Server.Ui
 
-@* Spec §8.1 (#91): one screen on both routes — the listing route renders it unselected, the
-   detail route with that Wisdom selected, so every existing deep link, including the Injection
-   log's, still resolves. The literal "wisdom" segment outranks ProjectPage's {Tab} parameter, so
-   this page owns the surface and ProjectPage no longer carries a Wisdom case. *@
 <PageTitle>Wisdom · Mimir</PageTitle>
 
 <h1 class="sr-only">Wisdom</h1>
@@ -17,11 +13,9 @@
     [Parameter]
     public Guid ProjectId { get; set; }
 
-    /// <summary>Null on the listing route: the surface renders its unselected placeholder.</summary>
     [Parameter]
     public Guid? WisdomId { get; set; }
 
-    /// <summary>The sidebar's "Needs attention" links land here; see <see cref="WisdomRoute"/>.</summary>
     [Parameter, SupplyParameterFromQuery(Name = WisdomRoute.LensName)]
     public string? Show { get; set; }
 }
