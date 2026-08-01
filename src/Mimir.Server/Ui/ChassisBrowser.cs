@@ -12,11 +12,7 @@ public sealed record ProjectListItem(Guid Id, string DisplayName, bool IsGlobal,
 
 /// <summary>
 /// The header's whole-install pipeline readout: Episodes captured, Sealed Episodes still owed
-/// distillation (failed included — same predicate as <c>DistillationQueue.QueueDepthAsync</c>),
-/// active Wisdom admitted, and Injections recalled today (UTC). <see cref="Distilling"/> is a
-/// narrower question than <c>Queued > 0</c>: it is true only while a claim is actually held
-/// (<see cref="DistillationState.Running"/>), not merely while work is backlogged — the Distilling
-/// counter pulses on this, not on backlog, so a stuck Failed Episode does not read as "in flight".
+/// distillation, active Wisdom admitted, and Injections recalled today (UTC).
 /// </summary>
 public sealed record HeaderPipeline(int Episodes, int Queued, int Wisdom, int RecalledToday, bool Distilling);
 
@@ -76,12 +72,6 @@ public sealed class ChassisBrowser(IDbContextFactory<MimirDbContext> contexts, T
             p.Id == Project.GlobalId,
             db.Wisdom.Count(w => w.ScopeProjectId == p.Id && w.RetiredAt == null)));
 
-    /// <summary>
-    /// The header's live readout, across every Project. <c>Queued</c> restates
-    /// <c>DistillationQueue.QueueDepthAsync</c>'s predicate verbatim rather than calling it: that
-    /// class is scoped to a request's own <c>MimirDbContext</c>, while every UI browser opens its
-    /// own short-lived one from a Singleton.
-    /// </summary>
     public async Task<HeaderPipeline> GetHeaderPipelineAsync(CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);

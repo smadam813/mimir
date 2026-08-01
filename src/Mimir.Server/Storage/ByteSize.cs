@@ -1,6 +1,5 @@
 namespace Mimir.Server.Storage;
 
-/// <summary>Renders a byte count for the Storage tile face.</summary>
 internal static class ByteSize
 {
     private static readonly string[] Units = ["B", "KB", "MB", "GB", "TB"];
@@ -16,7 +15,6 @@ internal static class ByteSize
             unit++;
         }
 
-        // Whole bytes never want a decimal point; everything else reads better with one.
         return unit == 0 ? $"{bytes} B" : $"{value:0.0} {Units[unit]}";
     }
 }

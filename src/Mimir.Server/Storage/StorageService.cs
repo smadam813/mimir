@@ -3,12 +3,6 @@ using Mimir.Server.Health;
 
 namespace Mimir.Server.Storage;
 
-/// <summary>
-/// Sole owner of the Storage tile: migrates the database (retrying until Postgres answers, which
-/// is how "mimir waits on postgres" holds even without Compose's healthchecks), then keeps the
-/// tile current. Running this in the background rather than at startup means the health strip is
-/// visible — and reporting what it is waiting for — while Postgres is still booting.
-/// </summary>
 internal sealed class StorageService(
     IServiceScopeFactory scopeFactory,
     IHealthState health,

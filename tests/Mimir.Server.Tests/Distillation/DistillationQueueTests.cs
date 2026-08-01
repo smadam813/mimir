@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Storage.Entities;
+using Mimir.Server.Ui;
 
 namespace Mimir.Server.Tests.Distillation;
 
@@ -118,6 +119,80 @@ public sealed class DistillationQueueTests(ThrowawayDatabaseFixture fixture) : P
 
         (await EpisodeAsync(running.Id)).Distillation.ShouldBe(DistillationState.Failed);
         (await EpisodeAsync(done.Id)).Distillation.ShouldBe(DistillationState.Done);
+    }
+
+    [Fact]
+    public async Task AClaimedEpisode_ComesBackTrackedOnTheCallersOwnContext()
+    {
+        var project = await AddProjectAsync("claim-tracking");
+        var seeded = await AddEpisodeAsync(project.Id, sealedAt: Now);
+
+        var claimed = await NewQueue().ClaimNextAsync(Token);
+
+        claimed.ShouldNotBeNull();
+        Context.Entry(claimed).State.ShouldBe(
+            EntityState.Unchanged,
+            "the queue shares the caller's scoped context, so the claim comes back attached to it "
+            + "— which is what lets the run reload the row after the gate's batch has moved it");
+        Context.Episodes.Local.ShouldContain(e => e.Id == seeded.Id);
+    }
+
+    /// <summary>
+    /// The queue's membership rule and the partial index's filter are one rule stated twice, in
+    /// two languages. Rather than restate it a third time in prose at either site, this feeds both
+    /// the same population — every (Sealed × state) combination — and reads the index's own filter
+    /// back out of the catalog to run it. Changing either side alone goes red.
+    /// </summary>
+    [Fact]
+    public async Task TheQueuesMembershipRule_IsThePartialIndexsFilter()
+    {
+        await AddEveryQueueStateAsync("index-agreement");
+
+        var filter = await FromDb(db => db.Database
+            .SqlQueryRaw<string>("""
+                SELECT pg_get_expr(i.indpred, i.indrelid) AS "Value"
+                FROM pg_index i
+                JOIN pg_class c ON c.oid = i.indrelid
+                WHERE c.relname = 'episodes' AND i.indpred IS NOT NULL
+                """)
+            .SingleAsync(Token));
+        // Concatenated rather than interpolated: the filter is the catalog's own expression text,
+        // and EF1002 fires on the interpolated overload regardless of where the text came from.
+        var countByTheIndexsFilter = """SELECT count(*)::int AS "Value" FROM episodes WHERE """ + filter;
+        var byTheIndex = await FromDb(db => db.Database
+            .SqlQueryRaw<int>(countByTheIndexsFilter)
+            .SingleAsync(Token));
+
+        (await NewQueue().QueueDepthAsync(Token)).ShouldBe(
+            byTheIndex, "the queue counts exactly the rows its partial index admits");
+    }
+
+    /// <summary>
+    /// The header's <c>Queued</c> readout restates the same predicate a third time, because the
+    /// browsers open their own contexts and cannot call the scoped queue. Same shape of agreement
+    /// test, so the restatement cannot drift silently.
+    /// </summary>
+    [Fact]
+    public async Task TheHeadersQueuedReadout_AgreesWithTheQueuesDepth()
+    {
+        await AddEveryQueueStateAsync("header-agreement");
+
+        var pipeline = await new ChassisBrowser(Contexts, Clock).GetHeaderPipelineAsync(Token);
+
+        pipeline.Queued.ShouldBe(await NewQueue().QueueDepthAsync(Token));
+        pipeline.Queued.ShouldBe(3, "Sealed and pending, running or failed — done and unsealed are not owed");
+    }
+
+    /// <summary>Every (Sealed × state) combination, so an agreement test feeds both sides of a
+    /// restated predicate the same population rather than a convenient corner of it.</summary>
+    private async Task AddEveryQueueStateAsync(string name)
+    {
+        var project = await AddProjectAsync(name);
+        foreach (var state in Enum.GetValues<DistillationState>())
+        {
+            await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: state);
+            await AddEpisodeAsync(project.Id, distillation: state);
+        }
     }
 
     private DistillationQueue NewQueue()

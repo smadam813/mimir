@@ -4,13 +4,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Distillation;
 
-/// <summary>
-/// <see cref="IMergeArbiter"/> on the distiller model through the §2 model-client layer: one call,
-/// made the way <see cref="DistillerCall"/> says every call to it is made, classifying the
-/// matched pair and producing the §6 rewrite or adjudication. Rewrites are capped at
-/// <see cref="ModelAnswer.MaxTextLength"/>; anything else unusable throws
-/// <see cref="MergeArbiterException"/>.
-/// </summary>
 internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -19,12 +12,8 @@ internal sealed class MergeArbiter(IChatClient chat) : IMergeArbiter
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>
-    /// The schema handed to <see cref="DistillerCall.ChatSettings"/> as the generation constraint,
-    /// so the verdict enum and shape are enforced while decoding. Deliberately flat — the
-    /// per-verdict required texts are conditional, which a grammar can't express, so
-    /// <see cref="Parse"/> stays the arbiter of usability.
-    /// </summary>
+    /// <summary>Flat rather than per-verdict: the required texts are conditional, which a
+    /// grammar cannot express, so <see cref="Parse"/> enforces them instead.</summary>
     private static readonly JsonElement Schema = JsonSerializer.Deserialize<JsonElement>("""
         {
           "type": "object",

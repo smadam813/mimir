@@ -4,10 +4,6 @@ using NpgsqlTypes;
 
 namespace Mimir.Server.Storage;
 
-/// <summary>
-/// One matching Event of the Episode leg, carrying enough of its Episode to render a timeline
-/// entry without a second query. <c>Type</c> arrives as the stored enum string.
-/// </summary>
 public sealed class EventSearchHit
 {
     public Guid EventId { get; set; }
@@ -20,8 +16,6 @@ public sealed class EventSearchHit
 
     public DateTimeOffset At { get; set; }
 
-    /// <summary>The payload JSON clipped server-side to a preview — stored payloads run to tens
-    /// of KB (prompts are whole, §4) and every consumer renders a snippet.</summary>
     public required string Payload { get; set; }
 
     public required string SessionId { get; set; }
@@ -35,16 +29,10 @@ public sealed class EventSearchHit
     public string? SealReason { get; set; }
 }
 
-/// <summary>
-/// The Episode leg of <c>mimir_search</c> (§7): FTS-only over <c>Event.tsv</c> plus metadata
-/// filters — Events carry no embeddings in v1, so there is nothing to fuse with and rank is
-/// <c>ts_rank_cd</c> alone. Filters and rank are wholly in SQL with no cross-leg fusion, so the
-/// caller's cap is the query's LIMIT — no over-fetch.
-/// </summary>
 public sealed class EventSearch(MimirDbContext db)
 {
-    /// <summary>Chars of payload text per hit — a margin over the caller's rendered snippet,
-    /// which collapses whitespace before clipping.</summary>
+    /// <summary>Deliberately larger than the rendered snippet, which collapses whitespace
+    /// before clipping and so needs slack here.</summary>
     private const int PayloadPreviewChars = 1000;
 
     private const string Sql = """
@@ -68,9 +56,6 @@ public sealed class EventSearch(MimirDbContext db)
         LIMIT @top_n
         """;
 
-    /// <param name="projectId">Narrow to one Project's Episodes; null reaches every Project.</param>
-    /// <param name="since">Keep only Events captured at or after this instant.</param>
-    /// <param name="topN">The caller's cap, applied as the query LIMIT.</param>
     public async Task<IReadOnlyList<EventSearchHit>> SearchAsync(
         string query, Guid? projectId, DateTimeOffset? since, int topN, CancellationToken cancellationToken)
         => await db.Database
