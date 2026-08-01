@@ -25,6 +25,14 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.8.0" />
+    <!-- The v2 line is the one that targets .NET 10 and runs under xunit.v3; the v1 line is
+         xunit.v2-only. xunit never downgrades to accommodate a test library (#127, decision 6). -->
+    <PackageVersion Include="bunit" Version="2.7.2" />
+    <!-- bUnit's floor is AngleSharp 1.4.0, which carries GHSA-pgww-w46g-26qg (patched in 1.5.0).
+         ADR-0007 leaves NU1902 a warning, so nothing would fail — which is exactly why the bump is
+         made here rather than left for whoever eventually reads the restore output. Direct, so
+         central versioning can lift the transitive; drop it if bUnit's own floor ever passes 1.5.0. -->
+    <PackageVersion Include="AngleSharp" Version="1.6.0" />
   </ItemGroup>
 
 </Project>

@@ -3,10 +3,11 @@ namespace Mimir.Server.Components.Shared;
 /// <summary>
 /// Whether a §8.2 confirmation is armed, and the record it is armed against. The whole of
 /// <see cref="ConfirmDelete"/>'s state, kept here rather than in its <c>@code</c> block because
-/// nothing renders a component in a test in this repo: a rule that must hold lives in a pure
-/// companion the tests can reach (<c>.claude/rules/blazor-ui.md</c>), and "selecting another
-/// row must not carry an armed Delete onto it" is exactly such a rule — #106 exists because a
-/// host quietly stopped honouring it and no test could notice.
+/// what a rule *decides* stays on this side of the renderer even now that bUnit renders components
+/// (the placement ladder in <c>.claude/rules/blazor-ui.md</c>, #130): "selecting another row must
+/// not carry an armed Delete onto it" is exactly such a rule, and #106 exists because a host
+/// quietly stopped honouring it. <c>ConfirmArmingTests</c> pins what this decides;
+/// <c>ConfirmDeleteTests</c> renders the markup that asks it, which is the half #106 actually broke.
 /// </summary>
 internal sealed class ConfirmArming
 {

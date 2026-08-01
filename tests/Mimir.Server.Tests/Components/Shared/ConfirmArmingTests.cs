@@ -3,9 +3,11 @@ using Mimir.Server.Components.Shared;
 namespace Mimir.Server.Tests.Components.Shared;
 
 /// <summary>
-/// #106: the §8.2 confirmation disarms itself when the record it is armed against changes. Nothing
-/// renders a component in a test here, so this is the seam that rule is pinnable at — the latch
-/// <c>ConfirmDelete</c> delegates its whole state to. No SQL and no DI, so it runs everywhere,
+/// #106: the §8.2 confirmation disarms itself when the record it is armed against changes. This is
+/// the latch <c>ConfirmDelete</c> delegates its whole state to, and what it *decides* stays here
+/// rather than in an <c>@code</c> block even now that bUnit renders components — the placement
+/// ladder in <c>.claude/rules/blazor-ui.md</c>. <c>ConfirmDeleteTests</c> is the other half: that
+/// the markup asks this latch, one directory over. No SQL and no DI, so this runs everywhere,
 /// including with no Postgres reachable.
 /// </summary>
 public class ConfirmArmingTests
