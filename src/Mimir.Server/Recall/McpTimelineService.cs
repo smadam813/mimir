@@ -5,11 +5,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Recall;
 
-/// <summary>
-/// <c>mimir_timeline</c> (§7): the Episode timeline, newest first, every Project unless narrowed.
-/// Each entry carries its seal state — live, or sealed with the §4 reason — so a session can see
-/// what is still open. Nothing here is Wisdom, so nothing is logged as an Injection.
-/// </summary>
 internal sealed class McpTimelineService(MimirDbContext db, McpProjects projects)
 {
     private const int MaxEpisodes = 20;
@@ -22,8 +17,7 @@ internal sealed class McpTimelineService(MimirDbContext db, McpProjects projects
             return miss;
         }
 
-        // Npgsql refuses a non-UTC DateTimeOffset against timestamptz; the CLI normalizes, but
-        // the endpoint is open to any local client.
+        // Npgsql refuses a non-UTC DateTimeOffset against timestamptz.
         var since = request.Since?.ToUniversalTime();
         var episodes = await db.Episodes
             .Where(e => filter == null || e.ProjectId == filter.Id)

@@ -7,13 +7,6 @@
 @inject NavigationManager Nav
 @inject ILogger<ProjectSidebar> Logger
 
-@* Spec §8: the project-centric chassis — every surface is scoped by the Project chosen here.
-   Global is pinned on top by the query's ordering. The second group swaps to match whichever
-   surface is active, read from the URL the same way the tab strip does (#89).
-
-   On first run the list is Global alone at zero, and the second group gives way to the one thing
-   there is to say about it: Projects are not something to add, they appear on their session's
-   first hook (#90). *@
 <nav class="project-sidebar" aria-label="Projects">
     <h6 class="sidebar-heading">Projects</h6>
     <div class="sidebar-group">
@@ -42,11 +35,6 @@
     {
         <h6 class="sidebar-heading">@GroupTitle(tab)</h6>
         <div class="sidebar-group">
-            @* Stat rows, not links, wherever the tab body still cannot read a filter back off the
-               URL — a row promising "Failed" would land on the tab's own unfiltered default view.
-               Wisdom's three are real links: its surface reads the lens from the query (#91). The
-               Episode list does filter by state, but from its own chips (#94), which the URL
-               does not carry — so its rows stay stat rows until something links a chip. *@
             @switch (tab)
             {
                 case "wisdom":
@@ -115,11 +103,6 @@
 </nav>
 
 @code {
-    /// <summary>
-    /// MainLayout's one first-run flag; the second group has nothing to count yet (#90). Null
-    /// until the answer lands, which reads as "not first run" here — the group it would replace is
-    /// the one this sidebar renders for every other state anyway.
-    /// </summary>
     [CascadingParameter(Name = MainLayout.FirstRunCascade)]
     public bool? IsFirstRun { get; set; }
 
@@ -134,8 +117,6 @@
 
     private Debouncer? _debounce;
 
-    // Ceilinged: this is the other unfiltered feed subscriber the ceiling exists for. The argument
-    // for it is stated once, on Debouncer.DefaultCeilingMultiple.
     protected override void OnInitialized()
         => _debounce = new Debouncer(
             Debouncer.DefaultDelay, Logger, "Project sidebar refresh", Debouncer.DefaultCeilingMultiple);
@@ -144,10 +125,6 @@
     {
         await RefreshAsync();
 
-        // The first hook from a new repo creates its Project mid-session; any capture change may
-        // be that first hook, so re-query the (tiny) list and let the sidebar grow live. The feed
-        // fires on every captured Event, not only session start and Seal, so a burst is coalesced
-        // into one refresh instead of one round trip (including the Recall group's query) per Event.
         _subscription = Feed.Subscribe(
             change => _debounce?.Schedule(() => InvokeAsync(RefreshAsync)));
         Nav.LocationChanged += OnLocationChanged;
@@ -182,8 +159,6 @@
             }
         }
 
-        // A newer refresh (a later event, or a location change) may have already landed while this
-        // one was awaiting its queries — drop this one rather than overwrite fresher state with stale.
         if (generation != _generation)
         {
             return;
@@ -205,10 +180,6 @@
     private bool IsSelectedProject(Guid id)
         => Nav.ToBaseRelativePath(Nav.Uri).StartsWith($"projects/{id}", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Each "Needs attention" row is the Wisdom listing under one lens — the same screen the tab
-    /// already shows, narrowed — so the link is the Wisdom route carrying that lens (#91).
-    /// </summary>
     private static string LensHref(Guid projectId, WisdomLens lens)
         => WisdomRoute.Listing(projectId, lens);
 

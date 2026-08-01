@@ -19,9 +19,6 @@ builder.Services.AddMimirUi();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Spec §11: localhost only, on the configured port. Under Compose the container listens on 8080
-// and the host publishes 6464 instead (spec §12), so an explicit ASPNETCORE_URLS wins.
-// No HTTPS and no auth: localhost is the trust boundary in v1 (spec §12).
 if (string.IsNullOrEmpty(builder.Configuration["ASPNETCORE_URLS"]))
 {
     var port = builder.Configuration.GetSection(ServerOptions.SectionName).Get<ServerOptions>()?.Port

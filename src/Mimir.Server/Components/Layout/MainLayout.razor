@@ -8,15 +8,6 @@
 @inject NavigationManager Nav
 @inject ILogger<MainLayout> Logger
 
-@* Spec §8: the chassis every surface lives in — header, tab strip, sidebar, then whichever
-   surface's body @Body renders. Fixed desktop frame: the whole shell fills the viewport and each
-   pane scrolls on its own, with a 1380px floor below which the frame scrolls horizontally rather
-   than reflowing (#89).
-
-   An install that has never been introduced to Claude Code is a state of this same shell, not a
-   separate screen (#90): the tab strip goes (there is no Project to count anything for), the body
-   explains the two registrations, and the header and sidebar read the cascade to say their own
-   part. Every region reads one flag from here rather than asking the database itself. *@
 <CascadingValue Value="IsFirstRun" Name="@FirstRunCascade">
     <div class="app-frame">
         <AppHeader />
@@ -47,52 +38,14 @@
 </div>
 
 @code {
-    /// <summary>
-    /// The name the header's and the sidebar's <c>[CascadingParameter]</c> bind to. One constant
-    /// rather than the same string literal in three files. What it carries is nullable: null is
-    /// "no answer yet", which the shell renders as the populated chassis but neither consumer
-    /// treats as a fact worth querying for.
-    /// </summary>
     public const string FirstRunCascade = "IsFirstRun";
 
-    /// <summary>
-    /// Whether this install has never been introduced to Claude Code — carried across the
-    /// prerender/circuit boundary rather than asked twice. Null until the first answer lands, and
-    /// again on a page whose prerender pass could not reach Postgres, which the circuit then
-    /// retries; an unknown answer shows the populated chassis, the state that asks nothing.
-    /// </summary>
-    /// <remarks>
-    /// Public and settable because that is the shape <c>[PersistentState]</c> binds to, and
-    /// persisted because without it the interactive instance starts at the default, renders once
-    /// before its own query resolves, and flashes the populated chassis over the prerendered
-    /// onboarding body on every first-run load — the one thing #90 is about.
-    /// </remarks>
+    // Public and settable because that is the shape [PersistentState] binds to.
     [PersistentState]
     public bool? IsFirstRun { get; set; }
 
     private bool ShowFirstRun => IsFirstRun is true;
 
-    /// <summary>
-    /// How the body sits in the frame. A surface fills it flush and scrolls its own panes (#91);
-    /// first run replaces <c>Body</c> outright with a panel that scrolls as one document, and so
-    /// do the routes that are not surfaces — the home page and the two error pages — which is the
-    /// unmodified body (#97).
-    /// </summary>
-    /// <remarks>
-    /// Read from the URL, the same way the sidebar and tab strip read it (#89); the layout
-    /// re-renders on every navigation because the router hands it a fresh <c>Body</c>. A
-    /// <c>projects/{id}</c> URL always names one of the three surfaces — <c>ProjectRoute</c>
-    /// folds a missing or unrecognised tab onto Episodes — so the surface routes are exactly the
-    /// ones it parses, drill-downs included.
-    /// <para>
-    /// Which is why the fit is the URL's answer and not the page's: <c>ProjectPage</c> and
-    /// <c>EpisodePage</c> both render <c>UnknownProject</c> when the id resolves to nothing, and
-    /// that notice is on a surface route, so it lands in the flush body — where it has to draw
-    /// its own padding and shrink-and-scroll rather than clip, which is what <c>.page-notice</c>
-    /// is for. That consequence is stated here and pointed at from the two places it lands,
-    /// rather than derived a third time in each of them.
-    /// </para>
-    /// </remarks>
     private string? BodyFit => !ShowFirstRun && ProjectRoute.Parse(Nav.ToBaseRelativePath(Nav.Uri)) is not null
         ? "is-flush"
         : null;
@@ -111,22 +64,14 @@
             }
             catch (Exception ex)
             {
-                // The chassis renders either way: nothing here is worth the whole shell becoming
-                // Blazor's error banner while the compose stack is still settling. Left unset
-                // rather than false, so the interactive pass asks again instead of inheriting a
-                // failure the prerender pass happened to hit.
+                // Swallowed and left unset: the chassis renders either way, and nothing here is
+                // worth the whole shell becoming Blazor's error banner mid-boot.
                 Logger.LogWarning(ex, "First-run check failed");
             }
         }
 
         if (ShowFirstRun)
         {
-            // A one-way latch: first run is "no non-Global Project exists", and a Project is only
-            // ever created — so the shell watches the Episode feed only while it is still showing
-            // the first-run state, and stops for good the moment the first hook lands. No debounce,
-            // unlike AppHeader's and ProjectSidebar's own refreshes: the very first Event to arrive
-            // is normally the one that ends the watch, and delaying that is delaying the whole
-            // point. RecheckAsync coalesces a burst instead.
             _subscription = Feed.Subscribe(change => _ = InvokeAsync(RecheckAsync));
         }
     }
@@ -140,9 +85,6 @@
 
         if (_rechecking)
         {
-            // An Event landed while the last query was in flight. That query may have read the
-            // database before this Event's own write committed, so ask once more when it returns
-            // rather than either racing a second query alongside it or dropping the Event.
             _recheckAgain = true;
             return;
         }
@@ -166,9 +108,8 @@
         }
         catch (Exception ex)
         {
-            // Fire-and-forget from the feed callback, and the whole body is inside this: a
-            // transient Postgres failure, or a StateHasChanged against a circuit torn down while
-            // the query was in flight, would otherwise be an exception nobody ever observes.
+            // Swallowed because the caller is a fire-and-forget feed callback: anything thrown
+            // here — a transient Postgres failure, a torn-down circuit — is never observed.
             Logger.LogWarning(ex, "First-run check failed");
         }
         finally

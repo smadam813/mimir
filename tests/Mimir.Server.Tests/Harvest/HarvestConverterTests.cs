@@ -110,6 +110,74 @@ public sealed class HarvestConverterTests(ThrowawayDatabaseFixture fixture) : Po
         (await FromDb(db => db.Wisdom.CountAsync(Token))).ShouldBe(1);
     }
 
+    [Fact]
+    public async Task PendingItems_ConvertOldestFirst_SoReharvestedContentMeetsWhatItProduced()
+    {
+        var project = await AddProjectAsync("convert");
+        const string original = "The build needs Postgres running";
+        const string reworded = "Postgres must be up for the build";
+        Embeddings.Map(original, TestVectors.Basis);
+        Embeddings.Map(reworded, TestVectors.WithCosine(0.9));
+
+        // Seeded newest-first on purpose: insertion order would otherwise hand the heap back in
+        // the order asserted and a dropped ORDER BY would be invisible.
+        await AddHarvestedItemAsync(project.Id, "f/memory/MEMORY.md", reworded, Now.AddHours(1));
+        await AddHarvestedItemAsync(project.Id, "f/memory/MEMORY.md", original);
+
+        (await Converter().ConvertPendingAsync(Token)).ShouldBe(2);
+
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(
+            original, "the older version reached the gate first, so the newer merged into it");
+        wisdom.Reinforcement.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task AnItemWhoseFileIsGone_StillConverts()
+    {
+        var project = await AddProjectAsync("convert");
+        await AddHarvestedItemAsync(
+            project.Id, "g/memory/deleted.md", "Fact delta", goneAt: Now.AddMinutes(-5));
+
+        (await Converter().ConvertPendingAsync(Token)).ShouldBe(1);
+
+        (await FromDb(db => db.Wisdom.SingleAsync(Token))).Text.ShouldBe("Fact delta");
+    }
+
+    [Fact]
+    public async Task AFailedBatch_LeavesNothingStagedOnTheConvertersOwnContext()
+    {
+        var project = await AddProjectAsync("convert");
+        const string unembeddable = "unembeddable";
+        Embeddings.Poison(unembeddable);
+        await AddHarvestedItemAsync(project.Id, "h/memory/poisoned.md", unembeddable);
+        // The seeder tracked what it inserted; anything present afterwards is the converter's.
+        Context.ChangeTracker.Clear();
+
+        await Should.ThrowAsync<InvalidOperationException>(() => Converter().ConvertPendingAsync(Token));
+
+        Context.ChangeTracker.Entries<HarvestedItem>().ShouldBeEmpty(
+            "the converter reads no-tracking, so a failed batch leaves nothing to clear");
+    }
+
+    [Fact]
+    public async Task NearIdenticalSectionsOfOneFile_MergeInsteadOfDuplicating()
+    {
+        var project = await AddProjectAsync("convert");
+        const string first = "## One\nThe build needs Postgres running";
+        const string second = "## Two\nPostgres must be up for the build";
+        Embeddings.Map(first, TestVectors.Basis);
+        Embeddings.Map(second, TestVectors.WithCosine(0.9));
+        await AddHarvestedItemAsync(project.Id, "i/memory/MEMORY.md", $"{first}\n{second}");
+
+        await Converter().ConvertPendingAsync(Token);
+
+        var wisdom = await FromDb(db => db.Wisdom.SingleAsync(Token));
+        wisdom.Text.ShouldBe(first);
+        wisdom.Reinforcement.ShouldBe(
+            2, "the gate saves after each candidate, so the second one can see the first");
+    }
+
     private HarvestConverter Converter(HarvestOptions? options = null)
         => new(
             Context,

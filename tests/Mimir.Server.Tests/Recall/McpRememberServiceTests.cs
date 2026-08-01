@@ -62,7 +62,7 @@ public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : 
         const string content = "The gate outlasted the caller";
 
         using var abandoned = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        Embeddings.OnGenerate = abandoned.Cancel;
+        Embeddings.OnGenerate = _ => abandoned.Cancel();
 
         await RememberAsync(project, content, "Fact", abandoned.Token);
 

@@ -9,17 +9,12 @@
 @inject IOptions<RecallOptions> Recall
 @inject ILogger<InjectionLogTab> Logger
 
-@* Spec §8.3, on the Nocturne look (#96): the four-pane surface a curator judges Recall from — a
-   session-grouped list, the payload the session actually received, and this Project's §9 figures
-   down the side. The mark is per entry, and the screen says so. *@
 <div class="surface-panes">
 
     <div class="pane-list">
         <div class="pane-list-head">
             <div class="pane-list-title">
                 <h4>Injections</h4>
-                @* The query's population, not the Project's — this count sits above the chips and
-                   the list it describes, and the aside carries the whole-Project figure. *@
                 <span class="pane-count">
                     @(_view?.Matching.ToString("N0") ?? "—")
                     @(_view?.Matching == 1 ? "entry" : "entries")
@@ -219,26 +214,16 @@
 
     protected override void OnInitialized()
     {
-        // Typing narrows the list live, so the query waits out a burst of keystrokes rather than
-        // answering each one — the same debounce the other live surfaces use (#89, #91), minus the
-        // ceiling the feed-driven ones take: Debouncer's ceilingMultiple says why a search lane
-        // gets none.
         _debounce = new Debouncer(Debouncer.DefaultDelay, Logger, "Injection listing refresh");
 
-        // One search box, claimed by whichever surface is on screen (§8). The claim is for the
-        // Project on screen, not for the life of the component — see AnchorOnProject. Parameters
-        // are set before this runs, so anchoring here is also the first anchor, and the re-anchor
-        // below then fires only on a real switch.
+        // Anchored here rather than at the boundary, since the parameters are already set: the
+        // re-anchor below then fires only on a real switch.
         AnchorOnProject();
         Search.Changed += OnSearchChanged;
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        // A different Project is a different log: the lane chip was chosen against the old one's
-        // counts and the selected entry is not in the new one at all. The router reuses this
-        // instance across the switch — same route template, different parameter — so this is the
-        // only place that runs.
         if (_loadedProject != ProjectId)
         {
             AnchorOnProject();
@@ -247,13 +232,6 @@
         await RefreshAsync();
     }
 
-    /// <summary>
-    /// Binds this tab to <see cref="ProjectId"/>, the typed term included. Re-claiming is what
-    /// sheds it: <see cref="SurfaceSearch.Claim"/> resets the term on the claiming edge and nothing
-    /// else does while the one instance lives, so a carried term would silently narrow the incoming
-    /// log by something nobody typed for it (#108). Released first, for the reason
-    /// <see cref="SurfaceSearch.Claim"/> states.
-    /// </summary>
     private void AnchorOnProject()
     {
         _loadedProject = ProjectId;
@@ -296,9 +274,6 @@
         var view = await Browser.ListAsync(
             new InjectionQuery(ProjectId, Search.Term, _lane), CancellationToken.None);
 
-        // A newer refresh may have already landed while this one was awaiting its queries — two
-        // lane chips clicked in quick succession, or a keystroke behind one. Drop this one rather
-        // than leave the listing showing a filter the chips no longer say is active.
         if (generation != _generation)
         {
             return;
@@ -306,17 +281,12 @@
 
         _view = view;
 
-        // The entries are records read fresh each time, so the selection has to be re-resolved by
-        // id or a mark would show its old verdict until the curator clicked elsewhere. An entry
-        // filtered or truncated out of the listing drops the selection with it.
         _selected = _selected is { } previous
             ? _view.Sessions.SelectMany(s => s.Entries).FirstOrDefault(e => e.Id == previous.Id)
             : null;
 
-        // Explicit, because the debounced search arrives outside any event handler: Blazor
-        // re-renders after a handler returns, not after arbitrary dispatcher work, so without this
-        // a term narrows the query and nothing on screen moves. The lifecycle callers re-render
-        // anyway and pay one redundant pass — the same trade every live surface here makes.
+        // Explicit, because a debounced search arrives outside any event handler and Blazor
+        // re-renders after a handler returns, not after arbitrary dispatcher work.
         StateHasChanged();
     }
 

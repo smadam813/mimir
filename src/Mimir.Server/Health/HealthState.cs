@@ -2,19 +2,12 @@ using Mimir.Contracts.Health;
 
 namespace Mimir.Server.Health;
 
-/// <summary>
-/// The health strip's single source of truth. Background probes push into it; Blazor circuits
-/// subscribe and re-render, which is how spec §8's "live updates over the SignalR circuit" works
-/// without any polling.
-/// </summary>
 public interface IHealthState
 {
     HealthSnapshot Current { get; }
 
-    /// <summary>Applies <paramref name="mutate"/> to the current snapshot and notifies subscribers.</summary>
     void Update(Func<HealthSnapshot, HealthSnapshot> mutate);
 
-    /// <summary>Observes every subsequent snapshot until the returned handle is disposed.</summary>
     IDisposable Subscribe(Action<HealthSnapshot> onChanged);
 }
 
@@ -49,15 +42,14 @@ public sealed class HealthState : IHealthState
 
         foreach (var subscriber in subscribers)
         {
-            // A subscriber is a UI circuit that may already be tearing down. One dead circuit
-            // must not stop the others from updating, nor abort the probe that pushed this.
             try
             {
                 subscriber.OnChanged(updated);
             }
             catch (Exception)
             {
-                // Intentionally swallowed; see above.
+                // Swallowed deliberately: one dead circuit must starve neither the others nor
+                // the probe that pushed.
             }
         }
     }

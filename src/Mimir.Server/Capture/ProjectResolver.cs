@@ -5,11 +5,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Capture;
 
-/// <summary>
-/// Spec §3.1 server side: match by identity, else by a root this Project has been seen at,
-/// creating one if needed and appending unseen roots. A path-identity Project that later reports
-/// a remote identity is upgraded in place — same row, id stable.
-/// </summary>
 internal sealed class ProjectResolver(MimirDbContext db)
 {
     public async Task<Project> ResolveAsync(string identity, string rootPath, CancellationToken cancellationToken)
@@ -23,10 +18,6 @@ internal sealed class ProjectResolver(MimirDbContext db)
             {
                 if (!project.RootPaths.Contains(rootPath))
                 {
-                    // Appended in the database, not in memory: a tracked save would overwrite a
-                    // concurrent hook's append with this context's stale array. The WHERE guard
-                    // re-checks under the row lock (EF cannot translate an array append into
-                    // ExecuteUpdate, hence SQL); the reload brings the merged array back.
                     await db.Database.ExecuteSqlAsync(
                         $"""
                         UPDATE projects
@@ -37,15 +28,9 @@ internal sealed class ProjectResolver(MimirDbContext db)
                     await db.Entry(project).ReloadAsync(cancellationToken);
                 }
 
-                // The rival probe runs on every identity match, not only when a root was just
-                // appended: a concurrent create (or a Harvester-born path row) can leave a
-                // path-born duplicate at an already-known root, and this is where it is healed —
-                // root_paths is not unique across Projects, so nothing else catches it.
                 if (project.Identity == identity && identity != rootPath
                     && await PathBornRivalAtAsync(project, rootPath, cancellationToken) is { } rival)
                 {
-                    // Clone merge (§3.1): this remote identity already has its Project, yet the
-                    // reported root belongs to a path-born one — two clones of one repository.
                     try
                     {
                         await ProjectMerger.MergeAsync(db, survivorId: project.Id, loserId: rival.Id, cancellationToken);
@@ -53,8 +38,6 @@ internal sealed class ProjectResolver(MimirDbContext db)
                     catch (PostgresException ex) when (
                         ex.IsForeignKeyViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
                     {
-                        // A concurrent hook referenced the loser between re-point and delete; the
-                        // transaction rolled back whole. Re-read and merge again.
                         db.ChangeTracker.Clear();
                         continue;
                     }
@@ -66,10 +49,6 @@ internal sealed class ProjectResolver(MimirDbContext db)
                 {
                     try
                     {
-                        // Identity upgrade (§3.1): the row was matched by root, its stored identity
-                        // is the path it was born at, and the hook knows the real remote. The WHERE
-                        // guard makes first-upgrade-wins atomic; a rival upgrading to the same
-                        // remote leaves nothing to do, and the reload is truthful either way.
                         await db.Database.ExecuteSqlAsync(
                             $"""
                             UPDATE projects
@@ -82,8 +61,6 @@ internal sealed class ProjectResolver(MimirDbContext db)
                     catch (PostgresException ex) when (
                         ex.IsUniqueViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
                     {
-                        // The remote identity already names another Project: two clones of one
-                        // repository. Re-read; the identity match finds the survivor.
                         db.Entry(project).State = EntityState.Detached;
                         continue;
                     }
@@ -107,18 +84,12 @@ internal sealed class ProjectResolver(MimirDbContext db)
             }
             catch (DbUpdateException ex) when (ex.IsUniqueViolation() && attempt < DbRaces.CreateRaceMaxAttempts)
             {
-                // Lost a create race on the unique identity: forget ours, match the winner.
                 db.Entry(project).State = EntityState.Detached;
             }
         }
     }
 
-    /// <summary>
-    /// A different, path-born Project claiming the reported root — the loser of a clone merge.
-    /// Path-born is checked in memory, not in the query: the array-contains-own-column shape has
-    /// no reliable translation. Normally at most one other row holds this root, but the filter is
-    /// applied across every holder so a genuine path-born rival is never masked by a remote one.
-    /// </summary>
+    /// <summary>Path-born in memory, not in the query: EF cannot translate array-contains-own-column.</summary>
     private async Task<Project?> PathBornRivalAtAsync(
         Project project, string rootPath, CancellationToken cancellationToken)
     {
@@ -128,19 +99,11 @@ internal sealed class ProjectResolver(MimirDbContext db)
         return holders.FirstOrDefault(r => r.IsPathBorn);
     }
 
-    /// <summary>
-    /// True when the hook reports a remote identity for a Project that never had one. A path-born
-    /// Project carries the root it was created at as identity, so its identity sits in its own
-    /// <c>root_paths</c>; a remote identity never does (roots come from the filesystem, identities
-    /// from <c>RemoteIdentity.Normalize</c>). An incoming identity equal to the reported root is
-    /// the §3.1 fallback — a hook that still knows no remote upgrades nothing.
-    /// </summary>
     private static bool ReportsARemoteFor(Project project, string identity, string rootPath)
         => project.Identity != identity
             && identity != rootPath
             && project.IsPathBorn;
 
-    /// <summary>The last segment of either identity form: <c>host/owner/repo</c> or a path.</summary>
     private static string DisplayNameOf(string identity)
     {
         var name = identity.TrimEnd('/', '\\').Split('/', '\\')[^1];

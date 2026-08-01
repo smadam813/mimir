@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -101,6 +101,31 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         (await EpisodeAsync(abandoned.Id)).Distillation.ShouldBe(DistillationState.Done);
     }
 
+    [Fact]
+    public async Task AfterASuccess_TheWorkerLooksAgainImmediately_DrainingTheQueue()
+    {
+        var project = await AddProjectAsync("drain");
+        for (var seal = 3; seal >= 1; seal--)
+        {
+            var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddMinutes(-seal));
+            await AddEventAsync(episode.Id, seq: 1, at: episode.StartedAt.AddMinutes(1));
+        }
+
+        for (var reply = 0; reply < 3; reply++)
+        {
+            Chat.Reply("""{"candidates":[]}""");
+        }
+
+        // The fake clock never ticks and nothing pokes the trigger, so the only way past the
+        // first Episode is the loop declining to wait after something distilled.
+        await StartServiceAsync();
+        var tile = await TileAsync(t => t.Summary == "queue empty" && t.LastRunAt is not null);
+
+        tile.QueueDepth.ShouldBe(0);
+        (await FromDb(db => db.Episodes.CountAsync(e => e.Distillation == DistillationState.Done, Token)))
+            .ShouldBe(3);
+    }
+
     private async Task<Episode> AddSealedEpisodeAsync(DistillationState state = DistillationState.Pending)
     {
         var project = await AddProjectAsync("distiller-service");
@@ -140,22 +165,6 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
         await _service.StartAsync(Token);
     }
 
-    private async Task<DistillationTile> TileAsync(Func<DistillationTile, bool> accept)
-    {
-        var seen = new TaskCompletionSource<DistillationTile>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = _health.Subscribe(snapshot =>
-        {
-            if (accept(snapshot.Distillation))
-            {
-                seen.TrySetResult(snapshot.Distillation);
-            }
-        });
-
-        if (accept(_health.Current.Distillation))
-        {
-            return _health.Current.Distillation;
-        }
-
-        return await seen.Task.WaitAsync(Patience, Token);
-    }
+    private Task<DistillationTile> TileAsync(Func<DistillationTile, bool> accept)
+        => _health.TileAsync(s => s.Distillation, accept, Patience, Token);
 }

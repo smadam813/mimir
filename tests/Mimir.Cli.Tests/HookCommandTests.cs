@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Mimir.Contracts.Hooks;
 
 namespace Mimir.Cli.Tests;
 
@@ -45,6 +46,33 @@ public class HookCommandTests
         exitCode.ShouldBe(0);
         output.ToString().ShouldBeEmpty();
         stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2), "the cap must bound a stdin that never closes");
+    }
+
+    [Fact]
+    public void TheHookRoundTripCap_IsThreeSeconds()
+        => HookLimits.RoundTripCap.ShouldBe(TimeSpan.FromSeconds(3));
+
+    [Fact]
+    public async Task StdinWithANullSessionId_PostsNothingAndStaysSilent()
+    {
+        var handler = new RecordingHandler("{}");
+        // An explicit JSON null, not an absent property: the property read succeeds and hands
+        // back a null string, which is the arm a missing property never reaches.
+        var output = await RunAsync(handler, "SessionStart", Stdin(sessionId: null));
+
+        output.ShouldBeEmpty();
+        handler.Path.ShouldBeNull("nothing to attach an Episode to means nothing is relayed");
+    }
+
+    [Fact]
+    public async Task AnUnknownHookEvent_PostsNothingAndStaysSilent()
+    {
+        var handler = new RecordingHandler("{}");
+
+        var output = await RunAsync(handler, "PreCompact", Stdin());
+
+        output.ShouldBeEmpty();
+        handler.Path.ShouldBeNull("an event this build does not know is dropped, never relayed");
     }
 
     [Fact]
@@ -93,6 +121,15 @@ public class HookCommandTests
         output.Trim().ShouldBe("the brief");
     }
 
+    [Fact]
+    public async Task AnEmptyBrief_PrintsNothingAtSessionStart()
+    {
+        var handler = new RecordingHandler("""{"brief":""}""");
+        var output = await RunAsync(handler, "SessionStart", Stdin());
+
+        output.ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData("PostToolUse")]
     [InlineData("Stop")]
@@ -138,11 +175,11 @@ public class HookCommandTests
         return output.ToString();
     }
 
-    private static string Stdin(string? cwd = null, string? prompt = null)
+    private static string Stdin(string? cwd = null, string? prompt = null, string? sessionId = "sess-123")
     {
         var fields = new Dictionary<string, object?>
         {
-            ["session_id"] = "sess-123",
+            ["session_id"] = sessionId,
             ["transcript_path"] = @"C:\Users\someone\.claude\projects\x\sess-123.jsonl",
             ["cwd"] = cwd ?? Environment.CurrentDirectory,
             ["hook_event_name"] = "whatever-fired",

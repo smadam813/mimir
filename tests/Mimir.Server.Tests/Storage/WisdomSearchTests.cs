@@ -67,8 +67,29 @@ public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : Postgr
         hits.ShouldHaveSingleItem().WisdomId.ShouldBe(live.Id);
     }
 
-    private WisdomSearch Search()
-        => new(Context, Options.Create(new SearchOptions { RrfK = RrfK, PerLegTopN = 2 }));
+    [Fact]
+    public async Task RowsTiedOnTheirFusedScore_AreOrderedById()
+    {
+        // Seeded highest-id-first so the heap hands them back in the wrong order: without the id
+        // tie-break the query would be right only by accident.
+        var higher = await AddIdentifiedWisdomAsync(
+            new Guid("ffffffff-0000-0000-0000-000000000002"), "pangolin pangolin", cosine: 0.0);
+        var lower = await AddIdentifiedWisdomAsync(
+            new Guid("00000000-0000-0000-0000-0000000000f1"), "an unrelated note", cosine: 0.9);
+
+        // One leg each at rank 1, so both contribute exactly 1/(k+1) and the fused scores tie.
+        var hits = await Search(perLegTopN: 1)
+            .SearchAsync(new Vector(TestVectors.Basis), "pangolin", Token);
+
+        hits.Select(h => h.FusedScore).Distinct().Count().ShouldBe(1, "the two rows are tied");
+        hits.Select(h => h.WisdomId).ShouldBe([lower.Id, higher.Id]);
+    }
+
+    private async Task<Wisdom> AddIdentifiedWisdomAsync(Guid id, string text, double cosine)
+        => await AddWisdomAsync(Project.GlobalId, text, cosine, id: id);
+
+    private WisdomSearch Search(int perLegTopN = 2)
+        => new(Context, Options.Create(new SearchOptions { RrfK = RrfK, PerLegTopN = perLegTopN }));
 
     private async Task<Wisdom> AddGlobalWisdomAsync(
         string text, double cosine, DateTimeOffset? retiredAt = null)

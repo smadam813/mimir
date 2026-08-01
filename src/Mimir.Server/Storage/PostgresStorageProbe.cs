@@ -18,13 +18,9 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
             var connection = context.Database.GetDbConnection();
             await context.Database.OpenConnectionAsync(cancellationToken);
 
-            // Deliberately no wrapping transaction. Wrapping these in REPEATABLE READ looks like it
-            // would make the sizes and the occupancy answers agree, and does the opposite: sizes
-            // come from the filesystem and ignore the snapshot entirely (measured: 8 KB then 27 MB
-            // inside one snapshot), while EXISTS honours it — so a table populated just after the
-            // snapshot opened reported 27 MB and "empty", which is the one thing this tile must
-            // never say. Statement-level snapshots keep each answer as fresh as it can be, and the
-            // occupancy legs are a single statement, so they are already atomic with each other.
+            // No wrapping transaction, deliberately: Postgres sizes come from the filesystem and
+            // ignore the snapshot (measured: 8 KB then 27 MB inside one), while EXISTS honours it,
+            // so REPEATABLE READ here produces "27 MB and empty".
             var sizeBytes = Convert.ToInt64(
                 await ScalarAsync(connection, StorageQueries.DatabaseSize, cancellationToken));
             var footprints = await ReadFootprintsAsync(connection, cancellationToken);
@@ -53,7 +49,6 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
         }
     }
 
-    /// <summary>Every reportable table with its total on-disk bytes, in catalog order.</summary>
     private static async Task<IReadOnlyList<(string Table, long TotalBytes)>> ReadFootprintsAsync(
         DbConnection connection,
         CancellationToken cancellationToken)
@@ -65,10 +60,8 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
         var footprints = new List<(string, long)>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            // Sizing a table that is being dropped yields NULL rather than an error (measured), and
-            // GetInt64 on a NULL throws an InvalidCastException no DbException filter would catch.
-            // Leave the row out: it no longer exists, and naming it in the occupancy query would
-            // only earn a 42P01.
+            // Postgres sizes a table mid-drop as NULL rather than erroring (measured), and
+            // GetInt64 on NULL throws an InvalidCastException no DbException filter would catch.
             if (await reader.IsDBNullAsync(1, cancellationToken))
             {
                 continue;
@@ -107,9 +100,8 @@ internal sealed class PostgresStorageProbe(MimirDbContext context, ILogger<Postg
         }
         catch (DbException ex) when (ex.SqlState == UndefinedTable)
         {
-            // A table went away underneath us. The union aborts as a whole, so we know nothing
-            // about any of them — and "unknown" is the only answer that is not a guess. Reporting
-            // sizes with no occupancy beats flagging the whole tile Degraded over a routine race.
+            // Swallowed: the union aborts as a whole, so nothing is known about any table, and
+            // Unknown is the only answer that is not a guess.
             logger.LogDebug(ex, "A table vanished mid-probe; reporting occupancy as unknown this round");
             return [];
         }

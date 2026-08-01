@@ -39,6 +39,15 @@ public sealed class PostgresTestBaseTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     [Fact]
+    public void TheIdentityAndRootHelpers_AnswerAFreshValueEachCall()
+    {
+        Identity("same").ShouldNotBe(
+            Identity("same"), "a resolver test hands two identities in and pins how they resolve "
+            + "against each other — a repeat would be §3.1 matching them onto one row instead");
+        Root("C", "same").ShouldNotBe(Root("C", "same"), "and the same for the root they match on");
+    }
+
+    [Fact]
     public async Task AfterTheReset_TheGlobalPseudoProjectIsTheOnlyProject()
     {
         var projects = await FromDb(db => db.Projects.ToListAsync(Token));

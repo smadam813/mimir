@@ -3,10 +3,8 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace Mimir.Server.Storage;
 
-/// <summary>
-/// Lets <c>dotnet ef migrations add</c> build a context without booting the whole server (and
-/// therefore without a running Postgres). Design-time only — never used at runtime.
-/// </summary>
+/// <summary>Design-time only, never resolved at runtime: it exists so
+/// <c>dotnet ef migrations add</c> needs no running server or Postgres.</summary>
 internal sealed class MimirDbContextFactory : IDesignTimeDbContextFactory<MimirDbContext>
 {
     public MimirDbContext CreateDbContext(string[] args)

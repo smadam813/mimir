@@ -459,6 +459,20 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         view.Noise.ShouldBe(1);
         view.Marked.ShouldBe(2);
         view.Unmarked.ShouldBe(2);
+
+        // Two queryables on purpose: `Matching` is the curator's filter, every aside figure is the
+        // whole Project. Unfiltered the two coincide, so the figures are re-read under a live
+        // search — a Precision or session count that moved with a search term would be answering
+        // about the screen instead of about the Project.
+        var filtered = await Browser().ListAsync(
+            new InjectionQuery(project.Id, Search: "p1"), Token);
+
+        filtered.Matching.ShouldBe(1);
+        filtered.TotalEntries.ShouldBe(4);
+        filtered.TotalSessions.ShouldBe(3);
+        filtered.Useful.ShouldBe(1);
+        filtered.Noise.ShouldBe(1);
+        filtered.Marked.ShouldBe(2);
     }
 
     [Fact]

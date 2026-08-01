@@ -347,6 +347,52 @@ public sealed class WisdomDisplayTests
             + "recency does not move — an edit rewords, it does not confirm (§6).");
     }
 
+    /// <summary>
+    /// Words are matched without the whitespace they carry, so a rewrap is not a rewording — but
+    /// the run that is drawn keeps that whitespace, so the row is still exactly this version's
+    /// text. Both halves in one test, because dropping either makes the other unfalsifiable.
+    /// </summary>
+    [Fact]
+    public void AWhitespaceOnlyRewrap_ReadsAsNoChangeAtAll_WhileStillDrawingTheNewSpacing()
+    {
+        const string wrapped = "the gate owns\nre-embedding and the\nversion chain";
+        const string rewrapped = "the gate owns re-embedding\nand the version chain";
+
+        var runs = WisdomDisplay.Diff(wrapped, rewrapped);
+
+        runs.ShouldAllBe(run => run.Change == TextChange.Kept);
+        string.Concat(runs.Select(run => run.Text)).ShouldBe(rewrapped);
+    }
+
+    /// <summary>
+    /// The pending row is numbered off the head, so a chain with no rows cannot grow one — the
+    /// state the schema does not allow while the Wisdom stands, and the one this method would
+    /// index into.
+    /// </summary>
+    [Fact]
+    public void AnEmptyChain_NeverGrowsAPendingRow()
+    {
+        WisdomDisplay.WithPendingEdit([], "the current wording", "a rewording").ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A Provenance row can carry both an Event and a harvested path, so the path is appended to
+    /// the line rather than switched on against the Episode half.
+    /// </summary>
+    [Fact]
+    public void AHarvestedPath_IsAppendedBesideAnEventLink_NotSwitchedOnAgainstIt()
+    {
+        var both = FromEvent() with
+        {
+            HarvestedItemId = Guid.NewGuid(),
+            HarvestedPath = "~/.claude/CLAUDE.md",
+        };
+
+        var detail = WisdomDisplay.ProvenanceDetail(both);
+
+        detail.ShouldBe("tool activity in ~/src/mimir · Event #4 · ~/.claude/CLAUDE.md");
+    }
+
     private static ProvenanceEntry FromEvent() => new(
         Guid.NewGuid(),
         EpisodeId: Guid.NewGuid(),

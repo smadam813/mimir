@@ -3,13 +3,6 @@ using Mimir.Server.Storage;
 
 namespace Mimir.Server.Capture;
 
-/// <summary>
-/// Spec §3.1 clone merge: re-point every reference to the loser at the survivor, union
-/// <c>root_paths</c>, remove the loser — one transaction, so a crash leaves both rows intact.
-/// References are enumerated from the database catalog at merge time, not a hand-list of today's
-/// tables: HarvestedItem, Wisdom scope, Injection and GoldenCase arrive with later tickets and
-/// must be re-pointed without edits here.
-/// </summary>
 internal static class ProjectMerger
 {
     public static async Task MergeAsync(
@@ -32,8 +25,6 @@ internal static class ProjectMerger
 #pragma warning restore EF1002
         }
 
-        // Union preserving order: the survivor's roots stay put, the loser's unseen roots append
-        // in the order the loser accumulated them.
         await db.Database.ExecuteSqlAsync(
             $"""
             UPDATE projects AS s
@@ -54,12 +45,6 @@ internal static class ProjectMerger
         await transaction.CommitAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Every foreign key in the database that references <c>projects</c>, straight from the
-    /// catalog — a table added tomorrow is covered the moment its constraint exists. Each must be
-    /// a single column referencing <c>projects.id</c>; any other shape is unmergeable and must
-    /// fail the merge loudly, not silently strand rows.
-    /// </summary>
     private static async Task<List<ProjectReference>> ReferencesToProjectsAsync(
         MimirDbContext db,
         CancellationToken cancellationToken)
@@ -90,10 +75,8 @@ internal static class ProjectMerger
 
     private sealed class ProjectReference
     {
-        /// <summary>Referencing table, already quoted for SQL by <c>regclass::text</c>.</summary>
         public required string Table { get; set; }
 
-        /// <summary>Referencing column, already quoted for SQL by <c>quote_ident</c>.</summary>
         public required string Column { get; set; }
 
         public required string ReferencedColumn { get; set; }

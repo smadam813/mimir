@@ -68,16 +68,30 @@ public sealed class ChassisBrowserTests(ThrowawayDatabaseFixture fixture) : Post
     [Fact]
     public async Task TheHeaderPipeline_QueuesSealedNotDone_FailedIncluded_UnsealedAndDoneExcluded()
     {
+        // A distinct number of rows per state, so the count says *which* states are owed and not
+        // merely how many are: one row each makes every "exclude exactly one state" predicate
+        // count the same, and `!= Done` → `!= Failed` stays green.
         var project = await AddProjectAsync("queue");
         await AddEpisodeAsync(project.Id, sealedAt: null, distillation: DistillationState.Pending);
         await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Pending);
-        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
-        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Failed);
-        await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
+        for (var i = 0; i < 2; i++)
+        {
+            await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Running);
+        }
+
+        for (var i = 0; i < 4; i++)
+        {
+            await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Failed);
+        }
+
+        for (var i = 0; i < 8; i++)
+        {
+            await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: DistillationState.Done);
+        }
 
         var pipeline = await Browser().GetHeaderPipelineAsync(Token);
 
-        pipeline.Queued.ShouldBe(3);
+        pipeline.Queued.ShouldBe(7, "Sealed and pending, running or failed — done and unsealed are not owed");
     }
 
     [Fact]

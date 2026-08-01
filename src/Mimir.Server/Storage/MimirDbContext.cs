@@ -3,12 +3,6 @@ using Mimir.Server.Storage.Entities;
 
 namespace Mimir.Server.Storage;
 
-/// <summary>
-/// The single store (ADR-0005): vectors, full-text and relational metadata in one Postgres.
-/// Tables and columns are snake_case, matching the spec §3 entity descriptions, because the
-/// ranking queries this schema exists for are hand-written SQL. The ticket that creates an entity
-/// builds its full §3 column set — consumers of the later columns arrive with later tickets.
-/// </summary>
 public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : DbContext(options)
 {
     public DbSet<Project> Projects => Set<Project>();
@@ -42,10 +36,8 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             project.Property(p => p.DisplayName).HasColumnName("display_name");
 
             project.HasIndex(p => p.Identity).IsUnique();
-            // GIN over text[] answers "which Project has been seen at this root" (§3.1, §5).
             project.HasIndex(p => p.RootPaths).HasMethod("gin");
 
-            // The reserved Global pseudo-project (§3), fixed at migration time.
             project.HasData(new Project
             {
                 Id = Project.GlobalId,
@@ -71,10 +63,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
 
             episode.HasIndex(e => e.SessionId).IsUnique();
             episode.HasIndex(e => e.ProjectId);
-            // The §6 queue's working set: sealed Episodes still owed distillation. Done rows —
-            // the table's eventual bulk — stay out of the index. Its consumer is
-            // DistillationQueue's claim and depth queries, which state this contract from the
-            // other side: a predicate change there means revisiting this filter.
             episode.HasIndex(e => e.Distillation)
                 .HasFilter("sealed_at IS NOT NULL AND distillation <> 'Done'");
             episode.HasOne<Project>().WithMany().HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Restrict);
@@ -92,7 +80,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             evt.Property(e => e.PayloadFullSize).HasColumnName("payload_full_size");
             evt.Property(e => e.Salient).HasColumnName("salient");
 
-            // Stored generated column over the payload's string values (§3): the Episode FTS leg.
             evt.Property(e => e.Tsv)
                 .HasColumnName("tsv")
                 .HasColumnType("tsvector")
@@ -100,7 +87,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
 
             evt.HasIndex(e => new { e.EpisodeId, e.Seq }).IsUnique();
             evt.HasIndex(e => e.Tsv).HasMethod("gin");
-            // §8.2: hard-deleting an Episode removes its Events with it.
             evt.HasOne<Episode>().WithMany().HasForeignKey(e => e.EpisodeId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -117,10 +103,8 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             item.Property(i => i.GoneAt).HasColumnName("gone_at");
             item.Property(i => i.ConvertedAt).HasColumnName("converted_at");
 
-            // The scanner's working set is "the latest row per path" (§5 item mechanics).
             item.HasIndex(i => i.Path);
             item.HasIndex(i => i.ProjectId);
-            // The converter's working set: versions the gate has not seen yet.
             item.HasIndex(i => i.ConvertedAt).HasFilter("converted_at IS NULL");
             item.HasOne<Project>().WithMany().HasForeignKey(i => i.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -132,7 +116,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             wisdom.Property(w => w.Kind).HasColumnName("kind").HasConversion<string>();
             wisdom.Property(w => w.ScopeProjectId).HasColumnName("scope_project_id");
             wisdom.Property(w => w.Text).HasColumnName("text");
-            // The dimension count is schema, not config: qwen3-embedding:0.6b is 1024-d (§3, §6).
             wisdom.Property(w => w.Embedding).HasColumnName("embedding").HasColumnType("vector(1024)");
             wisdom.Property(w => w.Reinforcement).HasColumnName("reinforcement");
             wisdom.Property(w => w.LastConfirmedAt).HasColumnName("last_confirmed_at");
@@ -140,7 +123,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             wisdom.Property(w => w.RetiredAt).HasColumnName("retired_at");
             wisdom.Property(w => w.SupersededBy).HasColumnName("superseded_by");
 
-            // Stored generated column over the text (§3): the FTS leg of the hybrid search.
             wisdom.Property(w => w.Tsv)
                 .HasColumnName("tsv")
                 .HasColumnType("tsvector")
@@ -148,12 +130,9 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
 
             wisdom.HasIndex(w => w.ScopeProjectId);
             wisdom.HasIndex(w => w.Tsv).HasMethod("gin");
-            // ANN for the cosine KNN leg. HNSW over IVFFlat: it needs no training rows, so it
-            // works from the first Wisdom onward.
             wisdom.HasIndex(w => w.Embedding).HasMethod("hnsw").HasOperators("vector_cosine_ops");
             wisdom.HasOne<Project>().WithMany().HasForeignKey(w => w.ScopeProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
-            // Deleting the superseder leaves the retired loser retired, just unlinked.
             wisdom.HasOne<Wisdom>().WithMany().HasForeignKey(w => w.SupersededBy)
                 .OnDelete(DeleteBehavior.SetNull);
         });
@@ -168,7 +147,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             version.Property(v => v.CreatedAt).HasColumnName("created_at");
             version.Property(v => v.Cause).HasColumnName("cause").HasConversion<string>();
 
-            // §10: deleting a Wisdom cascades its version chain; nothing else touches it.
             version.HasOne<Wisdom>().WithMany().HasForeignKey(v => v.WisdomId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
@@ -188,9 +166,6 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             provenance.HasIndex(p => p.HarvestedItemId);
             provenance.HasOne<Wisdom>().WithMany().HasForeignKey(p => p.WisdomId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // The §3 deletion contract: hard-deleting an Event or Episode (§8.2) removes the
-            // Provenance rows referencing it — the sole operation that removes Provenance. The
-            // Wisdom itself survives. HarvestedItems are never hard-deleted, so theirs restricts.
             provenance.HasOne<Episode>().WithMany().HasForeignKey(p => p.EpisodeId)
                 .OnDelete(DeleteBehavior.Cascade);
             provenance.HasOne<Event>().WithMany().HasForeignKey(p => p.EventId)
@@ -212,10 +187,8 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             injection.Property(i => i.Verdict).HasColumnName("verdict").HasConversion<string>();
             injection.Property(i => i.VerdictAt).HasColumnName("verdict_at");
 
-            // The §3 items — wisdom ids + scores — as one jsonb document on the row.
             injection.OwnsMany(i => i.Items, items => items.ToJson("items"));
 
-            // The injection-log UI (§8.3) reads per session and per Project.
             injection.HasIndex(i => i.SessionId);
             injection.HasIndex(i => i.ProjectId);
             injection.HasOne<Project>().WithMany().HasForeignKey(i => i.ProjectId)
@@ -232,19 +205,12 @@ public sealed class MimirDbContext(DbContextOptions<MimirDbContext> options) : D
             goldenCase.Property(g => g.CreatedFromInjectionId).HasColumnName("created_from_injection_id");
             goldenCase.Property(g => g.Note).HasColumnName("note");
 
-            // Partial unique: at most one promoted case per injection, making PromoteAsync's
-            // idempotency durable against concurrent clicks — hand-inserted cases (§9) carry no
-            // breadcrumb and stay unconstrained.
             goldenCase.HasIndex(g => g.CreatedFromInjectionId).IsUnique()
                 .HasFilter("created_from_injection_id IS NOT NULL");
             goldenCase.HasOne<Project>().WithMany().HasForeignKey(g => g.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
-            // A case expecting a hard-deleted Wisdom (§8.1) could never pass again, so it goes
-            // with the Wisdom rather than poisoning the suite.
             goldenCase.HasOne<Wisdom>().WithMany().HasForeignKey(g => g.ExpectedWisdomId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // The promotion link is a breadcrumb, not the case's substance: losing the source
-            // entry (nothing deletes Injections in v1) must not take the case with it.
             goldenCase.HasOne<Injection>().WithMany().HasForeignKey(g => g.CreatedFromInjectionId)
                 .OnDelete(DeleteBehavior.SetNull);
         });

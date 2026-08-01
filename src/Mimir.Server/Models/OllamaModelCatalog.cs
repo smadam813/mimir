@@ -28,7 +28,7 @@ internal sealed class OllamaModelCatalog(IOllamaApiClient client) : IModelCatalo
         }
     }
 
-    /// <summary>Ollama omits the byte totals on the manifest and verify phases; report no percentage there.</summary>
-    private static int? ToPercent(PullModelResponse response)
+    // Ollama omits the byte totals on the manifest and verify phases.
+    internal static int? ToPercent(PullModelResponse response)
         => response.Total > 0 ? (int)Math.Clamp(Math.Round(response.Percent), 0, 100) : null;
 }

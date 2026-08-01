@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Mimir.Contracts.Mcp;
 using Mimir.Server.Recall;
 
@@ -48,6 +49,19 @@ public sealed class McpTimelineServiceTests(ThrowawayDatabaseFixture fixture) : 
 
         text.ShouldContain("No project matches 'no-such-project'");
         text.ShouldContain(project.DisplayName);
+    }
+
+    [Fact]
+    public async Task Timeline_RecallsNoWisdom_SoItLogsNoInjectionRow()
+    {
+        var project = await AddProjectAsync("mcp-timeline");
+        var episode = await AddEpisodeAsync(project.Id);
+
+        var text = await TimelineAsync(new());
+
+        text.ShouldContain(episode.SessionId, customMessage: "the timeline answered with content");
+        (await FromDb(db => db.Injections.CountAsync(Token)))
+            .ShouldBe(0, "nothing a timeline returns is Wisdom, so no injection happened (§7)");
     }
 
     private async Task<string> TimelineAsync(McpTimelineRequest request)

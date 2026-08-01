@@ -1,24 +1,11 @@
 namespace Mimir.Server.Components.Layout;
 
-/// <summary>
-/// Parses the chassis's one route shape — <c>projects/{id}/{tab}[...]</c> — the way
-/// <c>ProjectPage</c> already read <c>Tab</c>, so <c>ProjectSidebar</c> and <c>SurfaceTabStrip</c>
-/// can each read the current Project and active surface from the URL alone, without a cascading
-/// parameter from the page they sit beside.
-/// </summary>
 internal static class ProjectRoute
 {
-    /// <summary>The three surfaces, in spec order. Anything else — or nothing — lands on Episodes.</summary>
     internal const string DefaultTab = "episodes";
 
     private static readonly string[] Tabs = ["wisdom", "episodes", "injections"];
 
-    /// <summary>
-    /// Reads a Blazor <c>NavigationManager.ToBaseRelativePath(...)</c> result. Null off the
-    /// <c>projects/{guid}</c> route entirely (the home page, say); the tab defaults to
-    /// <see cref="DefaultTab"/> both when the segment is missing and when it names neither surface
-    /// nor a recognised one — matching <c>ProjectPage.ActiveTab</c>'s own fallback.
-    /// </summary>
     public static (Guid ProjectId, string Tab)? Parse(string relativePath)
     {
         var segments = Segments(relativePath);
@@ -33,10 +20,7 @@ internal static class ProjectRoute
         return (projectId, Array.IndexOf(Tabs, tab) >= 0 ? tab : DefaultTab);
     }
 
-    /// <summary>
-    /// ToBaseRelativePath keeps the query string and fragment; strip them before segmenting so a
-    /// pasted "?highlight=…" or "#anchor" doesn't get parsed as (or corrupt) the tab segment.
-    /// </summary>
+    // ToBaseRelativePath keeps the query string and fragment, so both are stripped here first.
     private static string[] Segments(string relativePath) => relativePath
         .Split(['?', '#'], 2)[0]
         .Split('/', StringSplitOptions.RemoveEmptyEntries);

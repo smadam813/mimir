@@ -116,15 +116,158 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
     }
 
     [Fact]
-    public async Task TwoIdentitiesFromTheHelper_ResolveToTwoProjects()
+    public async Task APathBornRivalAtAnAlreadyKnownRoot_IsStillHealed()
     {
-        var first = await Resolve(Identity("same"), @"C:\git\first");
-        var second = await Resolve(Identity("same"), @"C:\git\second");
+        // The Harvester can mint a path-born Project at a root a remote-identity Project already
+        // lists, so the resolve that heals it appends nothing. Nothing else catches the duplicate:
+        // root_paths carries no unique index.
+        var remote = Identity("known-root");
+        var root = Root("C", "known-root");
+        var survivor = await Resolve(remote, root);
+        var rival = await AddProjectAsync(root, [root]);
 
-        second.Id.ShouldNotBe(
-            first.Id,
-            "one test resolves several identities against one another, so the helper answers a "
-            + "fresh one each call — a repeated identity would be §3.1 matching them onto one row");
+        var resolved = await Resolve(remote, root);
+
+        resolved.Id.ShouldBe(survivor.Id);
+        (await FromDb(db => db.Projects.AnyAsync(p => p.Id == rival.Id, Token)))
+            .ShouldBeFalse("the rival at an already-known root is merged away too");
+    }
+
+    [Fact]
+    public async Task ARemoteIdentityHolderOfTheRoot_NeverMasksThePathBornRival()
+    {
+        // Three Projects list the root: the one being resolved, another remote-identity clone, and
+        // the path-born row. Only the path-born one is the merge's loser.
+        var remote = Identity("masking");
+        var root = Root("C", "masking");
+        var survivor = await AddProjectAsync(remote, [Root("C", "masking-home"), root]);
+        var remoteHolder = await AddProjectAsync(Identity("masking-other"), [Root("D", "masking-other"), root]);
+        var pathBorn = await AddProjectAsync(root, [root]);
+
+        var resolved = await Resolve(remote, root);
+
+        resolved.Id.ShouldBe(survivor.Id);
+        (await FromDb(db => db.Projects.AnyAsync(p => p.Id == pathBorn.Id, Token)))
+            .ShouldBeFalse("the path-born rival is the loser");
+        (await FromDb(db => db.Projects.AnyAsync(p => p.Id == remoteHolder.Id, Token)))
+            .ShouldBeTrue("a Project carrying its own remote identity is never merged away");
+    }
+
+    [Fact]
+    public async Task ALostCreateRace_ResumesTheWinnersProject()
+    {
+        var identity = Identity("create-race");
+        var root = Root("C", "create-race");
+
+        var winning = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = identity,
+            RootPaths = [Root("D", "create-race-winner")],
+            DisplayName = "winner",
+        };
+
+        // Neither query sees the uncommitted row, so the losing resolve inserts and blocks on the
+        // unique identity index until the winner commits.
+        var resolved = await RaceAsync(
+            winner =>
+            {
+                winner.Projects.Add(winning);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Resolve(identity, root));
+
+        resolved.Id.ShouldBe(winning.Id);
+        (await Count(identity)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AnUpgradeCollidingOnTheRemoteIdentity_ResolvesToTheSurvivor()
+    {
+        var remote = Identity("collide");
+        var root = Root("C", "collide");
+        await Resolve(root, root);
+
+        var survivor = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = remote,
+            RootPaths = [Root("D", "collide-survivor")],
+            DisplayName = "survivor",
+        };
+
+        // The identity query misses the uncommitted row, so the losing resolve matches by root and
+        // tries the upgrade, blocking on the unique index until the survivor commits.
+        var resolved = await RaceAsync(
+            winner =>
+            {
+                winner.Projects.Add(survivor);
+                return winner.SaveChangesAsync(Token);
+            },
+            () => Resolve(remote, root));
+
+        resolved.Id.ShouldBe(survivor.Id);
+        resolved.RootPaths.ShouldContain(root, "the re-read resolves onto the survivor, clones and all");
+        (await FromDb(db => db.Projects.CountAsync(p => p.RootPaths.Contains(root), Token)))
+            .ShouldBe(1, "the losing upgrade leaves one Project holding the root");
+    }
+
+    [Fact]
+    public async Task AnUpgradeThatARivalAlreadyWon_ChangesNothing()
+    {
+        // This resolver still tracks the Project as path-born while another context upgrades it.
+        // First upgrade wins: the stale one must not re-identify an established repository.
+        var root = Root("C", "first-wins");
+        var stale = new ProjectResolver(Context);
+        await stale.ResolveAsync(root, root, Token);
+        var winning = Identity("first-wins-winner");
+        await using (var other = CreateContext())
+        {
+            await new ProjectResolver(other).ResolveAsync(winning, root, Token);
+        }
+
+        var resolved = await stale.ResolveAsync(Identity("first-wins-loser"), root, Token);
+
+        resolved.Identity.ShouldBe(winning);
+        var persisted = await FromDb(db => db.Projects.SingleAsync(p => p.Id == resolved.Id, Token));
+        persisted.Identity.ShouldBe(winning);
+        persisted.DisplayName.ShouldBe(winning.Split('/')[^1]);
+    }
+
+    [Fact]
+    public async Task AMergeRacingAConcurrentReference_RollsBackAndRetries()
+    {
+        var remote = Identity("fk-race");
+        var rootA = Root("C", "fk-race-a");
+        var rootB = Root("D", "fk-race-b");
+        var survivor = await Resolve(remote, rootA);
+        var loser = await Resolve(rootB, rootB);
+
+        var straggler = new Episode
+        {
+            Id = Guid.CreateVersion7(),
+            SessionId = $"sess-{Guid.NewGuid():N}",
+            ProjectId = loser.Id,
+            StartedAt = Now,
+            Cwd = rootB,
+            Distillation = DistillationState.Pending,
+        };
+
+        // The insert holds a key-share lock on the loser's row, so the merge's DELETE blocks; once
+        // it commits the delete sees a referencing Episode and the whole merge rolls back.
+        var merged = await RaceAsync(
+            concurrent =>
+            {
+                concurrent.Episodes.Add(straggler);
+                return concurrent.SaveChangesAsync(Token);
+            },
+            () => Resolve(remote, rootB));
+
+        merged.Id.ShouldBe(survivor.Id);
+        (await FromDb(db => db.Projects.AnyAsync(p => p.Id == loser.Id, Token)))
+            .ShouldBeFalse("the retried merge removes the loser");
+        var repointed = await FromDb(db => db.Episodes.SingleAsync(e => e.Id == straggler.Id, Token));
+        repointed.ProjectId.ShouldBe(survivor.Id, "the retry re-points the Episode that caused it");
     }
 
     private async Task<Project> Resolve(string identity, string root)
@@ -132,6 +275,4 @@ public sealed class ProjectResolverTests(ThrowawayDatabaseFixture fixture) : Pos
 
     private async Task<int> Count(string identity)
         => await Context.Projects.CountAsync(p => p.Identity == identity, Token);
-
-    private static string Identity(string name) => $"github.com/test/{name}-{Guid.NewGuid():N}";
 }

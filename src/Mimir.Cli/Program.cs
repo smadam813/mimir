@@ -1,12 +1,6 @@
-// Spec §13: the host companion. `hook` relays Claude Code hooks to Mimir; `mcp` serves the §7
-// MCP tools over stdio. Registration of both is documented in the README.
-//
-// `hook` deliberately exits 0 on every path, including argument mistakes and a malformed
-// MIMIR_URL: a hook that fails must never break or slow the session that invoked it (spec §1, §4).
-// `mcp` is the deliberate lane: it may fail loudly — Claude Code surfaces a dead MCP server.
-
 using System.Text;
 using Mimir.Cli;
+using Mimir.Contracts.Hooks;
 
 const string Usage = """
     mimir — host companion for the Mimir memory service
@@ -27,10 +21,8 @@ switch (args)
             using var http = new HttpClient
             {
                 BaseAddress = ServiceAddress(),
-                // Redundant with RunAsync's cap, which always fires first — kept as a backstop
-                // so a future request that forgets to thread the cap token still cannot hang
-                // the session for HttpClient's default 100 s.
-                Timeout = HookCommand.Cap,
+                // Backstop only: RunAsync's cap always fires first.
+                Timeout = HookLimits.RoundTripCap,
             };
             return await new HookCommand(http, Console.In, Console.Out).RunAsync(hookEvent);
         }
@@ -45,9 +37,7 @@ switch (args)
     case ["mcp"]:
         using (var http = new HttpClient { BaseAddress = ServiceAddress(), Timeout = McpServer.RequestTimeout })
         {
-            // MCP stdio is UTF-8 by contract; Console.In/Out would inherit the Windows console
-            // code page and mojibake anything non-ASCII — permanently, for remembered content.
-            // No-BOM encodings, and "\n" framing (the writer would otherwise emit "\r\n").
+            // Console.In/Out inherit the Windows console code page, and StreamWriter defaults to CRLF.
             using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
             using var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))
             {

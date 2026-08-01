@@ -140,6 +140,26 @@ public sealed class DistillationRunTests(ThrowawayDatabaseFixture fixture) : Pos
         events.ShouldBe([first.Id, second.Id], ignoreOrder: true);
     }
 
+    [Fact]
+    public async Task AfterTheBatchCommits_TheRunsTrackedEpisodeReadsDone_NotTheClaimItWasGiven()
+    {
+        var project = await AddProjectAsync("distiller");
+        var episode = await AddEpisodeAsync(project.Id, sealedAt: Now.AddHours(-1));
+        await AddEventAsync(episode.Id, seq: 1);
+        _distiller.Enqueue(new WisdomCandidate(
+            WisdomKind.Lesson, project.Id, "Reload after the batch", EpisodeId: episode.Id));
+
+        await NewRun().RunNextAsync(Token);
+
+        var tracked = Context.Episodes.Local.ShouldHaveSingleItem();
+        tracked.Id.ShouldBe(episode.Id);
+        tracked.Distillation.ShouldBe(
+            DistillationState.Done,
+            "the done marker committed on the gate's own context, so the copy this run still "
+            + "tracks would otherwise read the Running claim it was handed");
+        tracked.DistilledAt.ShouldBe(Now);
+    }
+
     private DistillationRun NewRun() => new(
         Context,
         new DistillationQueue(Context, Clock, Options.Create(new DistillationOptions())),

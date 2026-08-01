@@ -1,9 +1,5 @@
 namespace Mimir.Server.Modules;
 
-/// <summary>
-/// The one list of pipeline modules. Adding a stage to Mimir means adding a class here and
-/// nothing else.
-/// </summary>
 internal static class ModuleRegistration
 {
     private static readonly IMimirModule[] Modules =

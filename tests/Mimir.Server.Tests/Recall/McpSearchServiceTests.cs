@@ -116,6 +116,89 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     [Fact]
+    public async Task TheTwoLegs_AreRankedSections_NeverOneInterleavedList()
+    {
+        var project = await AddProjectAsync("mcp");
+        var first = await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
+        var second = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.8);
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddPromptEventAsync(episode.Id, "we deploy the pipeline here");
+
+        var text = await SearchAsync(project, new());
+
+        // A §7 query score and a bare ts_rank are incommensurable, so every Wisdom line stands
+        // above the Episode heading rather than being merged into one ordering.
+        var episodes = text.IndexOf("Episode events (", StringComparison.Ordinal);
+        episodes.ShouldBeGreaterThan(-1);
+        text.IndexOf("Wisdom (", StringComparison.Ordinal).ShouldBeLessThan(episodes);
+        text.IndexOf(first.Text, StringComparison.Ordinal).ShouldBeLessThan(episodes);
+        text.IndexOf(second.Text, StringComparison.Ordinal).ShouldBeLessThan(episodes);
+        text.IndexOf(episode.SessionId, StringComparison.Ordinal).ShouldBeGreaterThan(episodes);
+    }
+
+    [Fact]
+    public async Task EachLegRendersAtMostTen_NotTheWholeTopNPool()
+    {
+        var project = await AddProjectAsync("mcp");
+        var episode = await AddEpisodeAsync(project.Id);
+        for (var i = 0; i < 12; i++)
+        {
+            await AddWisdomAsync(project.Id, $"unrelated filler {i}", cosine: 0.9 - (i * 0.01));
+            await AddPromptEventAsync(episode.Id, $"we deploy the pipeline attempt {i}", seq: i + 1);
+        }
+
+        // PerLegTopN is 50, so both legs hand over every row: the caps are this lane's rendering
+        // decision, not a leftover of the §3 pool.
+        var text = await SearchAsync(project, new());
+
+        text.ShouldContain("Wisdom (10):");
+        text.ShouldContain("Episode events (10):");
+    }
+
+    [Fact]
+    public async Task AnUnknownRequesterDirectory_AnchorsTheRowOnGlobal()
+    {
+        var project = await AddProjectAsync("mcp");
+        await AddWisdomAsync(project.Id, "unrelated filler one", cosine: 0.9);
+        var stranger = new Project
+        {
+            Id = Guid.CreateVersion7(),
+            Identity = Identity("never-seeded"),
+            RootPaths = [Root("C", "never-seeded")],
+            DisplayName = "never-seeded",
+        };
+
+        await SearchAsync(stranger, new() { IncludeEpisodes = false });
+
+        var logged = await FromDb(db => db.Injections.SingleAsync(Token));
+        logged.ProjectId.ShouldBe(
+            Project.GlobalId, "a directory matching no Project falls back to the Global anchor");
+    }
+
+    [Fact]
+    public async Task EpisodeHits_AreGroupedPerEpisode_BestRankedEpisodeLeading()
+    {
+        var project = await AddProjectAsync("mcp");
+        var faint = await AddEpisodeAsync(project.Id);
+        var strong = await AddEpisodeAsync(project.Id);
+        await AddPromptEventAsync(faint.Id, "we deploy something else entirely", seq: 1);
+        await AddPromptEventAsync(strong.Id, "deploy the pipeline, deploy the pipeline", seq: 1);
+        await AddPromptEventAsync(faint.Id, "deploy the pipeline once here", seq: 2);
+        await AddPromptEventAsync(strong.Id, "deploy the pipeline again", seq: 2);
+
+        var text = await SearchAsync(project, new());
+
+        var strongHead = text.IndexOf($"- Episode {strong.SessionId}", StringComparison.Ordinal);
+        var faintHead = text.IndexOf($"- Episode {faint.SessionId}", StringComparison.Ordinal);
+        strongHead.ShouldBeGreaterThan(-1);
+        faintHead.ShouldBeGreaterThan(strongHead, "the best-ranked Episode leads");
+        text.Split($"- Episode {strong.SessionId}").Length
+            .ShouldBe(2, "an Episode is headed once, with its hits gathered under it");
+        text.IndexOf("  · #2 UserPromptSubmit", strongHead, StringComparison.Ordinal)
+            .ShouldBeLessThan(faintHead, "every hit of one Episode sits under that Episode's head");
+    }
+
+    [Fact]
     public async Task IncludeEpisodesFalse_SkipsTheEpisodeLeg()
     {
         var project = await AddProjectAsync("mcp");
@@ -195,10 +278,10 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     private static string NewMcpSessionId() => $"mcp-{Guid.NewGuid():N}";
 
-    private async Task AddPromptEventAsync(Guid episodeId, string promptText)
+    private async Task AddPromptEventAsync(Guid episodeId, string promptText, int seq = 1)
         => await AddEventAsync(
             episodeId,
-            seq: 1,
+            seq,
             at: Now.AddMinutes(-30),
             payload: $$"""{"prompt":"{{promptText}}"}""");
 }

@@ -3,11 +3,6 @@
 @inject ChassisBrowser Browser
 @inject NavigationManager Nav
 
-@* Spec §8: the three-tab surface strip, in spec order, carrying this Project's own counts —
-   the tab strip answers a different question from the header's whole-install pipeline (#89).
-   Reads the current Project and tab from the URL (ProjectRoute), the same trick ProjectSidebar
-   uses, so it needs no cascading parameter from the page it sits above. Renders nothing off the
-   projects/{id} route entirely — the home page, say. *@
 @if (_projectId is { } projectId)
 {
     <nav class="tab-strip" aria-label="Project surfaces">
@@ -52,8 +47,6 @@
         var projectId = route?.ProjectId;
         var counts = projectId is { } id ? await Browser.GetSurfaceCountsAsync(id, CancellationToken.None) : null;
 
-        // A newer refresh may have already landed while this one was awaiting its query — drop
-        // this one rather than overwrite a fresher Project's counts with a stale one's.
         if (generation != _generation)
         {
             return;

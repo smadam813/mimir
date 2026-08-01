@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -112,6 +112,59 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         degraded.Summary.ShouldBe("embedding model offline");
     }
 
+    [Fact]
+    public async Task ACancellationThatIsNotTheShutdowns_DegradesTheTile_AndTheLoopKeepsScanning()
+    {
+        WriteMemoryFile("MEMORY.md", "scanned fine, cancelled mid-embed");
+        var embeds = 0;
+        Embeddings.OnGenerate = _ =>
+        {
+            if (Interlocked.Increment(ref embeds) == 1)
+            {
+                throw new OperationCanceledException("the query timed out");
+            }
+        };
+
+        // A query timeout surfaces as an OperationCanceledException with nobody's shutdown behind
+        // it. That is a failed scan to degrade and retry, not a reason to tear the host down.
+        await StartServiceAsync();
+        await TileAsync(t => t.State == HealthTileState.Degraded);
+
+        Clock.Advance(TimeSpan.FromSeconds(1));
+        _trigger.Request();
+
+        var recovered = await TileAsync(t => t.State == HealthTileState.Ready);
+        recovered.LastScanAt.ShouldBe(Clock.GetUtcNow(), "the loop was still alive to rescan");
+    }
+
+    [Fact]
+    public async Task TheHostsOwnShutdown_EndsTheLoopWithoutDegradingTheTile()
+    {
+        WriteMemoryFile("MEMORY.md", "scanned, then the host went down mid-embed");
+        var scanning = new TaskCompletionSource();
+        var stopping = new TaskCompletionSource();
+        Embeddings.OnGenerate = _ =>
+        {
+            scanning.TrySetResult();
+            stopping.Task.Wait(Patience);
+            throw new OperationCanceledException("the host is going down");
+        };
+
+        await StartServiceAsync();
+        await scanning.Task.WaitAsync(Patience, Token);
+
+        // StopAsync cancels the stopping token before it awaits, so releasing the scan here makes
+        // its cancellation a genuine shutdown — the one OperationCanceledException ScanAsync's
+        // filter must let past, for ExecuteAsync's filter to catch. The two are inverses, and
+        // this is the half that pins the coupling: weaken either and the tile degrades.
+        var stopped = _service!.StopAsync(CancellationToken.None);
+        stopping.TrySetResult();
+        await stopped;
+
+        _health.Current.Harvester.State.ShouldNotBe(
+            HealthTileState.Degraded, "a shutdown is not a failed scan to report and retry");
+    }
+
     private sealed class ThrowingEmbeddings : IEmbeddingGenerator<string, Embedding<float>>
     {
         public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
@@ -154,24 +207,8 @@ public sealed class HarvesterServiceTests(ThrowawayDatabaseFixture fixture) : Po
         await _service.StartAsync(Token);
     }
 
-    private async Task<HarvesterTile> TileAsync(Func<HarvesterTile, bool> accept)
-    {
-        var seen = new TaskCompletionSource<HarvesterTile>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = _health.Subscribe(snapshot =>
-        {
-            if (accept(snapshot.Harvester))
-            {
-                seen.TrySetResult(snapshot.Harvester);
-            }
-        });
-
-        if (accept(_health.Current.Harvester))
-        {
-            return _health.Current.Harvester;
-        }
-
-        return await seen.Task.WaitAsync(Patience, Token);
-    }
+    private Task<HarvesterTile> TileAsync(Func<HarvesterTile, bool> accept)
+        => _health.TileAsync(s => s.Harvester, accept, Patience, Token);
 
     private void WriteMemoryFile(string relativePath, string content)
     {

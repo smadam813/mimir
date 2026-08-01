@@ -3,10 +3,6 @@
 @using Mimir.Server.Ui
 @inject NavigationManager Nav
 
-@* Spec §8.2 (#95): one session, read as the record it is — what it produced, crossing from the raw
-   tier to the durable one, and then the Event stream itself in arrival order. A long stream is
-   bounded on arrival and says so, because a curator must never take the first fifty Events for the
-   whole session. *@
 <main class="pane-detail">
     <div class="pane-detail-body">
         <article class="episode-detail">
@@ -28,8 +24,6 @@
                 <div class="produced-list">
                     @foreach (var wisdom in Detail.Produced)
                     {
-                        @* Into this Project's Wisdom surface, never the Wisdom's own Scope: a Global
-                           line produced here belongs to the list being browsed (WisdomRoute). *@
                         <a class="produced-row" @key="wisdom.Id"
                            href="@WisdomRoute.Detail(ProjectId, wisdom.Id, WisdomLens.Active)">
                             <span class="produced-text">@wisdom.Text</span>
@@ -71,9 +65,6 @@
                 <ol class="event-stream">
                     @foreach (var evt in Visible)
                     {
-                        @* The id anchors Provenance drill-downs (§8.1) straight to the Event; the
-                           link that writes it and the reader that opens the bound for it take the
-                           same spelling from EpisodeDisplay. *@
                         <li class="event-item" id="@EpisodeDisplay.EventAnchorId(evt.Id)" @key="evt.Id">
                             <div class="event-head">
                                 <span class="event-seq">#@evt.Seq</span>
@@ -111,8 +102,6 @@
                 }
             }
 
-            @* Spec §8.2: hard delete of the whole Episode for sensitive content; its Events go with
-               it. Set apart from the per-Event delete above — this one takes the record entire. *@
             <div class="pane-danger">
                 <ConfirmDelete Label="Delete Episode" SubjectKey="Detail.Episode.Id"
                                Prompt="@($"Hard-delete this Episode and its {Detail.Events.Count} Events forever?")"
@@ -135,18 +124,11 @@
 </main>
 
 @code {
-    /// <summary>
-    /// Named for the drill-down rather than for its record, because <c>EpisodeDetail</c> is the
-    /// record: a component of that name would shadow <see cref="Mimir.Server.Ui.EpisodeDetail"/>
-    /// inside its own file.
-    /// </summary>
+    // Named for the drill-down, not for its record: a component called EpisodeDetail would shadow
+    // Mimir.Server.Ui.EpisodeDetail inside its own file.
     [Parameter, EditorRequired]
     public EpisodeDetail Detail { get; set; } = null!;
 
-    /// <summary>
-    /// The Project whose surface this is, for the "What it produced" links — never a produced
-    /// Wisdom's own Scope, which may be Global.
-    /// </summary>
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
@@ -156,39 +138,21 @@
     [Parameter, EditorRequired]
     public EventCallback<Guid> OnDeleteEpisode { get; set; }
 
-    /// <summary>
-    /// A delete that did not land, said here rather than thrown. The surface owns the text because
-    /// it owns the call; this component owns where it sits, which is under the button that failed.
-    /// </summary>
     [Parameter]
     public string? Error { get; set; }
 
     private bool _expanded;
 
-    /// <summary>
-    /// Which record, and which Event of it the URL anchors — the pair the expansion belongs to. The
-    /// anchor is in the key rather than read once, because two §8.1 Provenance links into the same
-    /// Episode are one navigation apart and the second may name an Event the first did not need.
-    /// </summary>
     private (Guid EpisodeId, Guid? Anchor) _shown;
 
     private Episode Episode => Detail.Episode;
 
-    /// <summary>
-    /// The bounded stream. A stream inside the bound is whole and unannounced; past it, the first
-    /// <see cref="EpisodeDisplay.StreamBound"/> until the curator asks for the rest.
-    /// </summary>
     private IEnumerable<Event> Visible => _expanded
         ? Detail.Events
         : Detail.Events.Take(EpisodeDisplay.StreamBound);
 
     protected override void OnParametersSet()
     {
-        // A different record — or the same one opened at a different Event — decides the expansion
-        // afresh: it opens whole for an anchor the bound would otherwise withhold, and collapsed
-        // otherwise. Not reset on an ordinary re-render, because this component is handed a
-        // freshly-read Detail every time the feed announces a captured Event, and dropping the
-        // expansion there would collapse the stream under a curator reading a live session.
         var anchor = EpisodeDisplay.AnchoredEvent(Nav.Uri);
         if (_shown != (Episode.Id, anchor))
         {

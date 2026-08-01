@@ -10,6 +10,19 @@ public class InjectionDisplayTests
 
     private static readonly Guid ProjectId = Guid.CreateVersion7();
 
+    /// <summary>
+    /// A log row's stamp is the time alone — the session header above it already carries the day,
+    /// and <see cref="EpisodeDisplay.Stamp"/>'s full form would repeat it on every line. UTC, like
+    /// every other stamp on the surface, so a curator reading two of them is reading one clock.
+    /// </summary>
+    [Fact]
+    public void ARowsStamp_IsTheTimeAlone_InUtc_LeavingTheDayToTheSessionHeader()
+    {
+        var at = new DateTimeOffset(2026, 7, 1, 8, 30, 0, TimeSpan.FromHours(-5));
+
+        InjectionDisplay.TimeOfDay(at).ShouldBe("13:30");
+    }
+
     [Fact]
     public void Payload_RebuildsTheWrapperTheLaneRendered_LabelLinesIncluded()
     {

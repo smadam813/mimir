@@ -71,14 +71,16 @@ public sealed class TestDoubleTests
     public async Task OnGenerateFiresAsTheBatchIsServed_SoATestCanChangeTheWorldAsAnAdmissionBegins()
     {
         var embeddings = new FakeEmbeddings();
-        var served = 0;
-        embeddings.OnGenerate = () => served++;
+        var served = new List<IReadOnlyList<string>>();
+        embeddings.OnGenerate = served.Add;
 
         await embeddings.GenerateAsync(["one"], cancellationToken: Token);
-        served.ShouldBe(1);
+        await embeddings.GenerateAsync(["two", "three"], cancellationToken: Token);
 
-        await embeddings.GenerateAsync(["two"], cancellationToken: Token);
-        served.ShouldBe(2);
+        served.ShouldBe(
+            [["one"], ["two", "three"]],
+            "once per batch, with that batch's own texts — a test reads what the gate is holding "
+            + "at the moment it embeds");
     }
 
     [Theory]
