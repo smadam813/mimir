@@ -17,7 +17,7 @@ Every index earns its place from a named reader, and the reader is the thing to 
 
 - `projects.root_paths` is GIN over `text[]`, answering "which Project has been seen at this root" (§3.1, §5).
 - `harvested_items.path` serves the scanner's latest-row-per-path working set; the `converted_at IS NULL` partial index is the converter's unseen-versions working set (§5).
-- `wisdom.embedding` is HNSW rather than IVFFlat, because HNSW needs no training rows and so works from the first Wisdom onward.
+- `wisdom.embedding` is HNSW rather than IVFFlat, because HNSW needs no training rows and so works from the first Wisdom onward (`SchemaConstraintTests.TheEmbeddingIndex_IsHnsw_NotAMethodNeedingTrainingRows` reads the method back out of `pg_am`).
 - `episodes.distillation`'s partial index and `DistillationQueue`'s claim/depth predicates are one membership rule in two languages; they agree by test (`DistillationQueueTests.TheQueuesMembershipRule_IsThePartialIndexsFilter`), and the header's third statement of it by another, so neither needs prose.
 - `injections.session_id` and `injections.project_id` serve the §8.3 injection-log reads.
 
@@ -34,6 +34,10 @@ Benchmarked at a 50,000-row design ceiling (~2–10× any plausible single-user 
 The number that is *not* ~0.3 s: the first compose in a fresh process cost 0.62–0.85 s (1.07 s against a freshly bulk-loaded table) — EF compiling the queries, the JIT, and the first physical connection. A long-lived server pays that once at startup, not once per session, and no cap would remove it; but it is close enough to `BriefTripwire`'s own one-second threshold that on a slower host the first Brief after a restart will fire the warning. That is the tripwire reporting what it measured, once per restart, not a miscalibration. `BriefTripwire` is what keeps all of this honest — it re-measures every real composition on the real machine and says so, in the Brief itself, if one exceeds a second or the set passes 25,000 rows. Growth here is monotonic by design (§10 has no age-based retirement), so the guard is the measurement, not the absence of one.
 
 Only the "unlimited" half is pinned (`WisdomSearchAmbientTests.TheQuerylessListing_IsUnlimited_HoweverSmallTheSearchLegsCapIs`). "Unordered" stays doc-only: no test can tell a missing `ORDER BY` from one that happens to agree with heap order, so a pin would be vacuous (#137).
+
+## What the Episode leg does server-side (doc-only)
+
+`EventSearch` clips the payload with `left(e.payload::text, @payload_chars)` and bounds the set with `LIMIT @top_n`, both inside the one statement — a stored payload runs to tens of KB, and the point of each is the bytes never crossing the wire. Neither half is pinnable from outside: a mutant that selects the whole payload and trims after `ToListAsync`, or fetches everything and `.Take`s, produces results identical to the real thing. `EventSearchTests` therefore pins the outcome (a preview 1000 chars long; the caller's cap honoured) and says so at each site; the *where* survives only here.
 
 ## The optimistic write path
 

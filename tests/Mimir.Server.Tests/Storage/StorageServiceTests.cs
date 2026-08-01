@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,9 +25,9 @@ public sealed class StorageServiceTests : IAsyncDisposable
     public StorageServiceTests()
     {
         var services = new ServiceCollection();
+        // A unix-socket directory that does not exist: the connection fails immediately on
+        // every platform, so a retry loop is observable without paying a TCP timeout per turn.
         void Configure(DbContextOptionsBuilder builder) => builder.UseNpgsql(
-            // A unix-socket directory that does not exist: the connection fails immediately on
-            // every platform, so a retry loop is observable without paying a TCP timeout per turn.
             "Host=/mimir-tests-no-such-socket-dir;Username=nobody;Password=nobody;Database=nope",
             npgsql => npgsql.UseVector());
         services.AddDbContextFactory<MimirDbContext>(Configure);
@@ -58,23 +58,11 @@ public sealed class StorageServiceTests : IAsyncDisposable
         _service.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse(
             "the migration runs in the background so the health strip stays visible meanwhile");
 
-        var tile = await TileAsync(t => t.State == HealthTileState.Degraded);
+        var tile = await _health.TileAsync(
+            s => s.Storage,
+            t => t.State == HealthTileState.Degraded,
+            Patience,
+            TestContext.Current.CancellationToken);
         tile.Summary.ShouldStartWith("Postgres unavailable");
-    }
-
-    private async Task<StorageTile> TileAsync(Func<StorageTile, bool> accept)
-    {
-        var seen = new TaskCompletionSource<StorageTile>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = _health.Subscribe(snapshot =>
-        {
-            if (accept(snapshot.Storage))
-            {
-                seen.TrySetResult(snapshot.Storage);
-            }
-        });
-
-        return accept(_health.Current.Storage)
-            ? _health.Current.Storage
-            : await seen.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 }

@@ -44,8 +44,10 @@ public sealed class EventSearchTests(ThrowawayDatabaseFixture fixture) : Postgre
 
         var hit = (await NewSearch().SearchAsync("quokka", null, null, 10, Token)).ShouldHaveSingleItem();
 
-        hit.Payload.Length.ShouldBe(
-            1000, "stored payloads run to tens of KB, so the clip happens in SQL, not after transfer");
+        // That the clip is `left(...)` in SQL rather than a Substring after transfer is what it is
+        // for, and is not what this pins: a client-side trim gives the same 1000 chars. Only the
+        // length is pinned here; where the clip happens is doc-only in .claude/rules/storage.md.
+        hit.Payload.Length.ShouldBe(1000, "a hit carries a preview, not the whole stored payload");
     }
 
     [Fact]
@@ -55,12 +57,16 @@ public sealed class EventSearchTests(ThrowawayDatabaseFixture fixture) : Postgre
         var episode = await AddEpisodeAsync(project.Id);
         for (var seq = 1; seq <= 5; seq++)
         {
-            await AddEventAsync(episode.Id, seq, payload: """{"prompt":"quokka"}""");
+            // Distinct text per row, so ts_rank_cd does not tie across the whole population and
+            // leave the rank leg of the ORDER BY exercised only through its id tiebreak.
+            await AddEventAsync(episode.Id, seq, payload: $$"""{"prompt":"quokka {{new string('q', seq)}}"}""");
         }
 
         var hits = await NewSearch().SearchAsync("quokka", null, null, 2, Token);
 
-        hits.Count.ShouldBe(2, "rank and filters are wholly in SQL, so nothing is over-fetched and trimmed");
+        // Like the clip above: a client-side Take(2) gives the same count, so "the LIMIT is in the
+        // statement" is not what this pins — only that the caller's cap is honoured.
+        hits.Count.ShouldBe(2, "the caller's cap bounds the result set");
     }
 
     [Fact]

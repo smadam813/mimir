@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -177,22 +177,6 @@ public sealed class DistillerServiceTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     /// <summary>Waits (in real time — the service loop runs on real threads) for a tile state.</summary>
-    private async Task<DistillationTile> TileAsync(Func<DistillationTile, bool> accept)
-    {
-        var seen = new TaskCompletionSource<DistillationTile>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var subscription = _health.Subscribe(snapshot =>
-        {
-            if (accept(snapshot.Distillation))
-            {
-                seen.TrySetResult(snapshot.Distillation);
-            }
-        });
-
-        if (accept(_health.Current.Distillation))
-        {
-            return _health.Current.Distillation;
-        }
-
-        return await seen.Task.WaitAsync(Patience, Token);
-    }
+    private Task<DistillationTile> TileAsync(Func<DistillationTile, bool> accept)
+        => _health.TileAsync(s => s.Distillation, accept, Patience, Token);
 }

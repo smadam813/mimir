@@ -96,21 +96,7 @@ public sealed class WisdomSearchTests(ThrowawayDatabaseFixture fixture) : Postgr
     }
 
     private async Task<Wisdom> AddIdentifiedWisdomAsync(Guid id, string text, double cosine)
-    {
-        var wisdom = new Wisdom
-        {
-            Id = id,
-            Kind = WisdomKind.Fact,
-            ScopeProjectId = Project.GlobalId,
-            Text = text,
-            Embedding = new Vector(TestVectors.WithCosine(cosine)),
-            Reinforcement = 1,
-            LastConfirmedAt = Now,
-        };
-        Context.Wisdom.Add(wisdom);
-        await Context.SaveChangesAsync(Token);
-        return wisdom;
-    }
+        => await AddWisdomAsync(Project.GlobalId, text, cosine, id: id);
 
     private WisdomSearch Search(int perLegTopN = 2)
         => new(Context, Options.Create(new SearchOptions { RrfK = RrfK, PerLegTopN = perLegTopN }));

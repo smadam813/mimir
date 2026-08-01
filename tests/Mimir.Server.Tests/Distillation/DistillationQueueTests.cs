@@ -148,12 +148,15 @@ public sealed class DistillationQueueTests(ThrowawayDatabaseFixture fixture) : P
     {
         await AddEveryQueueStateAsync("index-agreement");
 
+        // Named rather than "the partial index on episodes": a second one is a realistic migration
+        // (the schema already carries partial indexes on two other tables), and this test would
+        // then bind to whichever the catalog handed back first.
         var filter = await FromDb(db => db.Database
             .SqlQueryRaw<string>("""
                 SELECT pg_get_expr(i.indpred, i.indrelid) AS "Value"
                 FROM pg_index i
-                JOIN pg_class c ON c.oid = i.indrelid
-                WHERE c.relname = 'episodes' AND i.indpred IS NOT NULL
+                JOIN pg_class ix ON ix.oid = i.indexrelid
+                WHERE ix.relname = 'IX_episodes_distillation'
                 """)
             .SingleAsync(Token));
         // Concatenated rather than interpolated: the filter is the catalog's own expression text,
@@ -180,18 +183,28 @@ public sealed class DistillationQueueTests(ThrowawayDatabaseFixture fixture) : P
         var pipeline = await new ChassisBrowser(Contexts, Clock).GetHeaderPipelineAsync(Token);
 
         pipeline.Queued.ShouldBe(await NewQueue().QueueDepthAsync(Token));
-        pipeline.Queued.ShouldBe(3, "Sealed and pending, running or failed — done and unsealed are not owed");
     }
 
-    /// <summary>Every (Sealed × state) combination, so an agreement test feeds both sides of a
-    /// restated predicate the same population rather than a convenient corner of it.</summary>
+    /// <summary>
+    /// Every (Sealed × state) combination, so an agreement test feeds both sides of a restated
+    /// predicate the same population rather than a convenient corner of it — and a distinct number
+    /// of rows per state, so the two sides can disagree by *which* state they exclude and not only
+    /// by how many. One row each would make every "exclude exactly one state" predicate count the
+    /// same, leaving `!= Done` → `!= Failed` green on both sides at once.
+    /// </summary>
     private async Task AddEveryQueueStateAsync(string name)
     {
         var project = await AddProjectAsync(name);
+        var rows = 1;
         foreach (var state in Enum.GetValues<DistillationState>())
         {
-            await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: state);
-            await AddEpisodeAsync(project.Id, distillation: state);
+            for (var i = 0; i < rows; i++)
+            {
+                await AddEpisodeAsync(project.Id, sealedAt: Now, distillation: state);
+                await AddEpisodeAsync(project.Id, distillation: state);
+            }
+
+            rows *= 2;
         }
     }
 

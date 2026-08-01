@@ -12,6 +12,24 @@ namespace Mimir.Server.Tests.Storage;
 public sealed class SchemaConstraintTests(ThrowawayDatabaseFixture fixture) : PostgresTestBase(fixture)
 {
     [Fact]
+    public async Task TheEmbeddingIndex_IsHnsw_NotAMethodNeedingTrainingRows()
+    {
+        var method = await FromDb(db => db.Database
+            .SqlQueryRaw<string>("""
+                SELECT am.amname AS "Value"
+                FROM pg_class c
+                JOIN pg_am am ON am.oid = c.relam
+                WHERE c.relname = 'IX_wisdom_embedding'
+                """)
+            .SingleAsync(Token));
+
+        method.ShouldBe(
+            "hnsw",
+            "ivfflat needs training rows and returns nothing useful until it has them, so the "
+            + "first Wisdom of an install would not be findable");
+    }
+
+    [Fact]
     public async Task DeletingASuperseder_LeavesTheRetiredLoserRetired_JustUnlinked()
     {
         var project = await AddProjectAsync("schema");

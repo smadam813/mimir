@@ -429,11 +429,12 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
         int reinforcement = 1,
         DateTimeOffset? lastConfirmedAt = null,
         DateTimeOffset? contestedAt = null,
-        DateTimeOffset? retiredAt = null)
+        DateTimeOffset? retiredAt = null,
+        Guid? id = null)
     {
         var wisdom = new Wisdom
         {
-            Id = Guid.CreateVersion7(),
+            Id = id ?? Guid.CreateVersion7(),
             Kind = kind,
             ScopeProjectId = scopeProjectId,
             Text = text,
