@@ -20,20 +20,23 @@
                     @(_listing?.Matching == 1 ? "entry" : "entries")
                 </span>
             </div>
-            <div class="chips">
-                <button class="btn btn-secondary chip @(_lane is null ? "is-active" : null)"
-                        title="Every lane"
-                        @onclick="() => FilterLaneAsync(null)">All</button>
-                @foreach (var lane in _aside?.Lanes ?? [])
-                {
-                    <button class="btn btn-secondary chip @(_lane == lane.Lane ? "is-active" : null)"
-                            @key="lane.Lane"
-                            @onclick="() => FilterLaneAsync(lane.Lane)">
-                        @InjectionDisplay.Name(lane.Lane)
-                        <span class="chip-count">@lane.Entries</span>
-                    </button>
-                }
-            </div>
+            @if (_aside is { } chips)
+            {
+                <div class="chips">
+                    <button class="btn btn-secondary chip @(_lane is null ? "is-active" : null)"
+                            title="Every lane"
+                            @onclick="() => FilterLaneAsync(null)">All</button>
+                    @foreach (var lane in chips.Lanes)
+                    {
+                        <button class="btn btn-secondary chip @(_lane == lane.Lane ? "is-active" : null)"
+                                @key="lane.Lane"
+                                @onclick="() => FilterLaneAsync(lane.Lane)">
+                            @InjectionDisplay.Name(lane.Lane)
+                            <span class="chip-count">@lane.Entries</span>
+                        </button>
+                    }
+                </div>
+            }
         </div>
 
         <div class="pane-list-body">
@@ -274,19 +277,24 @@
     private async Task RefreshAsync(bool reloadAside)
     {
         var generation = ++_generation;
+        var asideGeneration = reloadAside ? ++_asideGeneration : _asideGeneration;
 
-        if (reloadAside)
+        var asideRead = reloadAside
+            ? Browser.GetAsideAsync(ProjectId, CancellationToken.None)
+            : null;
+        var listingRead = Browser.ListAsync(
+            new InjectionQuery(ProjectId, Search.Term, _lane), CancellationToken.None);
+
+        if (asideRead is not null)
         {
-            var asideGeneration = ++_asideGeneration;
-            var aside = await Browser.GetAsideAsync(ProjectId, CancellationToken.None);
+            var aside = await asideRead;
             if (asideGeneration == _asideGeneration)
             {
                 _aside = aside;
             }
         }
 
-        var listing = await Browser.ListAsync(
-            new InjectionQuery(ProjectId, Search.Term, _lane), CancellationToken.None);
+        var listing = await listingRead;
 
         if (generation != _generation)
         {

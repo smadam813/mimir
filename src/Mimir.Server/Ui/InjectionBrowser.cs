@@ -146,14 +146,13 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
 
         var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == projectId);
 
-        var counts = await scoped
+        (int TotalEntries, int Useful, int Marked) counts = await scoped
             .GroupBy(_ => 1)
-            .Select(g => new AsideCounts(
+            .Select(g => new ValueTuple<int, int, int>(
                 g.Count(),
                 g.Count(i => i.Verdict == InjectionVerdict.Useful),
                 g.Count(i => i.Verdict != null)))
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? AsideCounts.OfAProjectWithNoEntries;
+            .FirstOrDefaultAsync(cancellationToken);
 
         // Postgres has no partial aggregate for `count(DISTINCT x)`, so folding this one into the
         // group above would cost that query its parallel plan.
@@ -202,13 +201,6 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
         => await WisdomBrowser
             .ToEntries(db, db.Wisdom.Where(w => wisdomIds.Contains(w.Id)))
             .ToDictionaryAsync(w => w.Id, cancellationToken);
-
-    private sealed record AsideCounts(int TotalEntries, int Useful, int Marked)
-    {
-        // GROUP BY over no rows returns no rows, so a Project with nothing logged has no group to
-        // read these off.
-        public static AsideCounts OfAProjectWithNoEntries { get; } = new(0, 0, 0);
-    }
 
     public async Task MarkAsync(
         Guid injectionId, InjectionVerdict verdict, CancellationToken cancellationToken)
