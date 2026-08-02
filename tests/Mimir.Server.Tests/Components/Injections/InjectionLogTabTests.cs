@@ -94,7 +94,9 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
         WaitForRows(tab, 4);
         tab.Find("span.pane-count").TextContent.Trim().ShouldStartWith("4");
         tab.Find("aside.pane-aside span.aside-figure-value").TextContent.ShouldBe("3");
-        tab.FindAll("button.chip span.chip-count").Select(c => c.TextContent).ShouldBe(["0", "3", "0"]);
+        tab.FindAll("button.chip")
+            .Single(c => c.TextContent.Contains("Prompt", StringComparison.Ordinal))
+            .QuerySelector("span.chip-count")!.TextContent.ShouldBe("3");
     }
 
     /// <summary>

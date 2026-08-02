@@ -98,9 +98,7 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             .SelectMany(i => i.Items.Select(x => x.WisdomId))
             .Distinct()
             .ToList();
-        var wisdom = await WisdomBrowser
-            .ToEntries(db, db.Wisdom.Where(w => wisdomIds.Contains(w.Id)))
-            .ToDictionaryAsync(w => w.Id, cancellationToken);
+        var wisdom = await HydrateAsync(db, wisdomIds, cancellationToken);
         var salient = (await ExplicitSalience.Ids(db)
                 .Where(id => wisdomIds.Contains(id))
                 .Distinct()
@@ -157,11 +155,8 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             .FirstOrDefaultAsync(cancellationToken)
             ?? AsideCounts.OfAProjectWithNoEntries;
 
-        // The fourth count stays its own query, against the shape of the other three, and the
-        // reason is measured rather than stylistic: folded in, it becomes
-        // `count(DISTINCT session_id)`, which Postgres has no partial aggregate for, so the whole
-        // grouped query loses its parallel plan and costs more than the four separate ones did
-        // (#107 — 50 ms folded against 23 ms split, at 100,000 entries).
+        // Postgres has no partial aggregate for `count(DISTINCT x)`, so folding this one into the
+        // group above would cost that query its parallel plan.
         var totalSessions = await scoped
             .Select(i => i.SessionId).Distinct().CountAsync(cancellationToken);
 
@@ -188,10 +183,8 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             .Take(MostRecalledLimit)
             .ToListAsync(cancellationToken);
 
-        var recalledIds = recalled.Select(r => r.WisdomId).ToList();
-        var wisdom = await WisdomBrowser
-            .ToEntries(db, db.Wisdom.Where(w => recalledIds.Contains(w.Id)))
-            .ToDictionaryAsync(w => w.Id, cancellationToken);
+        var wisdom = await HydrateAsync(
+            db, [.. recalled.Select(r => r.WisdomId)], cancellationToken);
 
         return new InjectionAside(
             counts.Useful,
@@ -203,6 +196,12 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             [.. recalled.Select(r => new RecalledWisdom(
                 r.WisdomId, r.Recalls, wisdom.GetValueOrDefault(r.WisdomId)))]);
     }
+
+    private static async Task<Dictionary<Guid, WisdomListEntry>> HydrateAsync(
+        MimirDbContext db, List<Guid> wisdomIds, CancellationToken cancellationToken)
+        => await WisdomBrowser
+            .ToEntries(db, db.Wisdom.Where(w => wisdomIds.Contains(w.Id)))
+            .ToDictionaryAsync(w => w.Id, cancellationToken);
 
     private sealed record AsideCounts(int TotalEntries, int Useful, int Marked)
     {
