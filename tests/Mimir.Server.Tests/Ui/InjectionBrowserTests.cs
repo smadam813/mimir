@@ -129,22 +129,31 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         await Browser().MarkAsync(useful2.Id, InjectionVerdict.Useful, Token);
         await Browser().MarkAsync(noise.Id, InjectionVerdict.Noise, Token);
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.Useful.ShouldBe(2);
-        view.Marked.ShouldBe(3);
-        view.Precision.ShouldNotBeNull().ShouldBe(2.0 / 3.0, tolerance: 1e-9);
+        aside.Useful.ShouldBe(2);
+        aside.Marked.ShouldBe(3);
+        aside.Precision.ShouldNotBeNull().ShouldBe(2.0 / 3.0, tolerance: 1e-9);
     }
 
+    /// <summary>
+    /// A Project with nothing logged is also the case the folded count query has no group to read:
+    /// <c>GROUP BY</c> over no rows returns no rows at all, so every figure here comes from the
+    /// fallback rather than from Postgres.
+    /// </summary>
     [Fact]
-    public async Task PrecisionIsNull_UntilAnythingIsMarked()
+    public async Task AnEmptyProject_ReadsZeroThroughout_AndHasNoPrecisionYet()
     {
         var project = await AddProjectAsync("injection");
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.Marked.ShouldBe(0);
-        view.Precision.ShouldBeNull();
+        aside.TotalEntries.ShouldBe(0);
+        aside.TotalSessions.ShouldBe(0);
+        aside.Useful.ShouldBe(0);
+        aside.Marked.ShouldBe(0);
+        aside.Precision.ShouldBeNull();
+        aside.Lanes.Select(l => l.Entries).ShouldAllBe(e => e == 0);
     }
 
     [Fact]
@@ -246,15 +255,16 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
                 items: [(wisdom.Id, 0.03)]);
         }
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var listing = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
-        view.Truncated.ShouldBeTrue();
-        view.Sessions.Sum(s => s.Entries.Count).ShouldBe(InjectionBrowser.RecentEntryLimit);
-        view.Sessions.SelectMany(s => s.Entries).ShouldAllBe(e => e.Id != oldest.Id);
-        view.Useful.ShouldBe(1);
-        view.Marked.ShouldBe(1);
-        view.Precision.ShouldNotBeNull().ShouldBe(1.0);
+        aside.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        listing.Truncated.ShouldBeTrue();
+        listing.Sessions.Sum(s => s.Entries.Count).ShouldBe(InjectionBrowser.RecentEntryLimit);
+        listing.Sessions.SelectMany(s => s.Entries).ShouldAllBe(e => e.Id != oldest.Id);
+        aside.Useful.ShouldBe(1);
+        aside.Marked.ShouldBe(1);
+        aside.Precision.ShouldNotBeNull().ShouldBe(1.0);
     }
 
     [Fact]
@@ -342,12 +352,12 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Brief, queryContext: null, Now, items: items);
 
-        var view = await Browser()
+        var listing = await Browser()
             .ListAsync(new InjectionQuery(project.Id, Search: "migrations"), Token);
 
-        view.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([hit.Id]);
-        view.Matching.ShouldBe(1);
-        view.TotalEntries.ShouldBe(3);
+        listing.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([hit.Id]);
+        listing.Matching.ShouldBe(1);
+        (await Browser().GetAsideAsync(project.Id, Token)).TotalEntries.ShouldBe(3);
     }
 
     [Fact]
@@ -380,13 +390,14 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         await AddInjectionAsync(
             project.Id, "sess-a", InjectionLane.Prompt, "another prompt", Now, items: items);
 
-        var view = await Browser()
+        var listing = await Browser()
             .ListAsync(new InjectionQuery(project.Id, Lane: InjectionLane.Brief), Token);
 
-        view.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([brief.Id]);
-        view.Matching.ShouldBe(1);
-        view.Lanes.Select(l => (l.Lane, l.Entries)).ShouldBe(
-            [(InjectionLane.Brief, 1), (InjectionLane.Prompt, 2), (InjectionLane.Mcp, 0)]);
+        listing.Sessions.SelectMany(s => s.Entries).Select(e => e.Id).ShouldBe([brief.Id]);
+        listing.Matching.ShouldBe(1);
+        (await Browser().GetAsideAsync(project.Id, Token)).Lanes
+            .Select(l => (l.Lane, l.Entries)).ShouldBe(
+                [(InjectionLane.Brief, 1), (InjectionLane.Prompt, 2), (InjectionLane.Mcp, 0)]);
     }
 
     [Fact]
@@ -404,13 +415,14 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
                 items: items);
         }
 
-        var view = await Browser()
+        var listing = await Browser()
             .ListAsync(new InjectionQuery(project.Id, Search: "the only match"), Token);
 
-        view.Listed.ShouldBe(1);
-        view.Matching.ShouldBe(1);
-        view.Truncated.ShouldBeFalse();
-        view.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        listing.Listed.ShouldBe(1);
+        listing.Matching.ShouldBe(1);
+        listing.Truncated.ShouldBeFalse();
+        (await Browser().GetAsideAsync(project.Id, Token)).TotalEntries
+            .ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
     }
 
     [Fact]
@@ -427,15 +439,50 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
                 project.Id, "sess-a", InjectionLane.Prompt, $"prompt {i}", Now, items: items);
         }
 
-        var view = await Browser()
+        var listing = await Browser()
             .ListAsync(new InjectionQuery(project.Id, Lane: InjectionLane.Prompt), Token);
 
-        view.Listed.ShouldBe(InjectionBrowser.RecentEntryLimit);
-        view.Matching.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
-        view.TotalEntries.ShouldBe(InjectionBrowser.RecentEntryLimit + 2);
-        view.Truncated.ShouldBeTrue();
+        listing.Listed.ShouldBe(InjectionBrowser.RecentEntryLimit);
+        listing.Matching.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        listing.Truncated.ShouldBeTrue();
+        (await Browser().GetAsideAsync(project.Id, Token)).TotalEntries
+            .ShouldBe(InjectionBrowser.RecentEntryLimit + 2);
     }
 
+    /// <summary>
+    /// The un-narrowed listing fills the bound too, and its <c>Matching</c> is then the Project's
+    /// whole count — which used to be handed over from the aside's own <c>totalEntries</c>. The
+    /// split leaves the listing to count for itself; a listing that stopped counting and read the
+    /// bound instead would report the screen's 100 as the match.
+    /// </summary>
+    [Fact]
+    public async Task AnUnfilteredListingThatFillsTheBound_StillCountsTheWholeProject()
+    {
+        var project = await AddProjectAsync("injection");
+        var wisdom = await AddWisdomAsync(project.Id, "a wisdom");
+        for (var i = 0; i <= InjectionBrowser.RecentEntryLimit; i++)
+        {
+            await AddInjectionAsync(
+                project.Id, "sess-a", InjectionLane.Prompt, $"prompt {i}", Now,
+                items: [(wisdom.Id, 0.03)]);
+        }
+
+        var listing = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+
+        listing.Listed.ShouldBe(InjectionBrowser.RecentEntryLimit);
+        listing.Matching.ShouldBe(InjectionBrowser.RecentEntryLimit + 1);
+        listing.Truncated.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Every figure here is one folded query's four counts, so they are asserted together: a fold
+    /// that dropped a term, or crossed two of them, moves one of these without moving the rest.
+    /// That the figures are the whole Project's rather than the listing's is no longer statable
+    /// against — <see cref="InjectionBrowser.GetAsideAsync"/> takes a Project and nothing else, so
+    /// there is no filter for a caller to pass and no reading for a test to rule out. What the
+    /// filtered half of that pairing is worth pinning against is the *surface*, where the two reads
+    /// meet: <c>InjectionLogTabTests.TheHeadCountsWhatMatched_AndTheAsideTheWholeProject</c>.
+    /// </summary>
     [Fact]
     public async Task TheAside_CountsMarkedNoiseUnmarkedAndSessions_OverTheWholeProject()
     {
@@ -451,28 +498,34 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
         await Browser().MarkAsync(useful.Id, InjectionVerdict.Useful, Token);
         await Browser().MarkAsync(noise.Id, InjectionVerdict.Noise, Token);
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.TotalEntries.ShouldBe(4);
-        view.TotalSessions.ShouldBe(3);
-        view.Useful.ShouldBe(1);
-        view.Noise.ShouldBe(1);
-        view.Marked.ShouldBe(2);
-        view.Unmarked.ShouldBe(2);
+        aside.TotalEntries.ShouldBe(4);
+        aside.TotalSessions.ShouldBe(3);
+        aside.Useful.ShouldBe(1);
+        aside.Noise.ShouldBe(1);
+        aside.Marked.ShouldBe(2);
+        aside.Unmarked.ShouldBe(2);
+    }
 
-        // Two queryables on purpose: `Matching` is the curator's filter, every aside figure is the
-        // whole Project. Unfiltered the two coincide, so the figures are re-read under a live
-        // search — a Precision or session count that moved with a search term would be answering
-        // about the screen instead of about the Project.
-        var filtered = await Browser().ListAsync(
-            new InjectionQuery(project.Id, Search: "p1"), Token);
+    /// <summary>
+    /// And the four are the Project's own, not the table's: one folded query counting over an
+    /// unscoped set reads right on a single-Project database and wrong on any real one.
+    /// </summary>
+    [Fact]
+    public async Task TheAsideCounts_AreScopedToTheProject()
+    {
+        var (project, other) = (await AddProjectAsync("injection"), await AddProjectAsync("other"));
+        await AddInjectionAsync(project.Id, "sess-a", InjectionLane.Prompt, "p1", Now);
+        var elsewhere = await AddInjectionAsync(other.Id, "sess-b", InjectionLane.Prompt, "p2", Now);
+        await Browser().MarkAsync(elsewhere.Id, InjectionVerdict.Useful, Token);
 
-        filtered.Matching.ShouldBe(1);
-        filtered.TotalEntries.ShouldBe(4);
-        filtered.TotalSessions.ShouldBe(3);
-        filtered.Useful.ShouldBe(1);
-        filtered.Noise.ShouldBe(1);
-        filtered.Marked.ShouldBe(2);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
+
+        aside.TotalEntries.ShouldBe(1);
+        aside.TotalSessions.ShouldBe(1);
+        aside.Useful.ShouldBe(0);
+        aside.Marked.ShouldBe(0);
     }
 
     [Fact]
@@ -490,9 +543,9 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
             items: [(wisdom.Id, 0.03)]);
         await Browser().PromoteAsync(elsewhere.Id, Token);
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.PromotedCases.ShouldBe(1);
+        aside.PromotedCases.ShouldBe(1);
     }
 
     [Fact]
@@ -524,13 +577,13 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
                 items: [(stale.Id, 0.9)]);
         }
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.MostRecalledThisWeek.Select(r => (r.WisdomId, r.Recalls)).ShouldBe(
+        aside.MostRecalledThisWeek.Select(r => (r.WisdomId, r.Recalls)).ShouldBe(
             [.. ranked.OrderByDescending(r => r.Recalls)
                 .Take(InjectionBrowser.MostRecalledLimit)
                 .Select(r => (r.Wisdom.Id, r.Recalls))]);
-        view.MostRecalledThisWeek[0].Wisdom.ShouldNotBeNull()
+        aside.MostRecalledThisWeek[0].Wisdom.ShouldNotBeNull()
             .Text.ShouldBe($"recalled {MostRecalledSpread} times");
     }
 
@@ -544,9 +597,9 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
             items: [(wisdom.Id, 0.03)]);
         await Context.Wisdom.Where(w => w.Id == wisdom.Id).ExecuteDeleteAsync(Token);
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        var recalled = view.MostRecalledThisWeek.ShouldHaveSingleItem();
+        var recalled = aside.MostRecalledThisWeek.ShouldHaveSingleItem();
         recalled.WisdomId.ShouldBe(wisdom.Id);
         recalled.Recalls.ShouldBe(1);
         recalled.Wisdom.ShouldBeNull();
@@ -561,9 +614,9 @@ public sealed class InjectionBrowserTests(ThrowawayDatabaseFixture fixture) : Po
             other.Id, "sess-other", InjectionLane.Prompt, "elsewhere", Now,
             items: [(wisdom.Id, 0.03)]);
 
-        var view = await Browser().ListAsync(new InjectionQuery(project.Id), Token);
+        var aside = await Browser().GetAsideAsync(project.Id, Token);
 
-        view.MostRecalledThisWeek.ShouldBeEmpty();
+        aside.MostRecalledThisWeek.ShouldBeEmpty();
     }
 
     private InjectionBrowser Browser() => new(Contexts, Clock);

@@ -35,9 +35,14 @@ public sealed record RecalledWisdom(Guid WisdomId, int Recalls, WisdomListEntry?
 
 public sealed record InjectionQuery(Guid ProjectId, string? Search = null, InjectionLane? Lane = null);
 
-public sealed record InjectionLogView(
-    IReadOnlyList<InjectionSession> Sessions,
-    int Matching,
+public sealed record InjectionListing(IReadOnlyList<InjectionSession> Sessions, int Matching)
+{
+    public int Listed => Sessions.Sum(s => s.Entries.Count);
+
+    public bool Truncated => Listed < Matching;
+}
+
+public sealed record InjectionAside(
     int Useful,
     int Marked,
     int TotalEntries,
@@ -51,10 +56,6 @@ public sealed record InjectionLogView(
     public int Noise => Marked - Useful;
 
     public int Unmarked => TotalEntries - Marked;
-
-    public int Listed => Sessions.Sum(s => s.Entries.Count);
-
-    public bool Truncated => Listed < Matching;
 }
 
 public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts, TimeProvider clock)
@@ -65,18 +66,15 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
 
     private static readonly TimeSpan RecalledWindow = TimeSpan.FromDays(7);
 
-    public async Task<InjectionLogView> ListAsync(
+    public async Task<InjectionListing> ListAsync(
         InjectionQuery query, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
 
-        var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == query.ProjectId);
-        var matching = scoped;
-        var narrowed = false;
+        var matching = db.Injections.AsNoTracking().Where(i => i.ProjectId == query.ProjectId);
         if (query.Lane is { } lane)
         {
             matching = matching.Where(i => i.Lane == lane);
-            narrowed = true;
         }
 
         if (query.Search?.Trim() is { Length: > 0 } term)
@@ -85,7 +83,6 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             matching = matching.Where(i =>
                 i.QueryContext != null
                 && EF.Functions.ILike(i.QueryContext, pattern, LikePattern.EscapeCharacter));
-            narrowed = true;
         }
 
         var rows = await matching
@@ -93,41 +90,12 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
             .Take(RecentEntryLimit)
             .ToListAsync(cancellationToken);
 
-        var totalEntries = await scoped.CountAsync(cancellationToken);
-        var matchingCount = rows.Count < RecentEntryLimit ? rows.Count
-            : narrowed ? await matching.CountAsync(cancellationToken)
-            : totalEntries;
-        var totalSessions = await scoped
-            .Select(i => i.SessionId).Distinct().CountAsync(cancellationToken);
-        var useful = await scoped
-            .CountAsync(i => i.Verdict == InjectionVerdict.Useful, cancellationToken);
-        var marked = await scoped.CountAsync(i => i.Verdict != null, cancellationToken);
-        var promotedCases = await db.GoldenCases.CountAsync(
-            g => g.ProjectId == query.ProjectId && g.CreatedFromInjectionId != null,
-            cancellationToken);
-
-        var laneRows = await scoped
-            .GroupBy(i => i.Lane)
-            .Select(g => new { Lane = g.Key, Entries = g.Count() })
-            .ToListAsync(cancellationToken);
-        var lanes = Enum.GetValues<InjectionLane>()
-            .Select(l => new LaneCount(
-                l, laneRows.FirstOrDefault(r => r.Lane == l)?.Entries ?? 0))
-            .ToList();
-
-        var since = clock.GetUtcNow() - RecalledWindow;
-        var recalled = await scoped
-            .Where(i => i.At >= since)
-            .SelectMany(i => i.Items)
-            .GroupBy(x => x.WisdomId)
-            .Select(g => new { WisdomId = g.Key, Recalls = g.Count() })
-            .OrderByDescending(r => r.Recalls).ThenBy(r => r.WisdomId)
-            .Take(MostRecalledLimit)
-            .ToListAsync(cancellationToken);
+        var matchingCount = rows.Count < RecentEntryLimit
+            ? rows.Count
+            : await matching.CountAsync(cancellationToken);
 
         var wisdomIds = rows
             .SelectMany(i => i.Items.Select(x => x.WisdomId))
-            .Concat(recalled.Select(r => r.WisdomId))
             .Distinct()
             .ToList();
         var wisdom = await WisdomBrowser
@@ -170,17 +138,77 @@ public sealed class InjectionBrowser(IDbContextFactory<MimirDbContext> contexts,
                     .ToList()))
             .ToList();
 
-        return new InjectionLogView(
-            sessions,
-            matchingCount,
-            useful,
-            marked,
-            totalEntries,
+        return new InjectionListing(sessions, matchingCount);
+    }
+
+    public async Task<InjectionAside> GetAsideAsync(
+        Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+
+        var scoped = db.Injections.AsNoTracking().Where(i => i.ProjectId == projectId);
+
+        var counts = await scoped
+            .GroupBy(_ => 1)
+            .Select(g => new AsideCounts(
+                g.Count(),
+                g.Count(i => i.Verdict == InjectionVerdict.Useful),
+                g.Count(i => i.Verdict != null)))
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? AsideCounts.OfAProjectWithNoEntries;
+
+        // The fourth count stays its own query, against the shape of the other three, and the
+        // reason is measured rather than stylistic: folded in, it becomes
+        // `count(DISTINCT session_id)`, which Postgres has no partial aggregate for, so the whole
+        // grouped query loses its parallel plan and costs more than the four separate ones did
+        // (#107 — 50 ms folded against 23 ms split, at 100,000 entries).
+        var totalSessions = await scoped
+            .Select(i => i.SessionId).Distinct().CountAsync(cancellationToken);
+
+        var promotedCases = await db.GoldenCases.CountAsync(
+            g => g.ProjectId == projectId && g.CreatedFromInjectionId != null,
+            cancellationToken);
+
+        var laneRows = await scoped
+            .GroupBy(i => i.Lane)
+            .Select(g => new { Lane = g.Key, Entries = g.Count() })
+            .ToListAsync(cancellationToken);
+        var lanes = Enum.GetValues<InjectionLane>()
+            .Select(l => new LaneCount(
+                l, laneRows.FirstOrDefault(r => r.Lane == l)?.Entries ?? 0))
+            .ToList();
+
+        var since = clock.GetUtcNow() - RecalledWindow;
+        var recalled = await scoped
+            .Where(i => i.At >= since)
+            .SelectMany(i => i.Items)
+            .GroupBy(x => x.WisdomId)
+            .Select(g => new { WisdomId = g.Key, Recalls = g.Count() })
+            .OrderByDescending(r => r.Recalls).ThenBy(r => r.WisdomId)
+            .Take(MostRecalledLimit)
+            .ToListAsync(cancellationToken);
+
+        var recalledIds = recalled.Select(r => r.WisdomId).ToList();
+        var wisdom = await WisdomBrowser
+            .ToEntries(db, db.Wisdom.Where(w => recalledIds.Contains(w.Id)))
+            .ToDictionaryAsync(w => w.Id, cancellationToken);
+
+        return new InjectionAside(
+            counts.Useful,
+            counts.Marked,
+            counts.TotalEntries,
             totalSessions,
             promotedCases,
             lanes,
             [.. recalled.Select(r => new RecalledWisdom(
                 r.WisdomId, r.Recalls, wisdom.GetValueOrDefault(r.WisdomId)))]);
+    }
+
+    private sealed record AsideCounts(int TotalEntries, int Useful, int Marked)
+    {
+        // GROUP BY over no rows returns no rows, so a Project with nothing logged has no group to
+        // read these off.
+        public static AsideCounts OfAProjectWithNoEntries { get; } = new(0, 0, 0);
     }
 
     public async Task MarkAsync(
