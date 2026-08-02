@@ -65,6 +65,68 @@ public class InjectionLogTabTests(ThrowawayDatabaseFixture fixture) : PostgresTe
     }
 
     /// <summary>
+    /// The two halves are two reads now (#107): a chip or a keystroke re-runs the listing alone,
+    /// and the Project-wide figures are left standing rather than recomputed for a filter that
+    /// cannot move them. Pinned by changing the Project behind the surface's back and then filtering
+    /// — the list picks the new row up because it re-queried, and every aside figure stays where it
+    /// was because it did not. The lane chips are aside figures too, so they hold their old counts
+    /// beside a head already counting the new row; that is the shape, not a discrepancy.
+    /// </summary>
+    [Fact]
+    public async Task AFilterChange_ReReadsTheListingAlone_AndLeavesTheProjectsFiguresStanding()
+    {
+        var project = await AddProjectAsync();
+        for (var i = 0; i < 3; i++)
+        {
+            await AddInjectionAsync(project.Id, lane: InjectionLane.Prompt, queryContext: $"p{i}");
+        }
+
+        var render = CreateRenderContext();
+        var tab = RenderAt(render, project.Id);
+        WaitForRows(tab, 3);
+        await tab.SettleAsync();
+        tab.Find("aside.pane-aside span.aside-figure-value").TextContent.ShouldBe("3");
+        await AddInjectionAsync(project.Id, lane: InjectionLane.Prompt, queryContext: "p3");
+
+        await tab.InvokeAsync(() => tab.FindAll("button.chip")
+            .Single(c => c.TextContent.Contains("Prompt", StringComparison.Ordinal)).Click());
+
+        WaitForRows(tab, 4);
+        tab.Find("span.pane-count").TextContent.Trim().ShouldStartWith("4");
+        tab.Find("aside.pane-aside span.aside-figure-value").TextContent.ShouldBe("3");
+        tab.FindAll("button.chip")
+            .Single(c => c.TextContent.Contains("Prompt", StringComparison.Ordinal))
+            .QuerySelector("span.chip-count")!.TextContent.ShouldBe("3");
+    }
+
+    /// <summary>
+    /// A mark is the other half of that: it is one of the two writes this surface makes that *can*
+    /// move the Project-wide figures, so it re-reads them. Asserted on §9 precision, which is
+    /// unreadable until something is marked and so cannot be right by accident — leave the aside
+    /// standing here and it goes on reporting no figure at all under a marked entry.
+    /// </summary>
+    [Fact]
+    public async Task MarkingAnEntry_ReReadsTheProjectWideFigures()
+    {
+        var project = await AddProjectAsync();
+        var wisdom = await AddWisdomAsync(project.Id, "a fact");
+        await AddInjectionAsync(project.Id, items: [(wisdom.Id, 0.9)]);
+        var render = CreateRenderContext();
+        var tab = RenderAt(render, project.Id);
+        WaitForRows(tab, 1);
+        await tab.SettleAsync();
+        tab.FindAll("aside.pane-aside dd").Last().TextContent.Trim().ShouldBe("—");
+        await tab.ClickAsync("button.entry-row");
+
+        await tab.InvokeAsync(() => tab.FindAll("button")
+            .First(b => b.TextContent.Contains("Useful", StringComparison.OrdinalIgnoreCase)).Click());
+
+        tab.WaitForAssertion(
+            () => tab.FindAll("aside.pane-aside dd").Last().TextContent.Trim().ShouldBe("1.00"),
+            Patience);
+    }
+
+    /// <summary>
     /// Selecting an entry opens the detail beside the list rather than replacing it — the log is
     /// judged by comparing entries, so losing the list on every click would be the wrong screen.
     /// </summary>

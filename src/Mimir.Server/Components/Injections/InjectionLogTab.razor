@@ -16,30 +16,33 @@
             <div class="pane-list-title">
                 <h4>Injections</h4>
                 <span class="pane-count">
-                    @(_view?.Matching.ToString("N0") ?? "—")
-                    @(_view?.Matching == 1 ? "entry" : "entries")
+                    @(_listing?.Matching.ToString("N0") ?? "—")
+                    @(_listing?.Matching == 1 ? "entry" : "entries")
                 </span>
             </div>
-            <div class="chips">
-                <button class="btn btn-secondary chip @(_lane is null ? "is-active" : null)"
-                        title="Every lane"
-                        @onclick="() => FilterLaneAsync(null)">All</button>
-                @foreach (var lane in _view?.Lanes ?? [])
-                {
-                    <button class="btn btn-secondary chip @(_lane == lane.Lane ? "is-active" : null)"
-                            @key="lane.Lane"
-                            @onclick="() => FilterLaneAsync(lane.Lane)">
-                        @InjectionDisplay.Name(lane.Lane)
-                        <span class="chip-count">@lane.Entries</span>
-                    </button>
-                }
-            </div>
+            @if (_aside is { } chips)
+            {
+                <div class="chips">
+                    <button class="btn btn-secondary chip @(_lane is null ? "is-active" : null)"
+                            title="Every lane"
+                            @onclick="() => FilterLaneAsync(null)">All</button>
+                    @foreach (var lane in chips.Lanes)
+                    {
+                        <button class="btn btn-secondary chip @(_lane == lane.Lane ? "is-active" : null)"
+                                @key="lane.Lane"
+                                @onclick="() => FilterLaneAsync(lane.Lane)">
+                            @InjectionDisplay.Name(lane.Lane)
+                            <span class="chip-count">@lane.Entries</span>
+                        </button>
+                    }
+                </div>
+            }
         </div>
 
         <div class="pane-list-body">
-            @if (_view is { } view)
+            @if (_listing is { } listing)
             {
-                @foreach (var session in view.Sessions)
+                @foreach (var session in listing.Sessions)
                 {
                     <div class="session-head" @key="session.SessionId">
                         <span class="session-word">Session</span>
@@ -80,10 +83,10 @@
                     }
                 }
 
-                @if (view.Listed == 0)
+                @if (listing.Listed == 0)
                 {
                     <p class="pane-empty">
-                        @(view.TotalEntries == 0
+                        @(_aside?.TotalEntries == 0
                             ? "No injections recorded for this Project yet. The Recall lanes fill this"
                               + " surface as sessions run (§7) — and an empty decision leaves no trace,"
                               + " so only actual injections land here."
@@ -91,10 +94,10 @@
                               + " never has (§3).")
                     </p>
                 }
-                else if (view.Truncated)
+                else if (listing.Truncated)
                 {
                     <p class="pane-truncated">
-                        @(view.Matching - view.Listed) more · older entries fall off at
+                        @(listing.Matching - listing.Listed) more · older entries fall off at
                         @InjectionBrowser.RecentEntryLimit
                     </p>
                 }
@@ -121,7 +124,7 @@
         }
 
         <aside class="pane-aside">
-            @if (_view is { } stats)
+            @if (_aside is { } stats)
             {
                 <div>
                     <h6>This Project</h6>
@@ -204,13 +207,15 @@
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
-    private InjectionLogView? _view;
+    private InjectionListing? _listing;
+    private InjectionAside? _aside;
     private InjectionLogEntry? _selected;
     private InjectionLane? _lane;
     private IDisposable? _searchClaim;
     private Debouncer? _debounce;
     private Guid _loadedProject;
     private int _generation;
+    private int _asideGeneration;
 
     protected override void OnInitialized()
     {
@@ -229,7 +234,7 @@
             AnchorOnProject();
         }
 
-        await RefreshAsync();
+        await RefreshAsync(reloadAside: true);
     }
 
     private void AnchorOnProject()
@@ -240,14 +245,15 @@
         _searchClaim = Search.Claim(this, "Search this Project's injections…");
     }
 
-    private void OnSearchChanged() => _debounce?.Schedule(() => InvokeAsync(RefreshAsync));
+    private void OnSearchChanged()
+        => _debounce?.Schedule(() => InvokeAsync(() => RefreshAsync(reloadAside: false)));
 
     private void Select(InjectionLogEntry entry) => _selected = entry;
 
     private async Task FilterLaneAsync(InjectionLane? lane)
     {
         _lane = lane;
-        await RefreshAsync();
+        await RefreshAsync(reloadAside: false);
     }
 
     private async Task MarkAsync(InjectionVerdict verdict)
@@ -255,7 +261,7 @@
         if (_selected is { } entry)
         {
             await Browser.MarkAsync(entry.Id, verdict, CancellationToken.None);
-            await RefreshAsync();
+            await RefreshAsync(reloadAside: true);
         }
     }
 
@@ -264,25 +270,41 @@
         if (_selected is { } entry)
         {
             await Browser.PromoteAsync(entry.Id, CancellationToken.None);
-            await RefreshAsync();
+            await RefreshAsync(reloadAside: true);
         }
     }
 
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(bool reloadAside)
     {
         var generation = ++_generation;
-        var view = await Browser.ListAsync(
+        var asideGeneration = reloadAside ? ++_asideGeneration : _asideGeneration;
+
+        var asideRead = reloadAside
+            ? Browser.GetAsideAsync(ProjectId, CancellationToken.None)
+            : null;
+        var listingRead = Browser.ListAsync(
             new InjectionQuery(ProjectId, Search.Term, _lane), CancellationToken.None);
+
+        if (asideRead is not null)
+        {
+            var aside = await asideRead;
+            if (asideGeneration == _asideGeneration)
+            {
+                _aside = aside;
+            }
+        }
+
+        var listing = await listingRead;
 
         if (generation != _generation)
         {
             return;
         }
 
-        _view = view;
+        _listing = listing;
 
         _selected = _selected is { } previous
-            ? _view.Sessions.SelectMany(s => s.Entries).FirstOrDefault(e => e.Id == previous.Id)
+            ? _listing.Sessions.SelectMany(s => s.Entries).FirstOrDefault(e => e.Id == previous.Id)
             : null;
 
         // Explicit, because a debounced search arrives outside any event handler and Blazor
