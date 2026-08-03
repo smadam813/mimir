@@ -77,6 +77,32 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         bySince.ShouldNotContain(staleFact.Text, customMessage: "since gates on last_confirmed_at");
     }
 
+    /// <summary>
+    /// The same non-UTC <c>since</c> <see cref="McpTimelineServiceTests"/> hands its own service,
+    /// and for the reasons stated there. What is this lane's own is that both legs are asserted:
+    /// one normalized value feeds the Wisdom search and the Episode search from here.
+    /// </summary>
+    [Fact]
+    public async Task ANonUtcSince_CutsBothLegsOnTheInstant()
+    {
+        var project = await AddProjectAsync("mcp");
+        var fresh = await AddWisdomAsync(
+            project.Id, "unrelated filler one", cosine: 0.9, lastConfirmedAt: Now.AddHours(-1));
+        var stale = await AddWisdomAsync(
+            project.Id, "unrelated filler two", cosine: 0.8, lastConfirmedAt: Now.AddHours(-3));
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddPromptEventAsync(episode.Id, "we deploy the pipeline now", at: Now.AddHours(-1));
+        await AddPromptEventAsync(episode.Id, "we deployed the pipeline then", seq: 2, at: Now.AddHours(-3));
+
+        var text = await SearchAsync(
+            project, new() { Since = Now.AddHours(-2).ToOffset(TimeSpan.FromHours(-7)) });
+
+        text.ShouldContain(fresh.Text);
+        text.ShouldNotContain(stale.Text);
+        text.ShouldContain("deploy the pipeline now");
+        text.ShouldNotContain("deployed the pipeline then");
+    }
+
     [Fact]
     public async Task AFilter_FindsMatchesTheUnfilteredTopNWouldHaveCrowdedOut()
     {
@@ -278,10 +304,11 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     private static string NewMcpSessionId() => $"mcp-{Guid.NewGuid():N}";
 
-    private async Task AddPromptEventAsync(Guid episodeId, string promptText, int seq = 1)
+    private async Task AddPromptEventAsync(
+        Guid episodeId, string promptText, int seq = 1, DateTimeOffset? at = null)
         => await AddEventAsync(
             episodeId,
             seq,
-            at: Now.AddMinutes(-30),
+            at: at ?? Now.AddMinutes(-30),
             payload: $$"""{"prompt":"{{promptText}}"}""");
 }

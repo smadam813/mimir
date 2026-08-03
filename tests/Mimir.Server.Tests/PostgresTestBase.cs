@@ -166,6 +166,22 @@ public abstract class PostgresTestBase(ThrowawayDatabaseFixture fixture)
             Clock);
 
     /// <summary>
+    /// The §4 hook keeper — wanted by its own tests, by both endpoint-method classes, and by the
+    /// MCP remember lane that appends through it.
+    /// </summary>
+    /// <param name="feed">
+    /// Only where a test subscribes to what the service announces; the default is a live feed with
+    /// no listeners, which is what every other caller wants.
+    /// </param>
+    private protected CaptureService CreateCaptureService(IEpisodeFeed? feed = null)
+        => new(
+            Context,
+            new ProjectResolver(Context),
+            Options.Create(new CaptureOptions()),
+            Clock,
+            feed ?? new EpisodeFeed());
+
+    /// <summary>
     /// Storage's §7 universe keeper over the fixture's database — the ranking below, the Brief's
     /// own graph, and a test asserting against the ambient universe itself all want the same one.
     /// </summary>

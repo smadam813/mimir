@@ -10,8 +10,6 @@ paths:
 
 `InjectionLabel.Date` and `McpTexts.Date` format identically and are deliberately separate. `InjectionLabel` owns the §7 label line every lane injects; `McpTexts` owns MCP's own wording for Episode sections and timeline entries. Collapsing them would let a change to MCP prose rewrite what a Brief puts in front of a session. `QueryRanking` has no unfiltered overload for the same reason: reaching past the ambient universe is stated (`WisdomSearchFilter.None`), never defaulted, so no consumer can forget a filter that was never its to apply.
 
-Global Wisdom never earns the affinity boost, even under a Global affinity context — `QueryRanking` is the one enforcer (`w.ScopeProjectId != Project.GlobalId && …`), and `RecallScoring.QueryScore` only takes the answer. Nothing pins it; closing that is [#140](https://github.com/smadam813/mimir/issues/140)'s fourth item, not a rule to restate at either site.
-
 `InjectionLog` saves on the shared scoped `MimirDbContext`, which is only honest because recall stages nothing else on it by the time a lane reaches the keeper. A lane that grows staged work of its own has to move off it.
 
 MCP route errors surface. Unlike the fail-open hook routes, the MCP lane is deliberate, and an honest error beats a silent empty answer — `McpEndpoints` deliberately catches nothing.

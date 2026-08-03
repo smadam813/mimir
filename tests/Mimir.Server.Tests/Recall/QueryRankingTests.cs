@@ -41,6 +41,30 @@ public sealed class QueryRankingTests(ThrowawayDatabaseFixture fixture) : Postgr
         ranked.Select(r => r.WisdomId).ShouldBe([global.Id, scoped.Id]);
     }
 
+    /// <summary>
+    /// Global is every session's Wisdom, so "this row belongs to the asking project" is a
+    /// distinction it cannot draw and an affinity boost on it would only outrank the rows that can.
+    /// Live rather than hypothetical: <c>McpSearchService</c> anchors on Global whenever a search
+    /// arrives from a directory matching no Project, so that context reaches the ranking in normal
+    /// use. Both arms are needed — the ordering alone would survive a boost small enough not to
+    /// overtake, and the score alone would survive one applied to every row equally.
+    /// </summary>
+    [Fact]
+    public async Task GlobalWisdom_EarnsNoAffinity_EvenUnderAGlobalAffinityContext()
+    {
+        var (project, other) = (await AddProjectAsync("rank"), await AddProjectAsync("rank"));
+        var global = await AddWisdomAsync(Project.GlobalId, "unrelated filler one", cosine: 0.90);
+        var scoped = await AddWisdomAsync(project.Id, "unrelated filler two", cosine: 0.91);
+
+        var underGlobal = await RankEverythingAsync(Project.GlobalId);
+
+        underGlobal.Select(r => r.WisdomId).ShouldBe([scoped.Id, global.Id]);
+        underGlobal.Single(r => r.WisdomId == global.Id).Score.ShouldBe(
+            (await RankEverythingAsync(other.Id)).Single(r => r.WisdomId == global.Id).Score,
+            tolerance: 1e-9,
+            "the Global row scores the same as it does under a context nothing of its own is in");
+    }
+
     [Fact]
     public async Task TheAmbientUniverse_HoldsGlobalAndTheSessionsOwn_NotAnotherProjects()
     {

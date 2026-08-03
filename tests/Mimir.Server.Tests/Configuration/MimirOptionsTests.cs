@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Mimir.Server.Configuration;
 
@@ -150,6 +151,32 @@ public class MimirOptionsTests
     public void InvalidRecallOptions_FailValidation(string key, string value)
         => Should.Throw<OptionsValidationException>(
             () => Resolve<RecallOptions>(new Dictionary<string, string?> { [key] = value }));
+
+    /// <summary>
+    /// Every test above validates on access, so all of them stay green with <c>ValidateOnStart</c>
+    /// dropped from <c>AddMimirOptions</c>' shared <c>AddSection</c> helper — and a bad knob would
+    /// then surface at whatever request first read it rather than refusing the boot. This is the
+    /// one that needs a host: it is the host's start, not the resolve, that runs the validator.
+    /// One section is enough because that helper is the single site every section passes through.
+    /// <para>
+    /// An empty builder, not a defaulted one: the defaults would read the real
+    /// <c>appsettings.json</c> and the environment beside this in-memory knob.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AnOutOfRangeKnob_RefusesTheBoot()
+    {
+        var builder = Host.CreateEmptyApplicationBuilder(settings: null);
+        builder.Configuration.AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Mimir:Server:Port"] = "70000" });
+        builder.Services.AddMimirOptions(builder.Configuration);
+        using var host = builder.Build();
+
+        var failure = await Should.ThrowAsync<OptionsValidationException>(
+            async () => await host.StartAsync(TestContext.Current.CancellationToken));
+
+        failure.OptionsType.ShouldBe(typeof(ServerOptions));
+    }
 
     private static TOptions Resolve<TOptions>(Dictionary<string, string?>? settings = null)
         where TOptions : class

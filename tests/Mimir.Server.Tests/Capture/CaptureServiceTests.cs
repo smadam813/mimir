@@ -1,9 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Capture;
-using Mimir.Server.Configuration;
 using Mimir.Server.Storage.Entities;
 using Mimir.Server.Ui;
 
@@ -394,13 +392,7 @@ public sealed class CaptureServiceTests(ThrowawayDatabaseFixture fixture) : Post
     private async Task<string> StoredPayloadAsync(Guid eventId)
         => (await FromDb(db => db.Events.SingleAsync(e => e.Id == eventId, Token))).Payload;
 
-    private CaptureService Service()
-        => new(
-            Context,
-            new ProjectResolver(Context),
-            Options.Create(new CaptureOptions()),
-            Clock,
-            _feed);
+    private CaptureService Service() => CreateCaptureService(_feed);
 
     private static HookEventRequest Request(
         string? sessionId = null,

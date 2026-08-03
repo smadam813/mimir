@@ -40,6 +40,28 @@ public sealed class McpTimelineServiceTests(ThrowawayDatabaseFixture fixture) : 
         text.ShouldNotContain(foreign.SessionId);
     }
 
+    /// <summary>
+    /// A <c>since</c> in the caller's own offset. Every other test here hands one already in UTC,
+    /// which is the one shape the service's normalization is invisible to — an MCP client parsing
+    /// what a human typed produces this one. Two failures are in reach and the fixture wants both:
+    /// Npgsql refuses a non-UTC <c>DateTimeOffset</c> against <c>timestamptz</c> outright, and a
+    /// normalization that read the wall clock instead of the instant would shift the cut by the
+    /// offset — so the bound sits two hours out, inside the seven the offset would move it.
+    /// </summary>
+    [Fact]
+    public async Task ANonUtcSince_CutsOnTheInstant()
+    {
+        var project = await AddProjectAsync("mcp-timeline");
+        var after = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-1));
+        var before = await AddEpisodeAsync(project.Id, startedAt: Now.AddHours(-3));
+
+        var text = await TimelineAsync(
+            new() { Since = Now.AddHours(-2).ToOffset(TimeSpan.FromHours(-7)) });
+
+        text.ShouldContain(after.SessionId);
+        text.ShouldNotContain(before.SessionId);
+    }
+
     [Fact]
     public async Task AnUnknownProject_NamesTheKnownOnes()
     {
