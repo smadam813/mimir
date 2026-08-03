@@ -1,10 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Mimir.Contracts.Hooks;
 using Mimir.Server.Capture;
-using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 using Mimir.Server.Harvest;
 using Mimir.Server.Storage.Entities;
@@ -26,11 +24,11 @@ public sealed class CaptureEventEndpointTests(ThrowawayDatabaseFixture fixture) 
         var (harvest, distillation) = (Trigger(request.SessionId), Trigger(request.SessionId));
 
         var result = await CaptureEndpoints.CaptureEventAsync(
-            request, CreateCapture(), harvest, distillation, Token);
+            request, CreateCaptureService(), harvest, distillation, Token);
 
         result.ShouldBeOfType<Accepted>("sealing answers the hook, it does not report on the workers");
-        harvest.Pokes.ShouldBe([true], "the §5 scan is asked for once, and the seal is already durable");
-        distillation.Pokes.ShouldBe([true], "and the §6 sweep once, off the same finished seal");
+        harvest.SealedAtEachPoke.ShouldBe([true], "the §5 scan is asked for once, and the seal is already durable");
+        distillation.SealedAtEachPoke.ShouldBe([true], "and the §6 sweep once, off the same finished seal");
         (await SealedAtAsync(request.SessionId)).ShouldBe(Now);
     }
 
@@ -46,22 +44,14 @@ public sealed class CaptureEventEndpointTests(ThrowawayDatabaseFixture fixture) 
         var (harvest, distillation) = (Trigger(request.SessionId), Trigger(request.SessionId));
 
         var result = await CaptureEndpoints.CaptureEventAsync(
-            request, CreateCapture(), harvest, distillation, Token);
+            request, CreateCaptureService(), harvest, distillation, Token);
 
         result.ShouldBeOfType<Accepted>();
-        harvest.Pokes.ShouldBeEmpty();
-        distillation.Pokes.ShouldBeEmpty();
+        harvest.SealedAtEachPoke.ShouldBeEmpty();
+        distillation.SealedAtEachPoke.ShouldBeEmpty();
         (await FromDb(db => db.Events.CountAsync(e => e.Type == EventType.Stop, Token))).ShouldBe(1);
         (await SealedAtAsync(request.SessionId)).ShouldBeNull();
     }
-
-    private CaptureService CreateCapture()
-        => new(
-            Context,
-            new ProjectResolver(Context),
-            Options.Create(new CaptureOptions()),
-            Clock,
-            new EpisodeFeed());
 
     /// <summary>
     /// A trigger that answers what the database looked like at the instant it was poked. On its own
@@ -104,7 +94,7 @@ public sealed class CaptureEventEndpointTests(ThrowawayDatabaseFixture fixture) 
         /// One entry per <see cref="Request"/>, each saying whether the Episode was already sealed
         /// when that poke arrived — so a count and an ordering are one assertion.
         /// </summary>
-        public IReadOnlyList<bool> Pokes => _pokes;
+        public IReadOnlyList<bool> SealedAtEachPoke => _pokes;
 
         public void Request() => _pokes.Add(sealedAlready());
 

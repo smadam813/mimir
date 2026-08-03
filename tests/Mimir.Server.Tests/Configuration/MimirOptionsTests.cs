@@ -157,7 +157,7 @@ public class MimirOptionsTests
     /// dropped from <c>AddMimirOptions</c>' shared <c>AddSection</c> helper — and a bad knob would
     /// then surface at whatever request first read it rather than refusing the boot. This is the
     /// one that needs a host: it is the host's start, not the resolve, that runs the validator.
-    /// One section is enough because that helper is the single site all seven pass through.
+    /// One section is enough because that helper is the single site every section passes through.
     /// <para>
     /// An empty builder, not a defaulted one: the defaults would read the real
     /// <c>appsettings.json</c> and the environment beside this in-memory knob.

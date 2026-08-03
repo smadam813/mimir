@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Mimir.Contracts.Mcp;
 using Mimir.Server.Capture;
-using Mimir.Server.Configuration;
 using Mimir.Server.Recall;
 using Mimir.Server.Storage.Entities;
 
@@ -140,11 +138,6 @@ public sealed class McpRememberServiceTests(ThrowawayDatabaseFixture fixture) : 
         => new(
             Context,
             new ProjectResolver(Context),
-            new CaptureService(
-                Context,
-                new ProjectResolver(Context),
-                Options.Create(new CaptureOptions()),
-                Clock,
-                new EpisodeFeed()),
+            CreateCaptureService(),
             CreateMergeGate());
 }

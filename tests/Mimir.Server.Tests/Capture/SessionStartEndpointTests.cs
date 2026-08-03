@@ -41,12 +41,6 @@ public sealed class SessionStartEndpointTests(ThrowawayDatabaseFixture fixture) 
 
     private async Task<SessionStartReply> InvokeAsync(HookEventRequest request)
     {
-        var capture = new CaptureService(
-            Context,
-            new ProjectResolver(Context),
-            Options.Create(new CaptureOptions()),
-            Clock,
-            new EpisodeFeed());
         var brief = new BriefService(
             Context,
             CreateWisdomSearch(),
@@ -54,7 +48,7 @@ public sealed class SessionStartEndpointTests(ThrowawayDatabaseFixture fixture) 
             Options.Create(new RecallOptions()),
             Clock,
             NullLogger<BriefService>.Instance);
-        return await CaptureEndpoints.SessionStartAsync(request, capture, brief, Token);
+        return await CaptureEndpoints.SessionStartAsync(request, CreateCaptureService(), brief, Token);
     }
 
     private static HookEventRequest Request()

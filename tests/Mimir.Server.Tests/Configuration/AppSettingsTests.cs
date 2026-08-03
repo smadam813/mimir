@@ -9,8 +9,8 @@ namespace Mimir.Server.Tests.Configuration;
 /// and this is what fails on drift between the two. Swept by convention rather than by a
 /// hand-written list per section: a hand-written list covers only the knobs somebody remembered,
 /// which is how <c>PromptBudgetChars</c>, <c>PromptGateCosine</c>, <c>AffinityBoost</c> and
-/// <c>GoldenSetK</c> came to be asserted nowhere ([#140](https://github.com/smadam813/mimir/issues/140)).
-/// A section or a knob added tomorrow is covered the day it lands.
+/// <c>GoldenSetK</c> came to be asserted nowhere (#140). A section or a knob added tomorrow is
+/// covered the day it lands.
 /// <para>
 /// Reads the file out of the test project's own output, so it issues no SQL and needs no Docker.
 /// </para>

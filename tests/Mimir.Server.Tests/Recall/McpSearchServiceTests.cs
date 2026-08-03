@@ -78,13 +78,9 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
     }
 
     /// <summary>
-    /// A <c>since</c> in the caller's own offset, which is what an MCP client parsing what a human
-    /// typed produces — every other test here hands one already in UTC, the one shape the service's
-    /// normalization is invisible to. Both legs, because one normalized <c>since</c> feeds the
-    /// Wisdom search and the Episode search from here. Two failures are in reach and the fixture
-    /// wants both: Npgsql refuses a non-UTC <c>DateTimeOffset</c> against <c>timestamptz</c>
-    /// outright, and a normalization reading the wall clock rather than the instant would shift the
-    /// cut by the offset — so the bound sits two hours out, inside the seven the offset would move it.
+    /// The same non-UTC <c>since</c> <see cref="McpTimelineServiceTests"/> hands its own service,
+    /// and for the reasons stated there. What is this lane's own is that both legs are asserted:
+    /// one normalized value feeds the Wisdom search and the Episode search from here.
     /// </summary>
     [Fact]
     public async Task ANonUtcSince_CutsBothLegsOnTheInstant()
