@@ -77,6 +77,36 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
         bySince.ShouldNotContain(staleFact.Text, customMessage: "since gates on last_confirmed_at");
     }
 
+    /// <summary>
+    /// A <c>since</c> in the caller's own offset, which is what an MCP client parsing what a human
+    /// typed produces — every other test here hands one already in UTC, the one shape the service's
+    /// normalization is invisible to. Both legs, because one normalized <c>since</c> feeds the
+    /// Wisdom search and the Episode search from here. Two failures are in reach and the fixture
+    /// wants both: Npgsql refuses a non-UTC <c>DateTimeOffset</c> against <c>timestamptz</c>
+    /// outright, and a normalization reading the wall clock rather than the instant would shift the
+    /// cut by the offset — so the bound sits two hours out, inside the seven the offset would move it.
+    /// </summary>
+    [Fact]
+    public async Task ANonUtcSince_CutsBothLegsOnTheInstant()
+    {
+        var project = await AddProjectAsync("mcp");
+        var fresh = await AddWisdomAsync(
+            project.Id, "unrelated filler one", cosine: 0.9, lastConfirmedAt: Now.AddHours(-1));
+        var stale = await AddWisdomAsync(
+            project.Id, "unrelated filler two", cosine: 0.8, lastConfirmedAt: Now.AddHours(-3));
+        var episode = await AddEpisodeAsync(project.Id);
+        await AddPromptEventAsync(episode.Id, "we deploy the pipeline now", at: Now.AddHours(-1));
+        await AddPromptEventAsync(episode.Id, "we deployed the pipeline then", seq: 2, at: Now.AddHours(-3));
+
+        var text = await SearchAsync(
+            project, new() { Since = Now.AddHours(-2).ToOffset(TimeSpan.FromHours(-7)) });
+
+        text.ShouldContain(fresh.Text);
+        text.ShouldNotContain(stale.Text);
+        text.ShouldContain("deploy the pipeline now");
+        text.ShouldNotContain("deployed the pipeline then");
+    }
+
     [Fact]
     public async Task AFilter_FindsMatchesTheUnfilteredTopNWouldHaveCrowdedOut()
     {
@@ -278,10 +308,11 @@ public sealed class McpSearchServiceTests(ThrowawayDatabaseFixture fixture) : Po
 
     private static string NewMcpSessionId() => $"mcp-{Guid.NewGuid():N}";
 
-    private async Task AddPromptEventAsync(Guid episodeId, string promptText, int seq = 1)
+    private async Task AddPromptEventAsync(
+        Guid episodeId, string promptText, int seq = 1, DateTimeOffset? at = null)
         => await AddEventAsync(
             episodeId,
             seq,
-            at: Now.AddMinutes(-30),
+            at: at ?? Now.AddMinutes(-30),
             payload: $$"""{"prompt":"{{promptText}}"}""");
 }
