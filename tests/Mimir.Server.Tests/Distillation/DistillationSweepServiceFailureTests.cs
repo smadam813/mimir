@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
 
@@ -14,14 +13,11 @@ public sealed class DistillationSweepServiceFailureTests : IAsyncDisposable
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
-    /// <summary>Real time, and why: see <see cref="DistillerServiceFailureTests"/>.</summary>
-    private static readonly TimeSpan Parked = TimeSpan.FromMilliseconds(500);
-
     private static readonly TimeSpan Margin = TimeSpan.FromMinutes(1);
 
     private static readonly DistillationOptions SweepOptions = new();
 
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 7, 22, 12, 0, 0, TimeSpan.Zero));
+    private readonly LoopClock _clock = new(new DateTimeOffset(2026, 7, 22, 12, 0, 0, TimeSpan.Zero));
     private readonly CapturedLog<DistillationSweepService> _log = new();
     private readonly ServiceProvider _provider;
     private readonly DistillationSweepService _service;
@@ -59,20 +55,21 @@ public sealed class DistillationSweepServiceFailureTests : IAsyncDisposable
         await _service.StartAsync(TestContext.Current.CancellationToken);
 
         await LoopWaits.UntilAsync(
-            () => _log.Warnings.Count >= 1, Patience, TestContext.Current.CancellationToken);
+            () => _log.Warnings.Count >= 1,
+            "log its first failed sweep",
+            Patience,
+            TestContext.Current.CancellationToken);
         _log.Warnings[0].ShouldContain("Distillation sweep failed");
 
         _service.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse(
             "the sweep ends on a shutdown cancellation and on nothing else");
 
-        await Task.Delay(Parked, TestContext.Current.CancellationToken);
-        _clock.Advance(SweepOptions.SweepInterval - Margin);
-        await Task.Delay(Parked, TestContext.Current.CancellationToken);
-        _log.Warnings.Count.ShouldBe(1, "the sweep interval has not elapsed yet");
-
-        _clock.Advance(Margin);
-        await LoopWaits.UntilAsync(
-            () => _log.Warnings.Count >= 2, Patience, TestContext.Current.CancellationToken);
+        await _clock.StraddleAsync(
+            SweepOptions.SweepInterval,
+            Margin,
+            () => _log.Warnings.Count >= 2,
+            Patience,
+            TestContext.Current.CancellationToken);
 
         _service.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse();
     }

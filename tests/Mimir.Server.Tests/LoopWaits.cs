@@ -11,14 +11,18 @@ public static class LoopWaits
 {
     private static readonly TimeSpan Beat = TimeSpan.FromMilliseconds(20);
 
-    public static async Task UntilAsync(Func<bool> until, TimeSpan patience, CancellationToken cancellationToken)
+    /// <param name="expected">What the loop was waited on to do, read into the timeout message:
+    /// a straddle has three waits that can time out and the message is all that tells them apart.
+    /// </param>
+    public static async Task UntilAsync(
+        Func<bool> until, string expected, TimeSpan patience, CancellationToken cancellationToken)
     {
         var elapsed = Stopwatch.StartNew();
         while (!until())
         {
             if (elapsed.Elapsed > patience)
             {
-                throw new TimeoutException($"The loop did not reach the expected state within {patience}.");
+                throw new TimeoutException($"The loop did not {expected} within {patience}.");
             }
 
             await Task.Delay(Beat, cancellationToken);

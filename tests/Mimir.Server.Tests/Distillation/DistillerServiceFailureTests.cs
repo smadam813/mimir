@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Time.Testing;
 using Mimir.Contracts.Health;
 using Mimir.Server.Configuration;
 using Mimir.Server.Distillation;
@@ -17,11 +16,6 @@ public sealed class DistillerServiceFailureTests : IAsyncDisposable
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
-    /// <summary>Real time, because a fake timer's registration is not observable: the loop is
-    /// between its log line and its <c>Task.Delay</c> when the assertions above start, and
-    /// advancing the clock before it parks would fire nothing.</summary>
-    private static readonly TimeSpan Parked = TimeSpan.FromMilliseconds(500);
-
     private static readonly TimeSpan Margin = TimeSpan.FromSeconds(1);
 
     private static readonly DateTimeOffset Now = new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
@@ -29,7 +23,7 @@ public sealed class DistillerServiceFailureTests : IAsyncDisposable
     private static readonly DateTimeOffset EarlierRun = Now.AddMinutes(-7);
 
     private readonly HealthState _health = new();
-    private readonly FakeTimeProvider _clock = new(Now);
+    private readonly LoopClock _clock = new(Now);
     private readonly CapturedLog<DistillerService> _log = new();
     private readonly ServiceProvider _provider;
     private readonly DistillerService _service;
@@ -94,14 +88,12 @@ public sealed class DistillerServiceFailureTests : IAsyncDisposable
         _service.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse(
             "the loop ends on a shutdown cancellation and on nothing else");
 
-        await Task.Delay(Parked, TestContext.Current.CancellationToken);
-        _clock.Advance(DistillerService.FailureRetryInterval - Margin);
-        await Task.Delay(Parked, TestContext.Current.CancellationToken);
-        _log.Warnings.Count.ShouldBe(1, "the retry interval has not elapsed yet");
-
-        _clock.Advance(Margin);
-        await LoopWaits.UntilAsync(
-            () => _log.Warnings.Count >= 2, Patience, TestContext.Current.CancellationToken);
+        await _clock.StraddleAsync(
+            DistillerService.FailureRetryInterval,
+            Margin,
+            () => _log.Warnings.Count >= 2,
+            Patience,
+            TestContext.Current.CancellationToken);
 
         _service.ExecuteTask.ShouldNotBeNull().IsCompleted.ShouldBeFalse();
     }
