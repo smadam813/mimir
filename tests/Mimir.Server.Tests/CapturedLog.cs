@@ -4,7 +4,22 @@ namespace Mimir.Server.Tests;
 
 internal class CapturedLog : ILogger
 {
-    public List<string> Warnings { get; } = [];
+    private readonly Lock _gate = new();
+    private readonly List<string> _warnings = [];
+
+    /// <summary>A snapshot under the lock, not the list itself: a hosted service's loop logs from
+    /// its own thread while the test reads this, and a bare <see cref="List{T}"/> is not safe
+    /// across that. Nothing pins it — removing the lock leaves a race, not a failure.</summary>
+    public IReadOnlyList<string> Warnings
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _warnings];
+            }
+        }
+    }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -17,9 +32,15 @@ internal class CapturedLog : ILogger
         Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
-        if (logLevel == LogLevel.Warning)
+        if (logLevel != LogLevel.Warning)
         {
-            Warnings.Add(formatter(state, exception));
+            return;
+        }
+
+        var message = formatter(state, exception);
+        lock (_gate)
+        {
+            _warnings.Add(message);
         }
     }
 }
