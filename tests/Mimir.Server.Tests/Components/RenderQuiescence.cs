@@ -12,10 +12,11 @@ namespace Mimir.Server.Tests.Components;
 /// <para>
 /// So the fix is not a longer timeout, it is waiting for quiescence — and it lives here, once,
 /// rather than as a hand-tuned <c>Task.Delay</c> per test. <c>Debouncer</c> hard-codes 250 ms with
-/// no <c>TimeProvider</c> seam (<c>DebouncerTests</c> records why), so a real wait is the only
-/// instrument available today; <c>.claude/rules/tests.md</c> and #144 carry that argument. One
-/// place to change is the point: when that seam gains a quiescence hook, this is the body that
-/// changes and no test does.
+/// no <c>TimeProvider</c> seam (<c>DebouncerTests</c> records why), so the wait is real — by
+/// decision, not for want of a seam: #144's record weighed a fake clock and a surface-side
+/// quiescence hook and kept real timers, and reopening it takes new numbers showing the delay
+/// dominating suite wall-clock. One place to change is still the point: this is the body that
+/// would change, and no test would.
 /// </para>
 /// </summary>
 internal static class RenderQuiescence
