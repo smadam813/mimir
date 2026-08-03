@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -25,13 +24,7 @@ public sealed class StorageServiceTests : IAsyncDisposable
     public StorageServiceTests()
     {
         var services = new ServiceCollection();
-        // A unix-socket directory that does not exist: the connection fails immediately on
-        // every platform, so a retry loop is observable without paying a TCP timeout per turn.
-        void Configure(DbContextOptionsBuilder builder) => builder.UseNpgsql(
-            "Host=/mimir-tests-no-such-socket-dir;Username=nobody;Password=nobody;Database=nope",
-            npgsql => npgsql.UseVector());
-        services.AddDbContextFactory<MimirDbContext>(Configure);
-        services.AddDbContext<MimirDbContext>(Configure, optionsLifetime: ServiceLifetime.Singleton);
+        UnreachableStorage.Add(services);
         services.AddScoped<IStorageProbe, PostgresStorageProbe>();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _provider = services.BuildServiceProvider();
