@@ -6,6 +6,7 @@
    since #97 there is no padded body to opt out of. */
 .surface-panes {
     flex: 1;
+    min-height: 0;
     min-width: 0;
     display: flex;
 }

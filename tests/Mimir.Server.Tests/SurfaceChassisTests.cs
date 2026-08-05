@@ -55,6 +55,17 @@ public class SurfaceChassisTests
             .Where(name => !name.StartsWith("is-", StringComparison.Ordinal)),
     ];
 
+    // The root each §8 surface hands MainLayout's flush body. Three class names rather than one,
+    // because each is its own surface's root and no markup wears two of them, so nothing the
+    // hoisting rules above check reaches these — they are the one part of the shared shape that
+    // still has to agree by hand.
+    private static readonly (string File, string Selector)[] SurfaceRoots =
+    [
+        ("Wisdom/WisdomSurface.razor.css", ".wisdom-surface"),
+        ("Episodes/EpisodeSurface.razor.css", ".episode-surface"),
+        ("Injections/InjectionLogTab.razor.css", ".surface-panes"),
+    ];
+
     private static readonly (string File, string Selector, string[] Declarations)[] ScopedDeltas =
     [
         // Places this surface's own .aside-link-text beside its .aside-link-count.
@@ -85,6 +96,39 @@ public class SurfaceChassisTests
                 $"the token layer no longer defines {selector}, so the surfaces that dropped their "
                 + "own copy of it are drawing nothing");
         }
+    }
+
+    [Fact]
+    public void EverySurfaceRoot_LaysItsPanesOutTheSameWay()
+    {
+        var stylesheets = ScopedStylesheets();
+
+        var boxes = SurfaceRoots
+            .Select(root =>
+            {
+                var sheet = stylesheets.Where(pair => pair.Path == root.File).ToList();
+
+                sheet.Count.ShouldBe(1, $"{root.File} is no longer one scoped stylesheet");
+
+                var rule = Rules(sheet[0].Code)
+                    .Where(candidate => Normalise(candidate.Selector) == root.Selector)
+                    .ToList();
+
+                rule.Count.ShouldBe(
+                    1,
+                    $"{root.File} no longer defines {root.Selector}, so the surface it is the root "
+                    + "of has no box of its own and this check is reading nothing");
+
+                return (root.Selector, Box: string.Join("; ", Declarations(rule[0].Body).Order()));
+            })
+            .ToList();
+
+        boxes.Select(box => box.Box).Distinct().Count().ShouldBe(
+            1,
+            "the three §8 surface roots no longer declare one box, so one of them sizes differently "
+            + "inside MainLayout's flush body — drop min-height: 0 and the panes take their content's "
+            + "height and are clipped by the body's overflow instead of each scrolling on its own: "
+            + string.Join(" | ", boxes.Select(box => $"{box.Selector} {{ {box.Box} }}")));
     }
 
     [Fact]
