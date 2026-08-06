@@ -35,6 +35,28 @@ Raw string literals carry the file's line endings, and the checkout decides thos
 
 This file is the repo's only always-on instruction file, so ambient context has exactly one place to audit. Path-specific material lives in `.claude/rules/*.md`, each scoped by a `paths:` frontmatter glob and loaded only once Claude reads a file it governs — `blazor-ui.md`, `capture.md`, `distillation.md`, `tests.md`, `storage.md`, `claude-settings.md`, `recall.md`, `harvest.md`, `host.md`, `cli.md`, each naming its own paths. No rule there goes unscoped — a rule that would cause mistakes in a session that never touches its governed paths belongs here instead. Path-scoped rules drop out after compaction until re-triggered, which is why nothing load-bearing outside its paths may live in one.
 
+## IMPORTANT: Style Preferences
+
+### Comments
+
+A comment is a failure to say the thing in code. Before writing one, try a better name, an extracted method, or a named constant instead — each of those stays true as the code changes; a comment just sits beside it and rots. (This is about voice and hygiene; where a comment would carry a behavioral rule, the Architecture section above governs where that lives.)
+
+When a comment is warranted, it says why, never what: a rejected alternative, a constraint the reader can't see from the call site, the reason a workaround exists. Delete commented-out code instead of leaving it — git history already has it. Never write a comment to apologize for bad code or restate a signature the name already makes obvious.
+
+### Naming
+
+A name should answer why it exists and how it's used without forcing the reader to open the body. Favor a longer, precise name over a short, vague one, like `RetiredAt` over `flag` or `InjectionWrapper` over `helper`, since a name gets read far more than it's typed.
+
+Don't let two names in the same scope differ only by a noise word or a number (`data`, `data2`); don't reuse one word for two concepts, or two words for one (pick `Fetch` or `Get`, not both). Classes and DTOs are nouns, methods are verbs, booleans read as predicates (`IsRetired`, not `Retired`).
+
+### Responses
+
+An answer carries the finding and nothing else. Cut preamble, postamble, restatements of the question, unrequested reasoning, options considered and not taken, and narration of a tool call before and after making it.
+
+Four things are never cut for length: a failing test and its output, a skipped or blocked step, an assumption the work rests on, and a caveat that changes what to do next. Brevity governs packaging only. Twenty lines is the right length when correctness needs twenty lines.
+
+A factual question gets a sentence or two. A code change gets the change and what verified it, not a tour of the diff.
+
 ## Agent skills
 
 ### Issue tracker
